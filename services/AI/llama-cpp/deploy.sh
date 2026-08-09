@@ -65,15 +65,19 @@ else
     print_info "llama.cpp serves ONE model. Pick it now — you can change it later"
     print_info "by editing LLAMA_ARG_HF_REPO in .env and rerunning this script."
     echo
-    echo "   1) ggml-org/gemma-3-4b-it-GGUF          ~2.5 GB  small, quick, good general quality"
-    echo "   2) ggml-org/Qwen2.5-Coder-7B-Instruct-GGUF  ~4.7 GB  tuned for code"
-    echo "   3) ggml-org/Meta-Llama-3.1-8B-Instruct-GGUF ~4.9 GB  the usual general-purpose default"
+    # Every repo below was checked to exist. Note the different owners: the
+    # ggml-org org (llama.cpp's own) publishes a small set, and the rest of
+    # the GGUF world lives mostly under bartowski. Guessing a prefix produces
+    # a repo that looks plausible and 401s at download time.
+    echo "   1) ggml-org/gemma-3-1b-it-GGUF               ~1 GB  tiny, fast, fine on CPU"
+    echo "   2) ggml-org/gemma-3-4b-it-GGUF               ~3 GB  small, good general quality"
+    echo "   3) bartowski/Qwen2.5-Coder-7B-Instruct-GGUF  ~5 GB  tuned for code"
     echo "   4) Enter a Hugging Face repo myself"
     read -rp "Choice (1-4): " model_choice
     case "$model_choice" in
-        1) HF_REPO_VALUE="ggml-org/gemma-3-4b-it-GGUF";                MODEL_GB=3 ;;
-        2) HF_REPO_VALUE="ggml-org/Qwen2.5-Coder-7B-Instruct-GGUF";    MODEL_GB=6 ;;
-        3) HF_REPO_VALUE="ggml-org/Meta-Llama-3.1-8B-Instruct-GGUF";   MODEL_GB=6 ;;
+        1) HF_REPO_VALUE="ggml-org/gemma-3-1b-it-GGUF";                MODEL_GB=2 ;;
+        2) HF_REPO_VALUE="ggml-org/gemma-3-4b-it-GGUF";                MODEL_GB=4 ;;
+        3) HF_REPO_VALUE="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF";   MODEL_GB=7 ;;
         4)
             echo
             echo "Format: user/repo  or  user/repo:QUANT   (quant defaults to Q4_K_M)"
@@ -170,15 +174,50 @@ print_info "Starting llama.cpp — first run downloads the model, which takes a 
 # running" arrives long before "ready to answer". The image ships its own
 # /health endpoint, which reports 503 while loading and 200 when serving —
 # exactly the distinction worth waiting on.
-print_info "Waiting for the model to download and load (watch: $COMPOSE_CMD logs -f llama-cpp)..."
+print_info "Waiting for the model to download and load. Progress below."
 READY=0
-for _ in $(seq 1 120); do
+DIED=0
+LAST_LINE=""
+for i in $(seq 1 120); do
+    # Checked FIRST, and every round. Without this the loop cannot tell a
+    # slow download from a container that exited seconds after starting —
+    # `docker exec` fails identically in both cases — and a crash caused by
+    # a wrong model name would look like twenty minutes of downloading.
+    state=$(docker inspect -f '{{.State.Status}}' llama-cpp 2>/dev/null || echo missing)
+    if [[ "$state" != "running" ]]; then
+        DIED=1
+        break
+    fi
+
     if docker exec llama-cpp curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
         READY=1
         break
     fi
+
+    # Echo the newest log line every ~30s. A download of several gigabytes
+    # behind a silent prompt is indistinguishable from a hang, and the honest
+    # fix is to show what the container is actually doing.
+    if (( i % 3 == 0 )); then
+        line=$(docker logs --tail 1 llama-cpp 2>&1 | tr -d '\r' | tail -n1)
+        if [[ -n "$line" && "$line" != "$LAST_LINE" ]]; then
+            echo "   … $line"
+            LAST_LINE="$line"
+        fi
+    fi
     sleep 10
 done
+
+if (( DIED )); then
+    echo
+    print_warn "The container stopped (state: $state). Its last output:"
+    echo "──────────────────────────────────────────────" >&2
+    docker logs --tail 25 llama-cpp 2>&1 | sed 's/^/  /' >&2
+    echo "──────────────────────────────────────────────" >&2
+    print_warn "A 401 or 'repository not found' above means LLAMA_ARG_HF_REPO in"
+    print_warn "$INSTALL_DIR/.env names a model that doesn't exist, or one that is"
+    print_warn "gated and needs you to accept its licence on Hugging Face first."
+    print_error "llama.cpp did not start."
+fi
 
 echo
 echo "──────────────────────────────────────────────"

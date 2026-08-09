@@ -53,9 +53,9 @@ bash deploy.sh
 You'll be asked for a **model** — mandatory here, unlike Ollama. `llama-server` loads one at startup; with nothing to load there's no service. Three curated options are offered, or enter any Hugging Face GGUF repo:
 
 ```
-ggml-org/gemma-3-4b-it-GGUF          ~2.5 GB
-ggml-org/Qwen2.5-Coder-7B-Instruct-GGUF  ~4.7 GB
-ggml-org/Meta-Llama-3.1-8B-Instruct-GGUF ~4.9 GB
+ggml-org/gemma-3-1b-it-GGUF               ~1 GB
+ggml-org/gemma-3-4b-it-GGUF               ~3 GB
+bartowski/Qwen2.5-Coder-7B-Instruct-GGUF  ~5 GB
 ```
 
 Format is `user/repo` or `user/repo:QUANT` — the quantization defaults to `Q4_K_M`. Browse more at [huggingface.co/models?library=gguf](https://huggingface.co/models?library=gguf).
