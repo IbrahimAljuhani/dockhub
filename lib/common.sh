@@ -245,6 +245,52 @@ ensure_single_provider() {
     return 0
 }
 
+# Waits for a container to become ready, and — the part that matters — knows
+# the difference between "still starting" and "already dead".
+#
+# Extracted after writing it twice: llama.cpp's first version polled a
+# readiness command in a loop, and because `docker exec` fails identically
+# whether a container is loading or has exited, a container crash-looping on
+# a bad setting looked exactly like a slow multi-gigabyte download. Twenty
+# minutes of silence, then a timeout blaming the wrong thing.
+#
+# $1 = container, $2 = shell command run INSIDE it to test readiness,
+# $3 = max rounds (default 120), $4 = seconds per round (default 10).
+# Returns: 0 ready · 1 container died · 2 timed out.
+# On death it prints the container's own last lines — the only place the real
+# reason ever appears.
+wait_for_container_ready() {
+    local name="$1" probe="$2" rounds="${3:-120}" gap="${4:-10}"
+    local i state line last=""
+    for (( i = 1; i <= rounds; i++ )); do
+        state=$(docker inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo missing)
+        # Checked first, every round. "restarting" counts as dead: a crash
+        # loop never becomes ready, and waiting it out helps nobody.
+        if [[ "$state" != "running" ]]; then
+            echo >&2
+            print_warn "The container stopped (state: $state). Its last output:"
+            echo "──────────────────────────────────────────────" >&2
+            docker logs --tail 25 "$name" 2>&1 | sed 's/^/  /' >&2
+            echo "──────────────────────────────────────────────" >&2
+            return 1
+        fi
+        if docker exec "$name" sh -c "$probe" >/dev/null 2>&1; then
+            return 0
+        fi
+        # Echo the newest log line periodically. A long download behind a
+        # silent prompt is indistinguishable from a hang.
+        if (( i % 3 == 0 )); then
+            line=$(docker logs --tail 1 "$name" 2>&1 | tr -d '\r' | tail -n1)
+            if [[ -n "$line" && "$line" != "$last" ]]; then
+                echo "   … $line"
+                last="$line"
+            fi
+        fi
+        sleep "$gap"
+    done
+    return 2
+}
+
 # Finds whichever model provider is currently running and where to reach it.
 # Sets AI_PROVIDER_NAME and AI_PROVIDER_BASE_URL in the caller's shell, both
 # empty when nothing is running.
