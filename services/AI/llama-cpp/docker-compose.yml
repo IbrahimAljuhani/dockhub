@@ -52,9 +52,19 @@ services:
       # Without this the download lands on the container filesystem and is
       # lost on every recreate — several gigabytes, re-fetched each time.
       LLAMA_CACHE: /models
-      # Empty means `auto`, which is what you want. Set a number in .env
-      # only when tuning a model that doesn't quite fit in VRAM.
-      LLAMA_ARG_N_GPU_LAYERS: ${LLAMA_ARG_N_GPU_LAYERS:-}
+      # LLAMA_ARG_N_GPU_LAYERS is deliberately NOT here.
+      #
+      # An empty environment variable is not the same as an absent one: it is
+      # present with an empty value, and llama.cpp parses this one with stoi,
+      # so an empty string is a parse error, not "use the default". Writing
+      # `${LLAMA_ARG_N_GPU_LAYERS:-}` here put the container into a restart
+      # loop with `error while handling environment variable
+      # "LLAMA_ARG_N_GPU_LAYERS": stoi` — the default IS auto, but only when
+      # the variable does not exist at all.
+      #
+      # deploy.sh therefore injects it into docker-compose.override.yml only
+      # when you have actually set a number in .env.
+      #
       # How many requests it will handle at once. 1 is the safe default on
       # a single consumer GPU: each parallel slot needs its own KV cache,
       # so raising this multiplies VRAM use rather than sharing it.

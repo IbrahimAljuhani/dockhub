@@ -80,7 +80,7 @@ The **image tag is the entire GPU decision**:
 > - **`--host`**: llama-server defaults to `127.0.0.1`, which in a container would mean nothing can reach it. The server image **already sets `LLAMA_ARG_HOST=0.0.0.0`**, so there's nothing to do.
 > - **`-ngl` / GPU layers**: defaults to **`auto`** in current llama.cpp, so the CUDA build offloads on its own. Older guides insist you must pass `-ngl 99` or it silently runs on CPU — no longer true.
 >
-> `LLAMA_ARG_N_GPU_LAYERS` is still in `.env`, empty. Set a number only when tuning a model that doesn't quite fit in VRAM.
+> `LLAMA_ARG_N_GPU_LAYERS` sits in `.env` empty, and `deploy.sh` passes it to the container **only when you give it a number**. That distinction is load-bearing: llama.cpp parses this variable with `stoi`, so an *empty* value is a parse error rather than a fallback to `auto`, and the container restart-loops with `error while handling environment variable "LLAMA_ARG_N_GPU_LAYERS": stoi`. The default applies only when the variable is absent entirely.
 
 ---
 
@@ -113,7 +113,7 @@ cd ~/docker/llama-cpp
 
 | `.env` variable | |
 |---|---|
-| `LLAMA_ARG_N_GPU_LAYERS` | Empty = `auto`. A number forces partial offload when a model doesn't quite fit VRAM. |
+| `LLAMA_ARG_N_GPU_LAYERS` | Leave **empty** for `auto` — `deploy.sh` then omits it entirely, which is what makes `auto` apply. Set a number to force partial offload when a model doesn't quite fit VRAM. Rerun `deploy.sh` after changing it. |
 | `LLAMA_ARG_N_PARALLEL` | Concurrent requests, default `1`. Raising it **multiplies** VRAM use — each slot needs its own KV cache. |
 
 ---

@@ -137,8 +137,16 @@ ENV_HOST_PORT=$(read_env_value "HOST_PORT" "$INSTALL_DIR/.env")
 ENV_HF_REPO=$(read_env_value "LLAMA_ARG_HF_REPO" "$INSTALL_DIR/.env")
 ENV_TAG=$(read_env_value "LLAMA_CPP_TAG" "$INSTALL_DIR/.env")
 
+ENV_NGL=$(read_env_value "LLAMA_ARG_N_GPU_LAYERS" "$INSTALL_DIR/.env")
+
 OVERRIDE_BODY=$(
     [[ -n "$ENV_MEM_LIMIT" ]] && echo "    mem_limit: $ENV_MEM_LIMIT"
+    # Injected ONLY when set to something. See docker-compose.yml: passing it
+    # empty is a parse error inside llama.cpp, not a fallback to the default.
+    if [[ -n "$ENV_NGL" ]]; then
+        echo "    environment:"
+        echo "      LLAMA_ARG_N_GPU_LAYERS: \"$ENV_NGL\""
+    fi
     if [[ -n "$ENV_HOST_PORT" ]]; then
         echo "    ports:"
         echo "      - \"$ENV_HOST_PORT:8080\""
@@ -213,9 +221,32 @@ if (( DIED )); then
     echo "──────────────────────────────────────────────" >&2
     docker logs --tail 25 llama-cpp 2>&1 | sed 's/^/  /' >&2
     echo "──────────────────────────────────────────────" >&2
-    print_warn "A 401 or 'repository not found' above means LLAMA_ARG_HF_REPO in"
-    print_warn "$INSTALL_DIR/.env names a model that doesn't exist, or one that is"
-    print_warn "gated and needs you to accept its licence on Hugging Face first."
+    # Match the hint to what the log actually says. A fixed "check your model
+    # name" message is worse than none when the real cause was a bad env var:
+    # it sends you to rebuild a model download that was never the problem.
+    FAILLOG=$(docker logs --tail 25 llama-cpp 2>&1 || true)
+    case "$FAILLOG" in
+        *"environment variable"*|*stoi*)
+            print_warn "That is a malformed setting in $INSTALL_DIR/.env, not a model problem."
+            print_warn "The named variable must hold a number, or be left out entirely —"
+            print_warn "an empty value is a parse error, not a default."
+            ;;
+        *401*|*403*|*"not found"*|*"failed to download"*)
+            print_warn "LLAMA_ARG_HF_REPO in $INSTALL_DIR/.env names a model that doesn't"
+            print_warn "exist, or one that is gated and needs you to accept its licence on"
+            print_warn "Hugging Face first. Check the exact name at:"
+            print_warn "  https://huggingface.co/$ENV_HF_REPO"
+            ;;
+        *"out of memory"*|*CUDA*|*cuda*)
+            print_warn "This looks like a GPU problem — most often a model too large for"
+            print_warn "your VRAM. Try a smaller model, or set LLAMA_ARG_N_GPU_LAYERS in"
+            print_warn ".env to a number lower than the model's layer count to split it"
+            print_warn "between GPU and CPU."
+            ;;
+        *)
+            print_warn "Full log: cd $INSTALL_DIR && $COMPOSE_CMD logs llama-cpp"
+            ;;
+    esac
     print_error "llama.cpp did not start."
 fi
 
