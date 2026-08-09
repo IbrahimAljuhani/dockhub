@@ -165,7 +165,10 @@ prompt_optional_domain() {
 # (this script can also be run standalone, out of order).
 ensure_main_net() {
     if ! docker network ls --format '{{.Name}}' | grep -qx "main-net"; then
-        docker network create main-net || true
+        # >/dev/null: `docker network create` echoes the new network's ID,
+        # which lands in the middle of a deploy as an unexplained 64-character
+        # hex string. The print_info below is the message we actually want.
+        docker network create main-net >/dev/null || true
         if docker network ls --format '{{.Name}}' | grep -qx "main-net"; then
             print_info "Created docker network 'main-net'."
         else
@@ -183,7 +186,7 @@ ensure_main_net() {
 # that can reach the port can use your models and read your conversations.
 ensure_ai_net() {
     if ! docker network ls --format '{{.Name}}' | grep -qx "ai-net"; then
-        docker network create ai-net || true
+        docker network create ai-net >/dev/null || true
         if docker network ls --format '{{.Name}}' | grep -qx "ai-net"; then
             print_info "Created docker network 'ai-net'."
         else

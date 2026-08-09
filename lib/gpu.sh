@@ -199,8 +199,20 @@ gpu_install_container_toolkit() {
     sudo apt-get update -qq || { print_warn "apt-get update failed."; return 1; }
     sudo apt-get install -y nvidia-container-toolkit || { print_warn "Package install failed."; return 1; }
 
-    print_info "Configuring the Docker runtime and restarting Docker..."
+    print_info "Configuring the Docker runtime..."
     sudo nvidia-ctk runtime configure --runtime=docker || { print_warn "nvidia-ctk failed."; return 1; }
+
+    # Restarting the daemon restarts every running container with it. That's
+    # unavoidable — the new runtime isn't active until it happens — but it
+    # should not be a surprise: on a normal DockHub host this briefly takes
+    # down NGINX Proxy Manager, Portainer and every deployed service.
+    local running
+    running=$(docker ps --format '{{.Names}}' 2>/dev/null | wc -l | tr -d ' ')
+    if (( running > 0 )); then
+        print_warn "Restarting Docker now. This briefly stops the $running container(s)"
+        print_warn "currently running — including NGINX Proxy Manager and Portainer."
+        print_warn "Anything with a restart policy comes back on its own."
+    fi
     sudo systemctl restart docker || { print_warn "Could not restart Docker."; return 1; }
 
     # Verified, not assumed — every step above can succeed and still leave a
