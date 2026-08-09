@@ -50,8 +50,13 @@ declare -A SERVICE_FILES=(
     [home-assistant]="docker-compose.yml"
     # No backup.sh: no database, so the generic volume backup covers it.
     [mosquitto]="docker-compose.yml"
-    # Security-Lab: no backup.sh by design — these hold no data of yours.
+    # AI: no backup.sh. Ollama's volume is downloaded models — re-pullable,
+    # and not yours. Open WebUI's volume DOES hold your chats and accounts,
+    # but it has no separate database container, so the generic backup
+    # already captures it correctly.
     [ollama]="docker-compose.yml"
+    [open-webui]="docker-compose.yml"
+    # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
     # Vulhub ships NO compose file of ours — it clones upstream's library of
