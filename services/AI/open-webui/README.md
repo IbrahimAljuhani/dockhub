@@ -99,7 +99,19 @@ docker inspect ollama     --format '{{json .NetworkSettings.Networks}}'
 
 **3. No connection is configured.** If you deployed before any provider existed, add one in **Admin → Settings → Connections** — `http://ollama:11434` for Ollama, or `http://llama-cpp:8080/v1` for an OpenAI-compatible server.
 
-> 📌 **Switched providers?** Edit `OLLAMA_BASE_URL` / `OPENAI_API_BASE_URL` in `~/docker/open-webui/.env` and rerun `deploy.sh`.
+### 🔄 Switched providers? Just rerun this deploy
+
+Providers are mutually exclusive, so deploying llama.cpp **stops** Ollama — and Open WebUI keeps pointing at the container that is no longer running. The symptom is an empty model list with nothing explaining it.
+
+Rerunning `deploy.sh` detects exactly that and offers to fix it:
+
+```
+[!] This deployment is configured to use 'ollama', which is not running.
+[!] 'llama-cpp' is running instead — you likely switched providers.
+Point Open WebUI at llama-cpp? (Y/n):
+```
+
+Saying yes rewrites `.env` for you, picking the right variable for the new provider — `OLLAMA_BASE_URL` for Ollama, `OPENAI_API_BASE_URL` for llama.cpp and LocalAI. Declining changes nothing. A cloud endpoint is never treated as "stopped".
 
 ---
 

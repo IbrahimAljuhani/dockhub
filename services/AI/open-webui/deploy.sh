@@ -46,6 +46,43 @@ ensure_ai_net
 
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
+
+    # Providers are mutually exclusive, so deploying a new one STOPS the old
+    # one — and leaves every consumer still pointing at a container that no
+    # longer runs. The visible result is an empty model list with nothing
+    # explaining it, so it's worth catching here rather than in the browser.
+    CONFIGURED_URL=$(read_env_value "OLLAMA_BASE_URL" "$INSTALL_DIR/.env")
+    [[ -z "$CONFIGURED_URL" ]] && CONFIGURED_URL=$(read_env_value "OPENAI_API_BASE_URL" "$INSTALL_DIR/.env")
+    # Only local providers can go missing; a cloud endpoint is never "stopped".
+    if [[ "$CONFIGURED_URL" == http://* ]]; then
+        CONFIGURED_HOST=${CONFIGURED_URL#http://}
+        CONFIGURED_HOST=${CONFIGURED_HOST%%:*}
+        if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONFIGURED_HOST"; then
+            echo
+            print_warn "This deployment is configured to use '$CONFIGURED_HOST', which is not running."
+            detect_ai_provider
+            if [[ -n "$AI_PROVIDER_NAME" ]]; then
+                print_warn "'$AI_PROVIDER_NAME' is running instead — you likely switched providers."
+                read -rp "Point Open WebUI at $AI_PROVIDER_NAME? (Y/n): " switch_answer
+                if [[ "${switch_answer,,}" != "n" ]]; then
+                    # Rewrite both keys: exactly one must hold a value, and
+                    # the choice of which depends on the provider's API.
+                    if [[ "$AI_PROVIDER_NAME" == "ollama" ]]; then
+                        NEW_OLLAMA="$AI_PROVIDER_BASE_URL"; NEW_OPENAI=""; NEW_KEY=""
+                    else
+                        NEW_OLLAMA=""; NEW_OPENAI="$AI_PROVIDER_BASE_URL/v1"; NEW_KEY="local"
+                    fi
+                    sed -i "s|^OLLAMA_BASE_URL=.*|OLLAMA_BASE_URL=$NEW_OLLAMA|" "$INSTALL_DIR/.env"
+                    sed -i "s|^OPENAI_API_BASE_URL=.*|OPENAI_API_BASE_URL=$NEW_OPENAI|" "$INSTALL_DIR/.env"
+                    sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$NEW_KEY|" "$INSTALL_DIR/.env"
+                    print_info "Switched to $AI_PROVIDER_NAME."
+                fi
+            else
+                print_warn "No other provider is running either. Start one, or add a"
+                print_warn "connection in Admin → Settings → Connections."
+            fi
+        fi
+    fi
 else
     WEBUI_SECRET=$(generate_secret_hex 32)
     OLLAMA_URL_VALUE=""
