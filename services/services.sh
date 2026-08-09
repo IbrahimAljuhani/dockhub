@@ -51,6 +51,7 @@ declare -A SERVICE_FILES=(
     # No backup.sh: no database, so the generic volume backup covers it.
     [mosquitto]="docker-compose.yml"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
+    [ollama]="docker-compose.yml"
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
     # Vulhub ships NO compose file of ours — it clones upstream's library of
