@@ -239,6 +239,37 @@ ensure_single_provider() {
     return 0
 }
 
+# Finds whichever model provider is currently running and where to reach it.
+# Sets AI_PROVIDER_NAME and AI_PROVIDER_BASE_URL in the caller's shell, both
+# empty when nothing is running.
+#
+# Consumers call this instead of hardcoding "ollama", so the same deploy.sh
+# keeps working when the user later switches to llama.cpp or LocalAI — the
+# only thing that changes is which container answers.
+#
+# Note the caller still decides which environment variable to put the URL in:
+# Ollama has a native API that most consumers support directly, while
+# llama.cpp and LocalAI are reached through their OpenAI-compatible /v1
+# path. That mapping is consumer-specific, so it doesn't belong here.
+AI_PROVIDER_NAME=""
+AI_PROVIDER_BASE_URL=""
+detect_ai_provider() {
+    AI_PROVIDER_NAME=""
+    AI_PROVIDER_BASE_URL=""
+    local name
+    for name in "${AI_PROVIDER_CONTAINERS[@]}"; do
+        docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$name" || continue
+        AI_PROVIDER_NAME="$name"
+        case "$name" in
+            ollama)    AI_PROVIDER_BASE_URL="http://ollama:11434" ;;
+            llama-cpp) AI_PROVIDER_BASE_URL="http://llama-cpp:8080" ;;
+            localai)   AI_PROVIDER_BASE_URL="http://localai:8080" ;;
+        esac
+        return 0
+    done
+    return 0
+}
+
 # Warns when there isn't room for what's about to be downloaded. Language
 # models are the only thing in DockHub measured in tens of gigabytes, so a
 # generic "enough disk?" check isn't enough — the caller passes what the
