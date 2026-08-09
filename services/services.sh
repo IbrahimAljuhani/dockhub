@@ -84,19 +84,37 @@ declare -A SERVICE_FILES=(
 # adding its first entry here; the category menu picks it up automatically
 # in the order entries first appear.
 CATALOG=(
+    # Three categories split what people loosely call "AI", along one line:
+    # do you USE a model, use an AGENT, or BUILD agent systems?
+    #
+    # AI            — the model layer: providers that serve models, and the
+    #                 chat interface you talk to them through.
     "AI|ollama|Ollama"
     "AI|open-webui|Open WebUI"
-    "AI|dify|Dify"
     "AI|llama-cpp|llama.cpp"
     "AI|localai|LocalAI"
-    # AI-Agents is its own category, not part of AI. The AI entries above are
-    # model *providers* and *interfaces*; these three are autonomous agents —
-    # software that acts on instructions, with tools, rather than answering a
-    # prompt. They were originally filed under Automation (OpenClaw, Hermes)
-    # and AI (Paperclip), which sent people looking in the wrong place.
+    # AI-Agents     — a running agent that does work FOR you. You talk to it
+    #                 and it acts, with tools. You don't design anything.
     "AI-Agents|openclaw|OpenClaw"
     "AI-Agents|hermes|Hermes"
-    "AI-Agents|paperclip|Paperclip"
+    "AI-Agents|openhands|OpenHands"
+    # Multi-Agent   — platforms where you BUILD and orchestrate systems of
+    #                 agents. Dify moved here from AI: it is an LLM app
+    #                 platform with agent management, far closer to Langflow
+    #                 and Flowise than to Ollama. Paperclip moved here from
+    #                 AI-Agents once its own description settled it — "the
+    #                 app everyone uses to manage agents at work".
+    #
+    # LangGraph and CrewAI are deliberately ABSENT. They are libraries, not
+    # services: LangGraph's server image builds YOUR code from a
+    # langgraph.json, and CrewAI publishes no image at all. Listing them
+    # would put entries in the menu with nothing to deploy. See this
+    # category's README — Langflow sits on LangGraph and Flowise on
+    # LangChain, so the capability is here, as a service.
+    "Multi-Agent|dify|Dify"
+    "Multi-Agent|langflow|Langflow"
+    "Multi-Agent|flowise|Flowise"
+    "Multi-Agent|paperclip|Paperclip"
     "Automation|n8n|n8n"
     "DNS|pi-hole|Pi-hole"
     "DNS|adguard|AdGuard"
