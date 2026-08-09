@@ -174,6 +174,85 @@ ensure_main_net() {
     fi
 }
 
+# ── AI cluster helpers ──────────────────────────────────────────────────
+
+# The AI services talk to each other over their own shared network, exactly
+# as the web services do over main-net. Keeping them separate means a model
+# provider needs no published port at all: consumers reach it by container
+# name. That matters because Ollama's API has NO AUTHENTICATION — anything
+# that can reach the port can use your models and read your conversations.
+ensure_ai_net() {
+    if ! docker network ls --format '{{.Name}}' | grep -qx "ai-net"; then
+        docker network create ai-net || true
+        if docker network ls --format '{{.Name}}' | grep -qx "ai-net"; then
+            print_info "Created docker network 'ai-net'."
+        else
+            print_error "Failed to create docker network 'ai-net'."
+        fi
+    fi
+}
+
+# Every model provider in DockHub, by container name. Used to keep exactly
+# one of them running at a time.
+AI_PROVIDER_CONTAINERS=(ollama llama-cpp localai)
+
+# Providers are alternatives, not companions: they all load models into the
+# same GPU memory, so two at once means either an out-of-memory failure or
+# constant swapping that destroys performance — and the model files are many
+# gigabytes each on disk.
+#
+# Deliberately checks whether another provider is RUNNING, not whether it is
+# installed. Contention is a runtime problem: having llama.cpp installed but
+# stopped costs nothing, and someone may reasonably keep LocalAI around for
+# image generation while using Ollama for chat. Same shape as the Vulhub
+# launcher's one-environment-at-a-time rule.
+#
+# $1 = the container name of the provider being deployed (excluded from the
+# check). Offers to stop whatever else is running; returns non-zero only if
+# the user declines.
+ensure_single_provider() {
+    local self="$1" other running=()
+    for other in "${AI_PROVIDER_CONTAINERS[@]}"; do
+        [[ "$other" == "$self" ]] && continue
+        docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$other" && running+=("$other")
+    done
+    (( ${#running[@]} )) || return 0
+
+    echo >&2
+    print_warn "Another model provider is already running: ${running[*]}"
+    print_warn "Providers share the same GPU memory, so running two at once means"
+    print_warn "either an out-of-memory failure or constant model swapping."
+    echo >&2
+    local answer
+    read -rp "Stop ${running[*]} and continue? (Y/n): " answer
+    if [[ "${answer,,}" == "n" ]]; then
+        print_info "Leaving ${running[*]} running. Nothing was deployed."
+        return 1
+    fi
+    for other in "${running[@]}"; do
+        docker stop "$other" >/dev/null 2>&1 && print_info "Stopped $other." \
+            || print_warn "Could not stop $other — check 'docker ps'."
+    done
+    return 0
+}
+
+# Warns when there isn't room for what's about to be downloaded. Language
+# models are the only thing in DockHub measured in tens of gigabytes, so a
+# generic "enough disk?" check isn't enough — the caller passes what the
+# specific model needs. $1 = GB required, $2 = path to check.
+# Returns non-zero if short; the caller decides whether that's fatal.
+check_free_disk_gb() {
+    local need="$1" path="${2:-$HOME}" free
+    free=$(df -BG --output=avail "$path" 2>/dev/null | tail -n1 | tr -dc '0-9') || return 0
+    [[ -n "$free" ]] || return 0
+    if (( free < need )); then
+        print_warn "Only ${free} GB free on $path, and this needs about ${need} GB."
+        return 1
+    fi
+    print_info "Disk check: ${free} GB free, ${need} GB needed. ✅"
+    return 0
+}
+
 valid_mem_limit() { [[ "$1" =~ ^[0-9]+[bkmgBKMG]?$ ]]; }
 
 # Prompts once for an optional memory cap. $1 = container name (for the
