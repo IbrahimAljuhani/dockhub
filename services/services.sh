@@ -89,10 +89,15 @@ CATALOG=(
     "AI|dify|Dify"
     "AI|llama-cpp|llama.cpp"
     "AI|localai|LocalAI"
-    "AI|paperclip|Paperclip"
+    # AI-Agents is its own category, not part of AI. The AI entries above are
+    # model *providers* and *interfaces*; these three are autonomous agents —
+    # software that acts on instructions, with tools, rather than answering a
+    # prompt. They were originally filed under Automation (OpenClaw, Hermes)
+    # and AI (Paperclip), which sent people looking in the wrong place.
+    "AI-Agents|openclaw|OpenClaw"
+    "AI-Agents|hermes|Hermes"
+    "AI-Agents|paperclip|Paperclip"
     "Automation|n8n|n8n"
-    "Automation|openclaw|OpenClaw"
-    "Automation|hermes|Hermes"
     "DNS|pi-hole|Pi-hole"
     "DNS|adguard|AdGuard"
     "ERP|erpnext|ERPNext"
