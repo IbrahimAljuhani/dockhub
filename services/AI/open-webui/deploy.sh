@@ -236,9 +236,25 @@ PROVIDER_REACHABLE=-1
 PROVIDER_URL="${ENV_OLLAMA_URL:-$ENV_OPENAI_BASE}"
 if (( UI_OK )) && [[ -n "$PROVIDER_URL" ]] && [[ "$PROVIDER_URL" == http://* ]]; then
     PROVIDER_REACHABLE=0
+    # Probe a path that actually exists. A bare OpenAI-compatible base URL
+    # is not an endpoint — llama.cpp and LocalAI answer 404 on /v1 itself
+    # while /v1/models is the real one. Ollama's root does return 200, so
+    # only the OpenAI-style base needs extending.
+    PROBE_URL="$PROVIDER_URL"
+    [[ "$PROBE_URL" == */v1 ]] && PROBE_URL="$PROBE_URL/models"
+
+    # An HTTPError still proves the connection worked — something answered.
+    # Only a connection-level failure means the container genuinely cannot
+    # reach the provider, which is the question being asked here. Treating
+    # every non-200 as unreachable reported a healthy llama.cpp as broken.
     docker exec open-webui python -c "
-import urllib.request
-urllib.request.urlopen('$PROVIDER_URL', timeout=5)" >/dev/null 2>&1 && PROVIDER_REACHABLE=1
+import sys, urllib.request, urllib.error
+try:
+    urllib.request.urlopen('$PROBE_URL', timeout=5)
+except urllib.error.HTTPError:
+    pass
+except Exception:
+    sys.exit(1)" >/dev/null 2>&1 && PROVIDER_REACHABLE=1
 fi
 
 echo
