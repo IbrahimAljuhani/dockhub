@@ -101,7 +101,7 @@ Both services are plain `docker-compose.yml` stacks under `~/docker/<service>/`,
 
 ## 🧱 Services
 
-This repo installs the **core infrastructure** (`install_dockhub.sh` → Docker CE, Compose, NPM, Portainer, and the shared `main-net` network). Everything else lives under [`services/`](services/README.md) as its own self-contained, independently-deployed folder — run only the ones you actually need. See [`services/README.md`](services/README.md) for the full up-to-date roadmap (38 catalog entries across 14 categories, ✅ = built), quick-start, and conventions — the table there is the source of truth; this section just shows the shape of the repo.
+This repo installs the **core infrastructure** (`install_dockhub.sh` → Docker CE, Compose, NPM, Portainer, and the shared `main-net` network). Everything else lives under [`services/`](services/README.md) as its own self-contained, independently-deployed folder — run only the ones you actually need. See [`services/README.md`](services/README.md) for the full up-to-date roadmap (41 catalog entries across 15 categories, ✅ = built), quick-start, and conventions — the table there is the source of truth; this section just shows the shape of the repo.
 
 ```
 dockhub/
