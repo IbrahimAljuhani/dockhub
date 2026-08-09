@@ -56,6 +56,8 @@ declare -A SERVICE_FILES=(
     # already captures it correctly.
     [ollama]="docker-compose.yml"
     [open-webui]="docker-compose.yml"
+    [llama-cpp]="docker-compose.yml"
+    [localai]="docker-compose.yml"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"

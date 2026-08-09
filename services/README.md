@@ -6,7 +6,7 @@ Optional services that run on top of the core infrastructure ([`install_dockhub.
 
 ## 📋 Services Roadmap
 
-![Progress](https://img.shields.io/badge/built-32%20%2F%2041%20services-46a049?style=for-the-badge)
+![Progress](https://img.shields.io/badge/built-34%20%2F%2041%20services-46a049?style=for-the-badge)
 
 [`services.sh`](services.sh) presents these grouped by category. ✅ = deployable now, 🚧 = listed in the menu already (shows "coming soon" if picked) but not built yet.
 
@@ -14,7 +14,7 @@ Optional services that run on top of the core infrastructure ([`install_dockhub.
 
 | Category | Services |
 |---|---|
-| **[AI](AI/)** | ✅ [![Ollama](https://img.shields.io/badge/Ollama-000000?style=flat-square&logo=ollama&logoColor=white)](AI/ollama/) · ✅ <a href="AI/open-webui/"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/open-webui.svg" width="20" height="20" alt="Open WebUI" title="Open WebUI"></a> · 🚧 <a href="AI/llama-cpp/"><img src="https://llama-cpp.com/wp-content/uploads/2025/10/Llama-cpp-300x108.jpg" height="20" alt="llama.cpp" title="llama.cpp"></a> · 🚧 <a href="AI/localai/"><img src="https://localai.io/img/logo-mark.png" height="20" alt="LocalAI" title="LocalAI"></a> |
+| **[AI](AI/)** | ✅ [![Ollama](https://img.shields.io/badge/Ollama-000000?style=flat-square&logo=ollama&logoColor=white)](AI/ollama/) · ✅ <a href="AI/open-webui/"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/open-webui.svg" width="20" height="20" alt="Open WebUI" title="Open WebUI"></a> · ✅ <a href="AI/llama-cpp/"><img src="https://llama-cpp.com/wp-content/uploads/2025/10/Llama-cpp-300x108.jpg" height="20" alt="llama.cpp" title="llama.cpp"></a> · ✅ <a href="AI/localai/"><img src="https://localai.io/img/logo-mark.png" height="20" alt="LocalAI" title="LocalAI"></a> |
 | **[AI-Agents](AI-Agents/)** | 🚧 <a href="AI-Agents/openclaw/"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/openclaw.svg" width="20" height="20" alt="OpenClaw" title="OpenClaw — personal assistant, multi-channel"></a> · 🚧 <a href="AI-Agents/hermes/"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/hermes-icon.svg" width="20" height="20" alt="Hermes" title="Hermes Agent — self-improving runtime"></a> · 🚧 [![OpenHands](https://img.shields.io/badge/OpenHands-000000?style=flat-square&logo=github&logoColor=white)](AI-Agents/openhands/) |
 | **[Multi-Agent](Multi-Agent/)** | 🚧 [![Dify](https://img.shields.io/badge/Dify-0033FF?style=flat-square&logo=dify&logoColor=white)](Multi-Agent/dify/) · 🚧 [![Langflow](https://img.shields.io/badge/Langflow-FF3366?style=flat-square)](Multi-Agent/langflow/) · 🚧 <a href="Multi-Agent/flowise/"><img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/flowise.svg" width="20" height="20" alt="Flowise" title="Flowise — lightest visual builder"></a> · 🚧 <a href="Multi-Agent/paperclip/"><img src="https://paperclip.ing/favicon.svg" width="20" height="20" alt="Paperclip" title="Paperclip — deferred, no official image upstream"></a> |
 | **[Automation](Automation/)** | ✅ [![n8n](https://img.shields.io/badge/n8n-EA4B71?style=flat-square&logo=n8n&logoColor=white)](Automation/n8n/) |
@@ -48,6 +48,8 @@ Only relevant if you opt into a service's **direct host port** prompt (default i
 | OpenProject | `8080` |
 | Nextcloud | `8080` ⚠️ same suggested default as OpenProject — pick a different one if running both |
 | n8n | `5678` |
+| LocalAI | `8082` (optional) → the container's `8080`. ⚠️ No authentication, like the other providers. Reached as `localai:8080` with no host port. |
+| llama.cpp | `8081` (optional) → the container's `8080`. ⚠️ No authentication, same as Ollama. Other services reach it as `llama-cpp:8080` with no host port. |
 | Open WebUI | `3000` (optional) ⚠️ same as Redmine and Juice Shop — pick another if running them together. NPM reaches it as `open-webui:8080`. |
 | Ollama | `11434` (optional, **default no**) ⚠️ Ollama's API has NO authentication — a published port exposes your models to the whole LAN. Other services reach it as `ollama:11434` over `ai-net` without one. |
 | Redmine | `3000` |
