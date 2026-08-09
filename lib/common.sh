@@ -236,6 +236,12 @@ ensure_single_provider() {
         docker stop "$other" >/dev/null 2>&1 && print_info "Stopped $other." \
             || print_warn "Could not stop $other — check 'docker ps'."
     done
+    # Consumers keep their old endpoint in .env, so they now point at a
+    # container that isn't running. The visible symptom is an empty model
+    # list with nothing explaining it; rerunning a consumer's deploy.sh
+    # detects the change and offers to re-point it.
+    print_warn "Anything already using ${running[*]} (Open WebUI, agents) still points"
+    print_warn "at it. Rerun that service's deploy.sh to switch it over."
     return 0
 }
 
