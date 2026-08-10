@@ -327,6 +327,7 @@ if [[ -n "$ENV_HOST_PORT" ]]; then
     echo "🔌 API (host):      http://$SERVER_IP:$ENV_HOST_PORT   ⚠️ no authentication"
 fi
 echo "🧠 Model:           $ENV_HF_REPO"
+echo "📁 Model files:     $ENV_MODELS_PATH"
 if (( GPU_ENABLED )); then
     ACCEL_LINE="GPU ✅"
 elif (( GPU_DOCKER_OK )); then

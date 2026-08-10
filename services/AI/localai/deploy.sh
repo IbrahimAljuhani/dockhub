@@ -248,6 +248,7 @@ echo "────────────────────────�
 echo "🔌 API (internal):  http://localai:8080/v1   ← how other services reach it"
 [[ -n "$ENV_HOST_PORT" ]] && echo "🔌 API (host):      http://$SERVER_IP:$ENV_HOST_PORT   ⚠️ no authentication"
 echo "🖥️  Build:           $ENV_TAG"
+echo "📁 Model files:     $ENV_MODELS_PATH"
 echo "📜 Log:             $LOGFILE"
 echo "──────────────────────────────────────────────"
 echo

@@ -67,6 +67,17 @@ gpu_setup
 STORED_ACCEL=$(read_env_value "AI_ACCELERATION" "$INSTALL_DIR/.env")
 gpu_resolve_acceleration "$STORED_ACCEL"
 
+# One shared location for every AI service, asked once and remembered in
+# ~/docker/.dockhub-env. Resolved HERE, before the branch, so the question
+# lands in the same place in every provider's flow — it used to sit inside
+# the fresh-deploy branch here and before it in llama.cpp and LocalAI, which
+# meant the order depended on which service you happened to install first.
+ENV_MODELS_PATH=$(read_env_value "AI_MODELS_PATH" "$INSTALL_DIR/.env")
+if [[ -z "$ENV_MODELS_PATH" ]]; then
+    resolve_ai_models_dir
+    ENV_MODELS_PATH="$AI_MODELS_DIR/ollama"
+fi
+
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
 else
@@ -85,17 +96,13 @@ else
     print_info "Other DockHub services reach it as http://ollama:11434 without a port."
     prompt_host_port "11434"
 
-    # One shared location for every AI service, asked once and remembered in
-    # ~/docker/.dockhub-env. The service records the path it actually used,
-    # so changing the global default later never moves a running deployment
-    # out from under itself.
-    resolve_ai_models_dir
-
+    # Recorded per service, so changing the global default later never moves
+    # a running deployment out from under itself.
     cat > "$INSTALL_DIR/.env" <<EOF
 OLLAMA_VERSION=latest
 OLLAMA_KEEP_ALIVE=5m
 AI_ACCELERATION=$AI_ACCELERATION
-AI_MODELS_PATH=$AI_MODELS_DIR/ollama
+AI_MODELS_PATH=$ENV_MODELS_PATH
 EOF
     [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT" >> "$INSTALL_DIR/.env"
     [[ -n "$HOST_PORT" ]] && echo "HOST_PORT=$HOST_PORT" >> "$INSTALL_DIR/.env"
@@ -117,14 +124,9 @@ set_env_value "AI_ACCELERATION" "$AI_ACCELERATION" "$INSTALL_DIR/.env"
 ENV_MEM_LIMIT=$(read_env_value "MEM_LIMIT" "$INSTALL_DIR/.env")
 ENV_HOST_PORT=$(read_env_value "HOST_PORT" "$INSTALL_DIR/.env")
 
-# Upgrade path for a deployment made before models moved out of a named
-# volume: fill the key in rather than failing on an unset bind-mount source.
-ENV_MODELS_PATH=$(read_env_value "AI_MODELS_PATH" "$INSTALL_DIR/.env")
-if [[ -z "$ENV_MODELS_PATH" ]]; then
-    resolve_ai_models_dir
-    ENV_MODELS_PATH="$AI_MODELS_DIR/ollama"
-    set_env_value "AI_MODELS_PATH" "$ENV_MODELS_PATH" "$INSTALL_DIR/.env"
-fi
+# Appends on a deployment made before models moved out of a named volume,
+# so an older .env gains the key instead of failing on an unset bind source.
+set_env_value "AI_MODELS_PATH" "$ENV_MODELS_PATH" "$INSTALL_DIR/.env"
 
 # Created and PROVEN writable before compose starts. A bind mount the
 # container can't write to fails later, mid-download, with an error that
@@ -250,6 +252,7 @@ else
 fi
 echo "🖥️  Acceleration:    $ACCEL_LINE"
 echo "📦 Models:          $MODEL_COUNT installed"
+echo "📁 Model files:     $ENV_MODELS_PATH"
 echo "📜 Log:             $LOGFILE"
 echo "──────────────────────────────────────────────"
 echo
