@@ -29,12 +29,21 @@ This is the difference that surprises people, so it's worth stating plainly:
 
 **`llama-server` loads one model and serves that one.** Point [Open WebUI](../open-webui/) at it and you'll see a single entry in the model dropdown rather than a list. **That is correct behaviour, not a broken connection.**
 
-To serve a different model:
+### Switching model
+
+**Rerun `deploy.sh`.** It shows what is currently being served and offers the same menu, with `0) Keep it` as the safe answer — no file editing.
 
 ```bash
-nano ~/docker/llama-cpp/.env      # change LLAMA_ARG_HF_REPO
 bash deploy.sh
 ```
+
+The new model **replaces** the old one; two at once is not something `llama-server` does. But nothing is thrown away: downloads land in the `llama-cpp-models` volume, so switching back later re-downloads nothing. See what's already cached with:
+
+```bash
+docker exec llama-cpp ls /models
+```
+
+> 💡 **If you wanted several models available at the same time, this is the wrong provider.** That is [Ollama](../ollama/), which holds many and hot-swaps them, or [LocalAI](../localai/), whose All-In-One build arrives with one model per capability. Both are one deploy away — and deploying either will stop this one, by the single-provider rule.
 
 ---
 

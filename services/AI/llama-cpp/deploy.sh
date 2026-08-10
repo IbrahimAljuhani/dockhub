@@ -61,29 +61,46 @@ gpu_setup
 STORED_ACCEL=$(read_env_value "AI_ACCELERATION" "$INSTALL_DIR/.env")
 gpu_resolve_acceleration "$STORED_ACCEL"
 
-if [[ -f "$INSTALL_DIR/.env" ]]; then
-    print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
-else
-    # ── The model ───────────────────────────────────────────────────────
-    # Mandatory here, unlike Ollama. llama-server loads a model at startup
-    # and serves that one; with nothing to load there is no service.
+# ── The model menu, shared by both paths ────────────────────────────────
+# Mandatory here, unlike Ollama: llama-server loads a model at startup and
+# serves that one, so with nothing to load there is no service.
+#
+# A rerun used to print "edit LLAMA_ARG_HF_REPO in .env and rerun" and then
+# offer no way to do it — the only route to a different model was a text
+# editor. Both paths call this now. Deliberately one function rather than a
+# second menu: the repo names below were each checked to exist, and a copy
+# would have to be kept in step with that by hand.
+#
+# $1 = the repo currently configured, empty on a fresh deploy.
+# Sets HF_REPO_VALUE, MODEL_GB and MODEL_CHANGED.
+pick_llama_model() {
+    local current="$1" choice
+    MODEL_CHANGED=0
     echo
-    print_info "llama.cpp serves ONE model. Pick it now — you can change it later"
-    print_info "by editing LLAMA_ARG_HF_REPO in .env and rerunning this script."
+    if [[ -n "$current" ]]; then
+        print_info "Currently serving: $current"
+        print_warn "llama.cpp serves ONE model, so picking another REPLACES this one."
+        print_info "The old weights stay in the volume, so switching back later"
+        print_info "re-downloads nothing."
+    else
+        print_info "llama.cpp serves ONE model. Pick it now — rerun this script"
+        print_info "later to change it."
+    fi
     echo
-    # Every repo below was checked to exist. Note the different owners: the
-    # ggml-org org (llama.cpp's own) publishes a small set, and the rest of
-    # the GGUF world lives mostly under bartowski. Guessing a prefix produces
-    # a repo that looks plausible and 401s at download time.
+    [[ -n "$current" ]] && echo "   0) Keep it — just restart"
+    # Note the different owners: the ggml-org org (llama.cpp's own) publishes
+    # a small set, and the rest of the GGUF world lives mostly under
+    # bartowski. Guessing a prefix produces a repo that looks plausible and
+    # 401s at download time.
     echo "   1) ggml-org/gemma-3-1b-it-GGUF               ~1 GB  tiny, fast, fine on CPU"
     echo "   2) ggml-org/gemma-3-4b-it-GGUF               ~3 GB  small, good general quality"
     echo "   3) bartowski/Qwen2.5-Coder-7B-Instruct-GGUF  ~5 GB  tuned for code"
     echo "   4) Enter a Hugging Face repo myself"
-    read -rp "Choice (1-4): " model_choice
-    case "$model_choice" in
-        1) HF_REPO_VALUE="ggml-org/gemma-3-1b-it-GGUF";                MODEL_GB=2 ;;
-        2) HF_REPO_VALUE="ggml-org/gemma-3-4b-it-GGUF";                MODEL_GB=4 ;;
-        3) HF_REPO_VALUE="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF";   MODEL_GB=7 ;;
+    read -rp "Choice ($( [[ -n "$current" ]] && echo 0 || echo 1 )-4): " choice
+    case "$choice" in
+        1) HF_REPO_VALUE="ggml-org/gemma-3-1b-it-GGUF";              MODEL_GB=2; MODEL_CHANGED=1 ;;
+        2) HF_REPO_VALUE="ggml-org/gemma-3-4b-it-GGUF";              MODEL_GB=4; MODEL_CHANGED=1 ;;
+        3) HF_REPO_VALUE="bartowski/Qwen2.5-Coder-7B-Instruct-GGUF"; MODEL_GB=7; MODEL_CHANGED=1 ;;
         4)
             echo
             echo "Format: user/repo  or  user/repo:QUANT   (quant defaults to Q4_K_M)"
@@ -98,18 +115,56 @@ else
                 fi
                 echo "Expected user/repo (e.g. ggml-org/gemma-3-4b-it-GGUF), not a URL." >&2
             done
-            MODEL_GB=8
+            MODEL_GB=8; MODEL_CHANGED=1
             ;;
-        *) print_error "Invalid choice. Nothing was deployed." ;;
+        *)
+            # A typo must not tear down a working deployment, so this only
+            # aborts on the fresh path, where there is nothing to protect.
+            if [[ -n "$current" ]]; then
+                HF_REPO_VALUE="$current"; MODEL_GB=0
+                [[ "$choice" == "0" ]] || print_warn "Not a valid choice — keeping $current."
+            else
+                print_error "Invalid choice. Nothing was deployed."
+            fi
+            ;;
     esac
+    # Picking the model already being served from the menu is a "keep", not a
+    # switch — otherwise it announces a change and re-runs the disk check for
+    # a download that will never happen.
+    [[ "$HF_REPO_VALUE" == "$current" ]] && MODEL_CHANGED=0
+    return 0
+}
 
-    # Unlike Ollama, the model isn't optional here — llama-server has nothing
-    # to serve without one — so running short of disk is a decision point
-    # rather than something that can be skipped past.
-    if ! check_free_disk_gb "$MODEL_GB" "$HOME"; then
-        read -rp "Not much room. Download anyway? (y/N): " disk_answer
-        [[ "${disk_answer,,}" == "y" ]] || print_error "Nothing was deployed."
+# Unlike Ollama, the model isn't optional here — llama-server has nothing to
+# serve without one — so running short of disk is a decision point rather
+# than something that can be skipped past. $1 = what to say on refusal.
+confirm_model_disk() {
+    (( MODEL_CHANGED )) || return 0
+    check_free_disk_gb "$MODEL_GB" "$HOME" && return 0
+    local answer
+    read -rp "Not much room. Download anyway? (y/N): " answer
+    [[ "${answer,,}" == "y" ]] || print_error "$1"
+    return 0
+}
+
+if [[ -f "$INSTALL_DIR/.env" ]]; then
+    print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
+
+    # The one setting worth revisiting on a rerun. Everything else in .env
+    # (port, memory limit) is stable; the model is the thing people actually
+    # come back to change, and it is the only one with no other route.
+    CURRENT_REPO=$(read_env_value "LLAMA_ARG_HF_REPO" "$INSTALL_DIR/.env")
+    if [[ -n "$CURRENT_REPO" ]]; then
+        pick_llama_model "$CURRENT_REPO"
+        if (( MODEL_CHANGED )); then
+            confirm_model_disk "Keeping $CURRENT_REPO. Nothing was changed."
+            set_env_value "LLAMA_ARG_HF_REPO" "$HF_REPO_VALUE" "$INSTALL_DIR/.env"
+            print_info "Switching to $HF_REPO_VALUE — it downloads on the next start."
+        fi
     fi
+else
+    pick_llama_model ""
+    confirm_model_disk "Nothing was deployed."
 
     echo
     prompt_mem_limit "llama-cpp" "8g"
@@ -269,6 +324,9 @@ fi
 echo
 echo "📌 llama.cpp serves ONE model. Open WebUI and the agents will show"
 echo "   '$ENV_HF_REPO' alone rather than a list — that is correct, not a fault."
-echo "   To serve a different one: edit LLAMA_ARG_HF_REPO in .env and rerun this script."
+echo "   To serve a different one, rerun this script — it offers the model menu"
+echo "   with your current choice kept as the default."
+echo "   Want SEVERAL models at once instead? That is Ollama or LocalAI, not this."
 echo
 echo "To manage: cd $INSTALL_DIR && $COMPOSE_CMD [ps|logs -f|stop|restart]"
+echo "Cached:    docker exec llama-cpp ls /models   ← models already downloaded"
