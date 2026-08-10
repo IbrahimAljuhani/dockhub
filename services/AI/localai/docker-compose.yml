@@ -50,14 +50,14 @@ services:
       # loop because it parses the value instead of checking it exists.
       DEBUG: ${LOCALAI_DEBUG:-false}
     volumes:
-      # Models live here, including everything AIO downloads on first start.
-      # Without a volume that download repeats on every recreate.
-      - localai-models:/models
+      # A HOST DIRECTORY, not a named volume — see resolve_ai_models_dir() in
+      # lib/common.sh. Everything AIO downloads on first start lands here,
+      # 25+ GB on the GPU profile, which is exactly why it belongs somewhere
+      # you can see with 'du' and relocate to a second disk. Without a mount
+      # at all, that download repeats on every recreate.
+      - ${AI_MODELS_PATH:?AI_MODELS_PATH is unset — run deploy.sh, which resolves it}:/models
     networks:
       - ai-net
-
-volumes:
-  localai-models:
 
 networks:
   ai-net:

@@ -85,10 +85,17 @@ else
     print_info "Other DockHub services reach it as http://ollama:11434 without a port."
     prompt_host_port "11434"
 
+    # One shared location for every AI service, asked once and remembered in
+    # ~/docker/.dockhub-env. The service records the path it actually used,
+    # so changing the global default later never moves a running deployment
+    # out from under itself.
+    resolve_ai_models_dir
+
     cat > "$INSTALL_DIR/.env" <<EOF
 OLLAMA_VERSION=latest
 OLLAMA_KEEP_ALIVE=5m
 AI_ACCELERATION=$AI_ACCELERATION
+AI_MODELS_PATH=$AI_MODELS_DIR/ollama
 EOF
     [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT" >> "$INSTALL_DIR/.env"
     [[ -n "$HOST_PORT" ]] && echo "HOST_PORT=$HOST_PORT" >> "$INSTALL_DIR/.env"
@@ -109,6 +116,22 @@ set_env_value "AI_ACCELERATION" "$AI_ACCELERATION" "$INSTALL_DIR/.env"
 
 ENV_MEM_LIMIT=$(read_env_value "MEM_LIMIT" "$INSTALL_DIR/.env")
 ENV_HOST_PORT=$(read_env_value "HOST_PORT" "$INSTALL_DIR/.env")
+
+# Upgrade path for a deployment made before models moved out of a named
+# volume: fill the key in rather than failing on an unset bind-mount source.
+ENV_MODELS_PATH=$(read_env_value "AI_MODELS_PATH" "$INSTALL_DIR/.env")
+if [[ -z "$ENV_MODELS_PATH" ]]; then
+    resolve_ai_models_dir
+    ENV_MODELS_PATH="$AI_MODELS_DIR/ollama"
+    set_env_value "AI_MODELS_PATH" "$ENV_MODELS_PATH" "$INSTALL_DIR/.env"
+fi
+
+# Created and PROVEN writable before compose starts. A bind mount the
+# container can't write to fails later, mid-download, with an error that
+# reads like a network problem — see prepare_model_dir() in lib/common.sh.
+prepare_model_dir "$ENV_MODELS_PATH" "ollama/ollama:$(read_env_value "OLLAMA_VERSION" "$INSTALL_DIR/.env")" \
+    || print_error "Fix the permissions above and rerun."
+print_info "Models: $ENV_MODELS_PATH"
 
 # docker-compose.override.yml is fully owned by this script (never hand-edit
 # it), so it's always safe to regenerate from what .env and the GPU probe say.
@@ -191,7 +214,7 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
     esac
 
     if [[ -n "$OLLAMA_MODEL" ]]; then
-        if ! check_free_disk_gb "$OLLAMA_MODEL_GB"; then
+        if ! check_free_disk_gb "$OLLAMA_MODEL_GB" "$ENV_MODELS_PATH"; then
             read -rp "Not much room. Download anyway? (y/N): " disk_answer
             [[ "${disk_answer,,}" == "y" ]] || OLLAMA_MODEL=""
         fi

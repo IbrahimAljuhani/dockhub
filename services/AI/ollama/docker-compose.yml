@@ -59,12 +59,19 @@ services:
       # after a gap.
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
     volumes:
-      - ollama-models:/root/.ollama
+      # A HOST DIRECTORY, not a named volume — see resolve_ai_models_dir() in
+      # lib/common.sh. Models are the largest thing DockHub downloads, and a
+      # named volume buries them in /var/lib/docker/volumes where you can
+      # neither see the space nor move it to a bigger disk. deploy.sh sets
+      # this and proves the container can write there before starting.
+      #
+      # Note what lands here: Ollama does NOT store plain .gguf files. It
+      # repacks weights into a content-addressed store (blobs/sha256-… plus
+      # manifests/), which is why this directory cannot be shared with
+      # llama.cpp or LocalAI even when running the same model.
+      - ${AI_MODELS_PATH:?AI_MODELS_PATH is unset — run deploy.sh, which resolves it}:/root/.ollama
     networks:
       - ai-net
-
-volumes:
-  ollama-models:
 
 networks:
   ai-net:

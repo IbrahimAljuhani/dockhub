@@ -61,6 +61,15 @@ gpu_setup
 STORED_ACCEL=$(read_env_value "AI_ACCELERATION" "$INSTALL_DIR/.env")
 gpu_resolve_acceleration "$STORED_ACCEL"
 
+# One shared location for every AI service, asked once and remembered in
+# ~/docker/.dockhub-env. Resolved before the disk check, because the check is
+# only meaningful against the filesystem the download will actually land on.
+ENV_MODELS_PATH=$(read_env_value "AI_MODELS_PATH" "$INSTALL_DIR/.env")
+if [[ -z "$ENV_MODELS_PATH" ]]; then
+    resolve_ai_models_dir
+    ENV_MODELS_PATH="$AI_MODELS_DIR/llama-cpp"
+fi
+
 # ── The model menu, shared by both paths ────────────────────────────────
 # Mandatory here, unlike Ollama: llama-server loads a model at startup and
 # serves that one, so with nothing to load there is no service.
@@ -80,8 +89,8 @@ pick_llama_model() {
     if [[ -n "$current" ]]; then
         print_info "Currently serving: $current"
         print_warn "llama.cpp serves ONE model, so picking another REPLACES this one."
-        print_info "The old weights stay in the volume, so switching back later"
-        print_info "re-downloads nothing."
+        print_info "The old weights stay in $ENV_MODELS_PATH,"
+        print_info "so switching back later re-downloads nothing."
     else
         print_info "llama.cpp serves ONE model. Pick it now — rerun this script"
         print_info "later to change it."
@@ -140,7 +149,7 @@ pick_llama_model() {
 # than something that can be skipped past. $1 = what to say on refusal.
 confirm_model_disk() {
     (( MODEL_CHANGED )) || return 0
-    check_free_disk_gb "$MODEL_GB" && return 0
+    check_free_disk_gb "$MODEL_GB" "$ENV_MODELS_PATH" && return 0
     local answer
     read -rp "Not much room. Download anyway? (y/N): " answer
     [[ "${answer,,}" == "y" ]] || print_error "$1"
@@ -178,6 +187,7 @@ else
 AI_ACCELERATION=$AI_ACCELERATION
 LLAMA_CPP_TAG=$( (( GPU_ENABLED )) && echo "server-cuda" || echo "server" )
 LLAMA_ARG_HF_REPO=$HF_REPO_VALUE
+AI_MODELS_PATH=$ENV_MODELS_PATH
 # Commented out on purpose — an EMPTY value here is not "use the default",
 # it is a parse error. llama.cpp reads this one with stoi, and an empty
 # string put the container into a restart loop with:
@@ -206,6 +216,7 @@ fi
 # the .env to `cpu` and get a genuinely CPU-only container next rerun, rather
 # than a CUDA image with the GPU withheld from it.
 set_env_value "AI_ACCELERATION" "$AI_ACCELERATION" "$INSTALL_DIR/.env"
+set_env_value "AI_MODELS_PATH"   "$ENV_MODELS_PATH" "$INSTALL_DIR/.env"
 set_env_value "LLAMA_CPP_TAG" \
     "$( (( GPU_ENABLED )) && echo "server-cuda" || echo "server" )" \
     "$INSTALL_DIR/.env"
@@ -251,6 +262,13 @@ fi
 [[ -n "$ENV_MEM_LIMIT" ]] && print_info "Memory limit $ENV_MEM_LIMIT applied to the 'llama-cpp' container."
 [[ -n "$ENV_HOST_PORT" ]] && print_info "Host port $ENV_HOST_PORT published — remember there is no authentication behind it."
 [[ "$ENV_TAG" == "server-cuda" ]] && print_info "GPU build selected ($ENV_TAG) and GPU access enabled in the compose override."
+
+# Created and PROVEN writable before compose starts. A bind mount the
+# container cannot write to fails later, mid-download, with an error that
+# reads like a network problem — see prepare_model_dir() in lib/common.sh.
+prepare_model_dir "$ENV_MODELS_PATH" "ghcr.io/ggml-org/llama.cpp:$ENV_TAG" \
+    || print_error "Fix the permissions above and rerun."
+print_info "Models: $ENV_MODELS_PATH"
 
 print_info "Starting llama.cpp — first run downloads the model, which takes a while..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \

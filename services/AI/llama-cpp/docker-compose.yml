@@ -70,12 +70,15 @@ services:
       # so raising this multiplies VRAM use rather than sharing it.
       LLAMA_ARG_N_PARALLEL: ${LLAMA_ARG_N_PARALLEL:-1}
     volumes:
-      - llama-cpp-models:/models
+      # A HOST DIRECTORY, not a named volume — see resolve_ai_models_dir() in
+      # lib/common.sh. LLAMA_CACHE points here, so this is where the GGUF
+      # pulled from Hugging Face lands. Keeping it out of
+      # /var/lib/docker/volumes is what lets you see the space and move it to
+      # a bigger disk. deploy.sh sets the path and proves the container can
+      # write to it before starting.
+      - ${AI_MODELS_PATH:?AI_MODELS_PATH is unset — run deploy.sh, which resolves it}:/models
     networks:
       - ai-net
-
-volumes:
-  llama-cpp-models:
 
 networks:
   ai-net:

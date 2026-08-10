@@ -52,6 +52,15 @@ gpu_setup
 STORED_ACCEL=$(read_env_value "AI_ACCELERATION" "$INSTALL_DIR/.env")
 gpu_resolve_acceleration "$STORED_ACCEL"
 
+# One shared location for every AI service, asked once and remembered in
+# ~/docker/.dockhub-env. Resolved before the disk check, because a 40 GB
+# check is only meaningful against the filesystem the download lands on.
+ENV_MODELS_PATH=$(read_env_value "AI_MODELS_PATH" "$INSTALL_DIR/.env")
+if [[ -z "$ENV_MODELS_PATH" ]]; then
+    resolve_ai_models_dir
+    ENV_MODELS_PATH="$AI_MODELS_DIR/localai"
+fi
+
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
 else
@@ -89,7 +98,7 @@ else
         LOCALAI_TAG_VALUE="latest-${AIO_PART}cpu"
     fi
 
-    if ! check_free_disk_gb "$NEED_GB"; then
+    if ! check_free_disk_gb "$NEED_GB" "$ENV_MODELS_PATH"; then
         read -rp "Not much room. Continue anyway? (y/N): " disk_answer
         [[ "${disk_answer,,}" == "y" ]] || print_error "Nothing was deployed."
     fi
@@ -106,6 +115,7 @@ else
 AI_ACCELERATION=$AI_ACCELERATION
 LOCALAI_TAG=$LOCALAI_TAG_VALUE
 LOCALAI_DEBUG=false
+AI_MODELS_PATH=$ENV_MODELS_PATH
 EOF
     [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT" >> "$INSTALL_DIR/.env"
     [[ -n "$HOST_PORT" ]] && echo "HOST_PORT=$HOST_PORT" >> "$INSTALL_DIR/.env"
@@ -120,6 +130,7 @@ else
 fi
 
 set_env_value "AI_ACCELERATION" "$AI_ACCELERATION" "$INSTALL_DIR/.env"
+set_env_value "AI_MODELS_PATH"   "$ENV_MODELS_PATH" "$INSTALL_DIR/.env"
 
 # Keep the tag's HARDWARE half in step with AI_ACCELERATION, and leave its
 # CONTENT half alone — the tag encodes two decisions and only one of them is
@@ -178,6 +189,13 @@ fi
 [[ -n "$ENV_HOST_PORT" ]] && print_info "Host port $ENV_HOST_PORT published — remember there is no authentication behind it."
 [[ "$ENV_TAG" == *gpu-nvidia* ]] && print_info "GPU build selected ($ENV_TAG) and GPU access enabled in the compose override."
 [[ "$ENV_TAG" == *aio* ]] && print_info "All-In-One build — it will download its model set on first start."
+
+# Created and PROVEN writable before compose starts. A bind mount the
+# container cannot write to fails later, part-way through a 25 GB download,
+# with an error that reads like a network problem — see prepare_model_dir().
+prepare_model_dir "$ENV_MODELS_PATH" "localai/localai:$ENV_TAG" \
+    || print_error "Fix the permissions above and rerun."
+print_info "Models: $ENV_MODELS_PATH"
 
 print_info "Starting LocalAI..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
