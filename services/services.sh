@@ -50,14 +50,20 @@ declare -A SERVICE_FILES=(
     [home-assistant]="docker-compose.yml"
     # No backup.sh: no database, so the generic volume backup covers it.
     [mosquitto]="docker-compose.yml"
-    # AI: no backup.sh. Ollama's volume is downloaded models — re-pullable,
-    # and not yours. Open WebUI's volume DOES hold your chats and accounts,
-    # but it has no separate database container, so the generic backup
-    # already captures it correctly.
-    [ollama]="docker-compose.yml"
+    # AI: the three PROVIDERS ship a backup.sh, and not for the usual
+    # database reason. Their volumes are downloaded model weights — many
+    # gigabytes of already-compressed binary that gzip cannot shrink, and
+    # that a pull or a restart re-fetches for free. The generic fallback
+    # would archive all of it, so each provider overrides backup_<slug>()
+    # to save the configuration and skip the weights.
+    #
+    # Open WebUI deliberately has NO backup.sh: its volume holds accounts,
+    # chat history and uploaded documents. That is real user data, and the
+    # generic backup is exactly right for it.
+    [ollama]="docker-compose.yml backup.sh"
     [open-webui]="docker-compose.yml"
-    [llama-cpp]="docker-compose.yml"
-    [localai]="docker-compose.yml"
+    [llama-cpp]="docker-compose.yml backup.sh"
+    [localai]="docker-compose.yml backup.sh"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
