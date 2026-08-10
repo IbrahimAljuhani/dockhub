@@ -589,6 +589,60 @@ backup_service_generic() {
 # install dir, $4 = path to the .tar.gz to restore. Overwrites everything
 # currently under install_dir plus named volumes — callers must confirm
 # with the user before calling this (see services.sh).
+# Backs up a service's CONFIGURATION only, leaving its volumes alone.
+#
+# For a model provider the generic backup is actively harmful, not merely
+# wasteful. A LocalAI All-In-One volume is 25+ GB of GGUF and safetensors —
+# already-quantised binary that gzip cannot compress — and the generic path
+# gzips it into a staging directory and then gzips that again. So it burns
+# a long single-threaded compression pass, needs roughly double the space
+# free (staging under $TMPDIR plus the final archive), and what it preserves
+# is a file set that `ollama pull` or a container restart re-fetches for
+# free. Nothing in it is yours.
+#
+# What IS worth keeping is small and irreplaceable-by-download: .env holds
+# the model choice, the acceleration decision, the port and the memory
+# limit, and the compose files hold how it was wired up.
+#
+# NOT for Open WebUI: its volume holds accounts, chat history and uploaded
+# documents. That is real user data and belongs in the generic backup.
+backup_service_config_only() {
+    local service="$1" instance="${2:-}" install_dir="$3"
+    local backup_root="$HOME/docker/backups/$service"
+    [[ -n "$instance" ]] && backup_root="$backup_root/$instance"
+    mkdir -p "$backup_root"
+
+    local ts staging
+    ts="$(date '+%Y-%m-%d_%H%M')"
+    staging="$(mktemp -d)"
+
+    mkdir -p "$staging/install_dir"
+    docker run --rm -v "$install_dir":/data:ro -v "$staging/install_dir":/backup alpine \
+        sh -c "cp -a /data/. /backup/" \
+        || print_warn "Some files under $install_dir may not have been backed up — check permissions."
+
+    # Say plainly what was left out and how big it was. A backup that is
+    # silently a hundredth of the size you expected looks like a failure.
+    local project_name volumes vol size
+    project_name="$(basename "$install_dir")"
+    volumes=$(docker volume ls --format '{{.Name}}' | grep -E "^${project_name}_" || true)
+    if [[ -n "$volumes" ]]; then
+        print_info "Skipping the model volume(s) — downloaded weights, not your data:"
+        for vol in $volumes; do
+            size=$(docker run --rm -v "$vol":/data:ro alpine du -sh /data 2>/dev/null | awk '{print $1}' || true)
+            print_info "   $vol${size:+  ($size)}"
+        done
+        print_info "Re-downloaded on the next start. Config and .env ARE in the backup."
+    fi
+
+    tar czf "$backup_root/${ts}.tar.gz" -C "$staging" .
+    rm -rf "$staging"
+    print_info "Backup saved: $backup_root/${ts}.tar.gz"
+}
+
+# Restores an archive made by either backup function — the volumes block is
+# skipped when the archive has none, so config-only archives need no special
+# restore of their own.
 restore_service_generic() {
     local service="$1" instance="${2:-}" install_dir="$3" archive="$4"
     local staging
