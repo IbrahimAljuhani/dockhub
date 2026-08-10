@@ -1,0 +1,65 @@
+# Open WebUI — the chat interface.
+#
+# A consumer, not a provider: it runs no models itself. It talks to whatever
+# is serving them — Ollama, llama.cpp or LocalAI on this host, or a cloud API
+# key — and gives you a ChatGPT-style interface in front of it.
+#
+# ── THE IMAGE TAG MATTERS MORE THAN USUAL ───────────────────────────────
+# Open WebUI publishes three tags, and one of them is a trap for this setup:
+#
+#   main    ← what we use. The interface, and nothing else.
+#   cuda    GPU build, but only for LOCAL EMBEDDINGS (document search, and
+#           speech-to-text). It does NOT accelerate the language model —
+#           that runs in the provider. Most people never need it.
+#   ollama  ⚠️ BUNDLES OLLAMA INSIDE THIS CONTAINER. Copying a guide that
+#           uses this tag, on a host where DockHub already deployed Ollama,
+#           leaves you with TWO Ollamas holding two separate model stores —
+#           you download the same model twice and neither UI explains why.
+#
+# ── TWO SHARED NETWORKS ─────────────────────────────────────────────────
+# The first DockHub service on both. It needs main-net so NGINX Proxy
+# Manager can serve it, and ai-net so it can reach the model provider by
+# container name. The provider itself stays off main-net — it has no web
+# interface and an unauthenticated API.
+#
+# ── NO GPU CHECK HERE, DELIBERATELY ─────────────────────────────────────
+# GPU handling belongs to providers. This container never loads a model, so
+# there is nothing here for a GPU to accelerate and lib/gpu.sh is not called.
+#
+# This is a single-instance service, under ~/docker/open-webui/.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it
+# (and the generated .env) to ~/docker/open-webui/ and runs it from there.
+
+services:
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:${OPEN_WEBUI_VERSION:-main}
+    container_name: open-webui
+    restart: unless-stopped
+    environment:
+      # Signs session cookies. Generated once by deploy.sh and kept in .env:
+      # if it changes, every logged-in user is silently signed out.
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY}
+      # Exactly one of these is filled in by deploy.sh, depending on which
+      # provider it found — Ollama has a native API that Open WebUI speaks
+      # directly, while llama.cpp and LocalAI are reached over their
+      # OpenAI-compatible /v1 path. Both may also be left empty and
+      # configured later in Admin → Settings → Connections.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    volumes:
+      # Accounts, chat history, settings and uploaded documents.
+      - open-webui-data:/app/backend/data
+    networks:
+      - main-net
+      - ai-net
+
+volumes:
+  open-webui-data:
+
+networks:
+  main-net:
+    external: true
+  ai-net:
+    external: true
