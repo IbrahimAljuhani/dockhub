@@ -54,9 +54,18 @@ ensure_ai_net
 # ── GPU ─────────────────────────────────────────────────────────────────
 # Runs on every deploy, not just the first: a user who installs the NVIDIA
 # driver later should be able to rerun this and get GPU acceleration without
-# removing anything. Sets GPU_DOCKER_OK.
+# removing anything. Sets GPU_DOCKER_OK — CAN the GPU be used.
 echo
 gpu_setup
+
+# SHOULD it be used, is a different question, and the answer belongs to the
+# user rather than to the probe. Read before .env is written so a first run
+# can ask; persisted afterwards so a rerun never re-decides it silently.
+# This used to be derived from GPU_DOCKER_OK alone, which meant a working
+# toolkit forced GPU use with no supported way to opt out — the override
+# file is regenerated every run, so editing it by hand didn't survive.
+STORED_ACCEL=$(read_env_value "AI_ACCELERATION" "$INSTALL_DIR/.env")
+gpu_resolve_acceleration "$STORED_ACCEL"
 
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
@@ -79,6 +88,7 @@ else
     cat > "$INSTALL_DIR/.env" <<EOF
 OLLAMA_VERSION=latest
 OLLAMA_KEEP_ALIVE=5m
+AI_ACCELERATION=$AI_ACCELERATION
 EOF
     [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT" >> "$INSTALL_DIR/.env"
     [[ -n "$HOST_PORT" ]] && echo "HOST_PORT=$HOST_PORT" >> "$INSTALL_DIR/.env"
@@ -93,6 +103,10 @@ else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 fi
 
+# Appends on a deployment made before this setting existed, replaces on any
+# other. Without this an older .env would be re-prompted on every single run.
+set_env_value "AI_ACCELERATION" "$AI_ACCELERATION" "$INSTALL_DIR/.env"
+
 ENV_MEM_LIMIT=$(read_env_value "MEM_LIMIT" "$INSTALL_DIR/.env")
 ENV_HOST_PORT=$(read_env_value "HOST_PORT" "$INSTALL_DIR/.env")
 
@@ -104,10 +118,10 @@ OVERRIDE_BODY=$(
         echo "    ports:"
         echo "      - \"$ENV_HOST_PORT:11434\""
     fi
-    if (( GPU_DOCKER_OK )); then
-        # Written only after a test container proved the GPU is actually
-        # reachable. Compose's device reservation is the modern equivalent
-        # of `docker run --gpus all`.
+    if (( GPU_ENABLED )); then
+        # GPU_ENABLED, not GPU_DOCKER_OK: written only when a test container
+        # proved the GPU is reachable AND the user chose to use it. Compose's
+        # device reservation is the modern equivalent of `docker run --gpus all`.
         echo "    deploy:"
         echo "      resources:"
         echo "        reservations:"
@@ -127,7 +141,7 @@ fi
 
 [[ -n "$ENV_MEM_LIMIT" ]] && print_info "Memory limit $ENV_MEM_LIMIT applied to the 'ollama' container."
 [[ -n "$ENV_HOST_PORT" ]] && print_info "Host port $ENV_HOST_PORT published — remember there is no authentication behind it."
-(( GPU_DOCKER_OK )) && print_info "GPU acceleration enabled in the compose override."
+(( GPU_ENABLED )) && print_info "GPU acceleration enabled in the compose override."
 
 print_info "Starting Ollama..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
@@ -135,15 +149,18 @@ print_info "Starting Ollama..."
 
 # ── Self-test ───────────────────────────────────────────────────────────
 # "Container started" is not "the API answers".
+#
+# Uses the shared helper rather than a bare retry loop. `docker exec` fails
+# identically whether the container is still starting or already dead, so a
+# plain loop reports "the API did not answer" for a crash — the exact failure
+# that cost twenty minutes on llama.cpp before the helper existed. This one
+# checks the container's state each round and prints its logs when it stops.
 print_info "Waiting for the API to answer..."
-API_OK=0
-for _ in $(seq 1 20); do
-    if docker exec ollama ollama list >/dev/null 2>&1; then
-        API_OK=1
-        break
-    fi
-    sleep 2
-done
+set +e
+wait_for_container_ready "ollama" "ollama list" 20 2
+API_RC=$?
+set -e
+API_OK=$(( API_RC == 0 ? 1 : 0 ))
 
 # ── First model ─────────────────────────────────────────────────────────
 # Without this the realistic path is: deploy Ollama ✅, deploy a chat UI ✅,
@@ -199,13 +216,26 @@ if [[ -n "$ENV_HOST_PORT" ]]; then
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🔌 API (host):      http://$SERVER_IP:$ENV_HOST_PORT   ⚠️ no authentication"
 fi
-echo "🖥️  Acceleration:    $( (( GPU_DOCKER_OK )) && echo "GPU ✅" || echo "CPU only" )"
+# "CPU only" reads as a failure when it was a decision, so the two cases are
+# spelled differently.
+if (( GPU_ENABLED )); then
+    ACCEL_LINE="GPU ✅"
+elif (( GPU_DOCKER_OK )); then
+    ACCEL_LINE="CPU only — by choice (AI_ACCELERATION=cpu in .env)"
+else
+    ACCEL_LINE="CPU only — no usable GPU on this host"
+fi
+echo "🖥️  Acceleration:    $ACCEL_LINE"
 echo "📦 Models:          $MODEL_COUNT installed"
 echo "📜 Log:             $LOGFILE"
 echo "──────────────────────────────────────────────"
 echo
 if (( API_OK )); then
     print_info "Self-test passed — the API answered."
+elif (( API_RC == 1 )); then
+    # The helper already printed the container's own logs above; repeating
+    # "check the logs" underneath them would be noise.
+    print_warn "Ollama stopped instead of starting. Its output is shown above."
 else
     print_warn "The API did not answer within 40 seconds. Check:"
     print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD logs -f ollama"

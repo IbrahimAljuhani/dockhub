@@ -40,4 +40,34 @@ This is one of three categories that split what people loosely call "AI", along 
 
 ---
 
+## 🖥️ GPU or CPU — you decide, not the detector
+
+Every provider writes **`AI_ACCELERATION`** into its `~/docker/<service>/.env`, holding `gpu` or `cpu`. It is asked once, on the first run, and honoured on every run after.
+
+The distinction it draws is the one most setup scripts miss:
+
+| Question | Answered by | Where |
+|---|---|---|
+| **Can** containers use a GPU on this host? | Detection — a real test container | `GPU_DOCKER_OK` |
+| **Should** this deployment use it? | You | `AI_ACCELERATION` in `.env` |
+
+A working GPU used to imply the second answer automatically, with no supported way to decline. There are good reasons to decline:
+
+- **The GPU is already spoken for.** DockHub ships [Jellyfin](../Media/jellyfin/) and [Plex](../Media/plex/), and both use it for hardware transcoding. A model that seizes the card breaks the media server the household actually notices.
+- **The model is larger than the VRAM.** 6 GB cannot hold a 14B model; 32 GB of system RAM can, slowly. Here the CPU *works* and the GPU *fails*.
+- **Isolating a fault.** "Is this CUDA's doing?" is answered fastest by one CPU run.
+- **Heat, fan noise and power draw** on a machine that runs overnight.
+
+To change your mind later, edit that one line and rerun `deploy.sh`:
+
+```bash
+AI_ACCELERATION=cpu
+```
+
+Each provider then adjusts whatever it needs to. llama.cpp and LocalAI also swap their image — `server` has no CUDA compiled in at all, so for them the tag *is* the hardware decision, and `deploy.sh` keeps it in step so you never have to edit two things.
+
+> ⚠️ Switching LocalAI between GPU and CPU means a different set of backends. They're built per hardware target, so the ones already downloaded don't carry over — expect it to fetch again. `deploy.sh` warns before it happens.
+
+---
+
 ← Back to [all services](../README.md)

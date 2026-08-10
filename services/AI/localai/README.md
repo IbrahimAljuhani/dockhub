@@ -47,7 +47,9 @@ bash deploy.sh
 
 Because the names match OpenAI's, code written against the OpenAI API works against your server with only the base URL changed.
 
-**Empty** gives you a bare server and you configure each model yourself. A reasonable choice — but it leaves LocalAI doing roughly what Ollama does, with more effort.
+**Empty** gives you a bare server and you configure each model yourself. A reasonable choice — but it leaves LocalAI doing roughly what Ollama does, with more effort, and it answers nothing at all until you install something.
+
+> 💡 **LocalAI serves its own web interface on the same port.** If you published a host port, open `http://<server-ip>:<port>` and use the **Models** tab to browse the gallery and install with a click — no CLI needed. This is the easy path out of an empty deployment.
 
 > ⚠️ **AIO downloads its model set on first start, not at image pull.** The container is "running" long before it's usable, and on the GPU profile that's tens of gigabytes. `deploy.sh` waits on LocalAI's own `/readyz` and prints progress, so you can tell downloading from stuck.
 
@@ -64,9 +66,13 @@ LocalAI's tags combine **hardware** and **content**:
 
 `deploy.sh` builds the tag from both halves: the hardware from what [`lib/gpu.sh`](../../../lib/gpu.sh) detected, the content from your answer. Nothing is guessed.
 
-> 💡 **A modest GPU is not a reason to avoid the GPU build.** AIO detects how much VRAM the card actually has and starts with a matching profile — an 8 GB card gets the `gpu-8g` profile, with models sized for it. It adapts to your hardware rather than assuming a large card.
+> 💡 **A modest GPU is not a reason to avoid the GPU build.** AIO detects how much VRAM the card actually has and starts with a matching profile, with models sized for it. It adapts to your hardware rather than assuming a large card.
 >
-> The CPU build is a *fallback* for when GPU loading genuinely fails, not a requirement for smaller cards. If that happens, set `LOCALAI_TAG=latest-aio-cpu` in `.env` and rerun; the failure message says so too.
+> **Verified on a 6 GB RTX 2060:** `latest-aio-gpu-nvidia-cuda-12` deployed and reached `/readyz` in about 25 minutes. AIO picked `Q4_K_M` (4-bit) quantisations for both large models — a 4.4 GB chat model and a 4.7 GB vision model — rather than the `Q8`/`F16` builds it would use on a bigger card. That sizing is the profile mechanism working, not a coincidence.
+>
+> The CPU build is a *fallback* for when GPU loading genuinely fails, not a requirement for smaller cards. If that happens — or if you simply want the card left free for something else — set **`AI_ACCELERATION=cpu`** in `.env` and rerun. `deploy.sh` swaps the hardware half of the tag for you and leaves the All-In-One half alone, so you don't have to work out which of the four tags you need. See the [category README](../README.md#-gpu-or-cpu--you-decide-not-the-detector).
+>
+> ⚠️ Switching direction means a different set of backends: LocalAI builds them per hardware target, so what's already downloaded doesn't carry over. `deploy.sh` says so before it starts.
 >
 > Don't confuse the two limits: **disk** decides whether the model set can be downloaded (tens of GB for the GPU profile), **VRAM** decides how large a single model can be once loaded. They're unrelated, and only the second is about your card.
 
@@ -92,6 +98,7 @@ cd ~/docker/localai
 
 | Command | Purpose |
 |---|---|
+| Open `http://<server-ip>:8082` | LocalAI's own UI — browse and install models from the gallery |
 | `docker compose logs -f localai` | Follow downloads and inference |
 | `curl http://localhost:8082/v1/models` | What's actually loaded (if you published a host port) |
 | `docker exec localai local-ai models list` | Everything available in the gallery |

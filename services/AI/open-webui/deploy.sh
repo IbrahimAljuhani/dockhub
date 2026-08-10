@@ -28,13 +28,17 @@ INSTALL_DIR="$HOME/docker/open-webui"
 LOGFILE="$INSTALL_DIR/deploy.log"
 SECRETS_FILE="$INSTALL_DIR/.open-webui-docker-secrets.txt"
 
-LIB_COMMON="$SOURCE_DIR/../../../lib/common.sh"
-if [[ ! -f "$LIB_COMMON" ]]; then
-    LIB_COMMON="$(mktemp -d)/common.sh"
-    curl -fsSL -o "$LIB_COMMON" "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/common.sh"
+# Shared helpers — sourced from a git checkout if present, self-fetched
+# otherwise so standalone curl usage still works with no extra steps.
+# gpu.sh is deliberately NOT sourced: this container never loads a model, so
+# it has nothing for a GPU to accelerate.
+LIB_DIR="$SOURCE_DIR/../../../lib"
+if [[ ! -f "$LIB_DIR/common.sh" ]]; then
+    LIB_DIR="$(mktemp -d)"
+    curl -fsSL -o "$LIB_DIR/common.sh" "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/common.sh"
 fi
 # shellcheck source=/dev/null
-source "$LIB_COMMON"
+source "$LIB_DIR/common.sh"
 
 check_prerequisites
 
@@ -72,9 +76,12 @@ if [[ -f "$INSTALL_DIR/.env" ]]; then
                     else
                         NEW_OLLAMA=""; NEW_OPENAI="$AI_PROVIDER_BASE_URL/v1"; NEW_KEY="local"
                     fi
-                    sed -i "s|^OLLAMA_BASE_URL=.*|OLLAMA_BASE_URL=$NEW_OLLAMA|" "$INSTALL_DIR/.env"
-                    sed -i "s|^OPENAI_API_BASE_URL=.*|OPENAI_API_BASE_URL=$NEW_OPENAI|" "$INSTALL_DIR/.env"
-                    sed -i "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$NEW_KEY|" "$INSTALL_DIR/.env"
+                    # set_env_value, not a bare sed: it appends when the key
+                    # is absent. A bare sed silently does nothing on an .env
+                    # that predates a key, and reports success while doing it.
+                    set_env_value "OLLAMA_BASE_URL"     "$NEW_OLLAMA" "$INSTALL_DIR/.env"
+                    set_env_value "OPENAI_API_BASE_URL" "$NEW_OPENAI" "$INSTALL_DIR/.env"
+                    set_env_value "OPENAI_API_KEY"      "$NEW_KEY"    "$INSTALL_DIR/.env"
                     print_info "Switched to $AI_PROVIDER_NAME."
                 fi
             else

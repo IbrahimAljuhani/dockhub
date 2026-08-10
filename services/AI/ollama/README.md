@@ -86,6 +86,22 @@ Browse everything available at [ollama.com/library](https://ollama.com/library).
 
 ---
 
+## 🖥️ GPU or CPU
+
+`deploy.sh` asks once, on the first run, and stores the answer as **`AI_ACCELERATION`** in `~/docker/ollama/.env`:
+
+```bash
+AI_ACCELERATION=cpu    # or: gpu
+```
+
+Every rerun honours it. Detection still runs each time — so installing an NVIDIA driver later and rerunning does enable the GPU — but detecting that the GPU *works* is no longer taken as consent to *use* it.
+
+> ⚠️ **Don't hand-edit `docker-compose.override.yml`.** `deploy.sh` regenerates it from scratch on every run, so deleting the `deploy:` block there lasts exactly until the next rerun. `.env` is the file that persists. This was the only supported way to get CPU on a GPU host before `AI_ACCELERATION` existed — and it didn't work.
+
+Reasons to choose CPU on a machine that has a working GPU are covered in the [category README](../README.md#-gpu-or-cpu--you-decide-not-the-detector); the common one is leaving the card free for [Jellyfin](../../Media/jellyfin/) or [Plex](../../Media/plex/) transcoding.
+
+---
+
 ## 🔌 How other services reach it
 
 ```

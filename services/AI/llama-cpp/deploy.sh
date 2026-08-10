@@ -27,18 +27,18 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/docker/llama-cpp"
 LOGFILE="$INSTALL_DIR/deploy.log"
 
-LIB_COMMON="$SOURCE_DIR/../../../lib/common.sh"
-LIB_GPU="$SOURCE_DIR/../../../lib/gpu.sh"
-if [[ ! -f "$LIB_COMMON" ]]; then
-    _tmp="$(mktemp -d)"
-    LIB_COMMON="$_tmp/common.sh"; LIB_GPU="$_tmp/gpu.sh"
-    curl -fsSL -o "$LIB_COMMON" "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/common.sh"
-    curl -fsSL -o "$LIB_GPU"    "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/gpu.sh"
+# Shared helpers — sourced from a git checkout if present, self-fetched
+# otherwise so standalone curl usage still works with no extra steps.
+LIB_DIR="$SOURCE_DIR/../../../lib"
+if [[ ! -f "$LIB_DIR/common.sh" ]]; then
+    LIB_DIR="$(mktemp -d)"
+    curl -fsSL -o "$LIB_DIR/common.sh" "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/common.sh"
+    curl -fsSL -o "$LIB_DIR/gpu.sh"    "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/gpu.sh"
 fi
 # shellcheck source=/dev/null
-source "$LIB_COMMON"
+source "$LIB_DIR/common.sh"
 # shellcheck source=/dev/null
-source "$LIB_GPU"
+source "$LIB_DIR/gpu.sh"
 
 check_prerequisites
 
@@ -52,8 +52,14 @@ mkdir -p "$INSTALL_DIR"
 ensure_ai_net
 
 # Detects, reports, and offers to install the container toolkit — never
-# installs a driver silently. Sets GPU_DOCKER_OK.
+# installs a driver silently. Sets GPU_DOCKER_OK: CAN the GPU be used.
 gpu_setup
+
+# SHOULD it be, is the user's call, not the probe's. Persisted in .env so a
+# rerun honours it instead of re-deriving it. See lib/gpu.sh for why "the
+# hardware works" is not the same as "use the hardware".
+STORED_ACCEL=$(read_env_value "AI_ACCELERATION" "$INSTALL_DIR/.env")
+gpu_resolve_acceleration "$STORED_ACCEL"
 
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
@@ -114,7 +120,8 @@ else
     prompt_host_port "8081"
 
     cat > "$INSTALL_DIR/.env" <<EOF
-LLAMA_CPP_TAG=$( (( GPU_DOCKER_OK )) && echo "server-cuda" || echo "server" )
+AI_ACCELERATION=$AI_ACCELERATION
+LLAMA_CPP_TAG=$( (( GPU_ENABLED )) && echo "server-cuda" || echo "server" )
 LLAMA_ARG_HF_REPO=$HF_REPO_VALUE
 LLAMA_ARG_N_GPU_LAYERS=
 LLAMA_ARG_N_PARALLEL=1
@@ -131,6 +138,16 @@ if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 fi
+
+# AI_ACCELERATION is the single source of truth, and LLAMA_CPP_TAG follows
+# it — `server` has no CUDA compiled in at all, so the tag IS the hardware
+# decision here. Keeping them in sync on every run is what lets someone flip
+# the .env to `cpu` and get a genuinely CPU-only container next rerun, rather
+# than a CUDA image with the GPU withheld from it.
+set_env_value "AI_ACCELERATION" "$AI_ACCELERATION" "$INSTALL_DIR/.env"
+set_env_value "LLAMA_CPP_TAG" \
+    "$( (( GPU_ENABLED )) && echo "server-cuda" || echo "server" )" \
+    "$INSTALL_DIR/.env"
 
 ENV_MEM_LIMIT=$(read_env_value "MEM_LIMIT" "$INSTALL_DIR/.env")
 ENV_HOST_PORT=$(read_env_value "HOST_PORT" "$INSTALL_DIR/.env")
@@ -183,44 +200,16 @@ print_info "Starting llama.cpp — first run downloads the model, which takes a 
 # /health endpoint, which reports 503 while loading and 200 when serving —
 # exactly the distinction worth waiting on.
 print_info "Waiting for the model to download and load. Progress below."
-READY=0
-DIED=0
-LAST_LINE=""
-for i in $(seq 1 120); do
-    # Checked FIRST, and every round. Without this the loop cannot tell a
-    # slow download from a container that exited seconds after starting —
-    # `docker exec` fails identically in both cases — and a crash caused by
-    # a wrong model name would look like twenty minutes of downloading.
-    state=$(docker inspect -f '{{.State.Status}}' llama-cpp 2>/dev/null || echo missing)
-    if [[ "$state" != "running" ]]; then
-        DIED=1
-        break
-    fi
+# Shared helper — the state-checking and progress-echoing this used to do
+# inline now lives in lib/common.sh, because LocalAI needed exactly the same
+# thing and a second copy is how the two quietly drift apart.
+set +e
+wait_for_container_ready "llama-cpp" "curl -fsS http://localhost:8080/health" 120 10
+WAIT_RC=$?
+set -e
+READY=$(( WAIT_RC == 0 ? 1 : 0 ))
 
-    if docker exec llama-cpp curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
-        READY=1
-        break
-    fi
-
-    # Echo the newest log line every ~30s. A download of several gigabytes
-    # behind a silent prompt is indistinguishable from a hang, and the honest
-    # fix is to show what the container is actually doing.
-    if (( i % 3 == 0 )); then
-        line=$(docker logs --tail 1 llama-cpp 2>&1 | tr -d '\r' | tail -n1)
-        if [[ -n "$line" && "$line" != "$LAST_LINE" ]]; then
-            echo "   … $line"
-            LAST_LINE="$line"
-        fi
-    fi
-    sleep 10
-done
-
-if (( DIED )); then
-    echo
-    print_warn "The container stopped (state: $state). Its last output:"
-    echo "──────────────────────────────────────────────" >&2
-    docker logs --tail 25 llama-cpp 2>&1 | sed 's/^/  /' >&2
-    echo "──────────────────────────────────────────────" >&2
+if (( WAIT_RC == 1 )); then
     # Match the hint to what the log actually says. A fixed "check your model
     # name" message is worse than none when the real cause was a bad env var:
     # it sends you to rebuild a model download that was never the problem.
@@ -259,7 +248,14 @@ if [[ -n "$ENV_HOST_PORT" ]]; then
     echo "🔌 API (host):      http://$SERVER_IP:$ENV_HOST_PORT   ⚠️ no authentication"
 fi
 echo "🧠 Model:           $ENV_HF_REPO"
-echo "🖥️  Build:           $ENV_TAG  ($( [[ "$ENV_TAG" == "server-cuda" ]] && echo "GPU ✅" || echo "CPU only" ))"
+if (( GPU_ENABLED )); then
+    ACCEL_LINE="GPU ✅"
+elif (( GPU_DOCKER_OK )); then
+    ACCEL_LINE="CPU only — by choice (AI_ACCELERATION=cpu in .env)"
+else
+    ACCEL_LINE="CPU only — no usable GPU on this host"
+fi
+echo "🖥️  Build:           $ENV_TAG  ($ACCEL_LINE)"
 echo "📜 Log:             $LOGFILE"
 echo "──────────────────────────────────────────────"
 echo

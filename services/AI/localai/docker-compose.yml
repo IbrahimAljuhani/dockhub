@@ -44,9 +44,10 @@ services:
     restart: unless-stopped
     environment:
       MODELS_PATH: /models
-      # How many CPU threads inference may use. Left to LocalAI's own
-      # default unless you set it — see the note in deploy.sh about empty
-      # environment variables being a parse error rather than a default.
+      # Set explicitly rather than left unset. An empty environment variable
+      # is not an absent one, and this project has already been bitten by
+      # that: an empty LLAMA_ARG_N_GPU_LAYERS put llama.cpp into a restart
+      # loop because it parses the value instead of checking it exists.
       DEBUG: ${LOCALAI_DEBUG:-false}
     volumes:
       # Models live here, including everything AIO downloads on first start.

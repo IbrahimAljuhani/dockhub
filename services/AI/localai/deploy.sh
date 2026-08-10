@@ -26,18 +26,18 @@ SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/docker/localai"
 LOGFILE="$INSTALL_DIR/deploy.log"
 
-LIB_COMMON="$SOURCE_DIR/../../../lib/common.sh"
-LIB_GPU="$SOURCE_DIR/../../../lib/gpu.sh"
-if [[ ! -f "$LIB_COMMON" ]]; then
-    _tmp="$(mktemp -d)"
-    LIB_COMMON="$_tmp/common.sh"; LIB_GPU="$_tmp/gpu.sh"
-    curl -fsSL -o "$LIB_COMMON" "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/common.sh"
-    curl -fsSL -o "$LIB_GPU"    "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/gpu.sh"
+# Shared helpers — sourced from a git checkout if present, self-fetched
+# otherwise so standalone curl usage still works with no extra steps.
+LIB_DIR="$SOURCE_DIR/../../../lib"
+if [[ ! -f "$LIB_DIR/common.sh" ]]; then
+    LIB_DIR="$(mktemp -d)"
+    curl -fsSL -o "$LIB_DIR/common.sh" "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/common.sh"
+    curl -fsSL -o "$LIB_DIR/gpu.sh"    "https://raw.githubusercontent.com/IbrahimAljuhani/dockhub/main/lib/gpu.sh"
 fi
 # shellcheck source=/dev/null
-source "$LIB_COMMON"
+source "$LIB_DIR/common.sh"
 # shellcheck source=/dev/null
-source "$LIB_GPU"
+source "$LIB_DIR/gpu.sh"
 
 check_prerequisites
 
@@ -46,6 +46,11 @@ ensure_single_provider "localai" || exit 0
 mkdir -p "$INSTALL_DIR"
 ensure_ai_net
 gpu_setup
+
+# Whether the GPU CAN be used (gpu_setup) and whether it SHOULD be
+# (gpu_resolve_acceleration) are separate questions — see lib/gpu.sh.
+STORED_ACCEL=$(read_env_value "AI_ACCELERATION" "$INSTALL_DIR/.env")
+gpu_resolve_acceleration "$STORED_ACCEL"
 
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
@@ -66,15 +71,19 @@ else
     # the card's actual VRAM at startup and picks a profile to match — an 8 GB
     # card gets gpu-8g, with models sized for it — so a modest GPU is fine.
     case "$aio_choice" in
-        1) AIO_PART="aio-"; NEED_GB=$( (( GPU_DOCKER_OK )) && echo 40 || echo 25 ) ;;
+        # GPU_ENABLED, not GPU_DOCKER_OK: the figure has to match the image
+        # that will actually be pulled. Someone with a working card who chose
+        # CPU gets the smaller CPU image, and asking them for 40 GB would be
+        # a warning about a download that is never going to happen.
+        1) AIO_PART="aio-"; NEED_GB=$( (( GPU_ENABLED )) && echo 40 || echo 25 ) ;;
         2) AIO_PART="";     NEED_GB=5 ;;
         *) print_error "Invalid choice. Nothing was deployed." ;;
     esac
 
     # The tag is hardware + content. Both halves come from decisions already
-    # made rather than from a guess: gpu_setup detected the first, you chose
-    # the second.
-    if (( GPU_DOCKER_OK )); then
+    # made rather than from a guess: you chose the content, and the hardware
+    # half follows GPU_ENABLED — detected capability AND your consent.
+    if (( GPU_ENABLED )); then
         LOCALAI_TAG_VALUE="latest-${AIO_PART}gpu-nvidia-cuda-12"
     else
         LOCALAI_TAG_VALUE="latest-${AIO_PART}cpu"
@@ -94,6 +103,7 @@ else
     prompt_host_port "8082"
 
     cat > "$INSTALL_DIR/.env" <<EOF
+AI_ACCELERATION=$AI_ACCELERATION
 LOCALAI_TAG=$LOCALAI_TAG_VALUE
 LOCALAI_DEBUG=false
 EOF
@@ -107,6 +117,33 @@ if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
     print_info "Existing docker-compose.yml found at $INSTALL_DIR — keeping it (not overwritten). Delete it yourself first if you want the latest version from this repo."
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
+fi
+
+set_env_value "AI_ACCELERATION" "$AI_ACCELERATION" "$INSTALL_DIR/.env"
+
+# Keep the tag's HARDWARE half in step with AI_ACCELERATION, and leave its
+# CONTENT half alone — the tag encodes two decisions and only one of them is
+# being changed here. The aio part is recovered from the existing tag rather
+# than re-asked, because "All-In-One or empty" was answered on the first run
+# and re-prompting for it would be a different question than the one the
+# user came back to change.
+CUR_TAG=$(read_env_value "LOCALAI_TAG" "$INSTALL_DIR/.env")
+if [[ -n "$CUR_TAG" ]]; then
+    KEEP_AIO=""; [[ "$CUR_TAG" == *aio* ]] && KEEP_AIO="aio-"
+    if (( GPU_ENABLED )); then
+        WANT_TAG="latest-${KEEP_AIO}gpu-nvidia-cuda-12"
+    else
+        WANT_TAG="latest-${KEEP_AIO}cpu"
+    fi
+    if [[ "$WANT_TAG" != "$CUR_TAG" ]]; then
+        print_warn "Switching image: $CUR_TAG → $WANT_TAG"
+        # LocalAI's backends are built per hardware target, so the ones
+        # already in the volume don't carry over. Saying so up front beats
+        # a second unexplained multi-gigabyte download.
+        print_warn "LocalAI downloads its backends per hardware target, so the ones"
+        print_warn "already downloaded do not carry over — expect it to fetch again."
+        set_env_value "LOCALAI_TAG" "$WANT_TAG" "$INSTALL_DIR/.env"
+    fi
 fi
 
 ENV_MEM_LIMIT=$(read_env_value "MEM_LIMIT" "$INSTALL_DIR/.env")
@@ -148,9 +185,22 @@ print_info "Starting LocalAI..."
 
 # /readyz is LocalAI's own readiness endpoint: it stays unready while the AIO
 # model set downloads, which is exactly the distinction worth waiting on.
+#
+# The budget is scaled to what is actually being fetched. A measured AIO GPU
+# run on a fast connection took 25 minutes — five short of the flat 30-minute
+# limit this used to have. A margin that thin means anyone on a slower link
+# sees "not ready" printed over a download that was proceeding perfectly, so
+# AIO gets an hour. The empty build fetches nothing and starts in seconds;
+# giving it the same hour would only make a genuine failure take an hour to
+# report.
+if [[ "$ENV_TAG" == *aio* ]]; then
+    WAIT_ROUNDS=360; WAIT_LABEL="an hour"
+else
+    WAIT_ROUNDS=90;  WAIT_LABEL="15 minutes"
+fi
 print_info "Waiting for LocalAI to be ready. Progress below."
 set +e
-wait_for_container_ready "localai" "curl -fsS http://localhost:8080/readyz" 180 10
+wait_for_container_ready "localai" "curl -fsS http://localhost:8080/readyz" "$WAIT_ROUNDS" 10
 WAIT_RC=$?
 set -e
 
@@ -182,8 +232,8 @@ echo
 if (( WAIT_RC == 0 )); then
     print_info "Self-test passed — LocalAI reports ready."
 else
-    print_warn "Not ready yet after 30 minutes. The AIO model set is large, so this"
-    print_warn "is not necessarily a failure — watch it finish with:"
+    print_warn "Not ready yet after $WAIT_LABEL. The container is still running and its"
+    print_warn "log was moving, so this is not necessarily a failure — watch it with:"
     print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD logs -f localai"
 fi
 echo
@@ -194,9 +244,17 @@ if [[ "$ENV_TAG" == *aio* ]]; then
     echo "   List what's actually loaded:"
     echo "     curl -s http://$SERVER_IP:${ENV_HOST_PORT:-8080}/v1/models"
 else
-    echo "📌 This build ships with NO models. Add them from the gallery:"
+    echo "📌 This build ships with NO models, so it cannot answer anything yet."
+    if [[ -n "$ENV_HOST_PORT" ]]; then
+        echo "   Easiest way to add some — LocalAI has its own web interface:"
+        echo "     http://$SERVER_IP:$ENV_HOST_PORT  →  Models tab  →  Install"
+        echo "   Or from the command line:"
+    else
+        echo "   Add them from the gallery:"
+    fi
     echo "     docker exec localai local-ai models list"
     echo "     docker exec localai local-ai models install <name>"
+    echo "   A small one that suits a 6-8 GB card: llama-3.2-1b-instruct:q4_k_m"
 fi
 echo
 echo "To manage: cd $INSTALL_DIR && $COMPOSE_CMD [ps|logs -f|stop|restart]"

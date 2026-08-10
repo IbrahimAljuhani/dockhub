@@ -48,10 +48,15 @@ services:
       # exactly like a broken network. Same class of trap as Mosquitto's
       # local-only default and WebGoat's standalone-JAR binding.
       OLLAMA_HOST: "0.0.0.0:11434"
-      # How long a model stays resident after its last request. Ollama's
-      # default is 5 minutes; on a machine that also runs other services,
-      # holding several GB of RAM or VRAM idle is worth reclaiming sooner.
-      # Raise it if you use it constantly and dislike the reload pause.
+      # How long a model stays resident after its last request. 5m is
+      # Ollama's own default — repeated here so the knob is visible and
+      # editable in .env rather than buried in upstream's defaults, not
+      # because DockHub disagrees with it.
+      #
+      # Lower it on a machine sharing RAM or VRAM with other services, where
+      # several idle gigabytes are worth reclaiming. Raise it if you use
+      # Ollama constantly and dislike the reload pause on the first request
+      # after a gap.
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
     volumes:
       - ollama-models:/root/.ollama

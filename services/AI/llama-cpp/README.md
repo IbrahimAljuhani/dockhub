@@ -73,7 +73,9 @@ The **image tag is the entire GPU decision**:
 | `server` | CPU build. No CUDA inside — a GPU on the host changes nothing, because the binary can't use it. |
 | `server-cuda` | CUDA build. Required for any acceleration at all. |
 
-`deploy.sh` picks between them from what [`lib/gpu.sh`](../../../lib/gpu.sh) actually detected, and adds the device reservation to the compose override when it chooses the CUDA build.
+`deploy.sh` picks between them from **two** inputs: what [`lib/gpu.sh`](../../../lib/gpu.sh) detected (*can* the GPU be used) and `AI_ACCELERATION` in `.env` (*should* it be). It adds the device reservation to the compose override only when it chooses the CUDA build.
+
+> 💡 **To force CPU on a machine with a working GPU** — to leave the card free for Plex or Jellyfin transcoding, say — set `AI_ACCELERATION=cpu` in `~/docker/llama-cpp/.env` and rerun. Don't edit `LLAMA_CPP_TAG` yourself: `deploy.sh` keeps it in step with `AI_ACCELERATION` on every run, so a hand-edited tag is overwritten. One setting, one source of truth. See the [category README](../README.md#-gpu-or-cpu--you-decide-not-the-detector) for why this is a choice at all.
 
 > 📌 **Two things guides tell you to fix that are already fine.** Both were checked against upstream's own Dockerfile and server docs rather than assumed:
 >
