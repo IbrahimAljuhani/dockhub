@@ -234,33 +234,46 @@ ensure_ai_net() {
 # Every model provider in DockHub, by container name. Used to keep exactly
 # one of them running at a time.
 AI_PROVIDER_CONTAINERS=(ollama llama-cpp localai)
+AI_AGENT_CONTAINERS=(openclaw hermes openhands)
 
-# Providers are alternatives, not companions: they all load models into the
-# same GPU memory, so two at once means either an out-of-memory failure or
-# constant swapping that destroys performance — and the model files are many
-# gigabytes each on disk.
+# Container names this call actually stopped. Callers read it to decide
+# whether a follow-up message applies at all — "your consumers now point at
+# a stopped container" is noise when nothing was stopped.
+SINGLE_GROUP_STOPPED=()
+
+# One-of-a-group enforcement, shared by providers and agents.
 #
-# Deliberately checks whether another provider is RUNNING, not whether it is
-# installed. Contention is a runtime problem: having llama.cpp installed but
-# stopped costs nothing, and someone may reasonably keep LocalAI around for
-# image generation while using Ollama for chat. Same shape as the Vulhub
-# launcher's one-environment-at-a-time rule.
+# Deliberately checks whether another member is RUNNING, not whether it is
+# installed: contention is a runtime problem, and having llama.cpp installed
+# but stopped costs nothing. Same shape as the Vulhub launcher's
+# one-environment-at-a-time rule.
 #
-# $1 = the container name of the provider being deployed (excluded from the
-# check). Offers to stop whatever else is running; returns non-zero only if
-# the user declines.
-ensure_single_provider() {
-    local self="$1" other running=()
-    for other in "${AI_PROVIDER_CONTAINERS[@]}"; do
+# Generic on purpose. Providers and agents both allow only one, but for
+# DIFFERENT reasons, so each caller supplies its own — copying the VRAM
+# wording onto agents would be a false statement in a warning, since agents
+# never load a model at all.
+#
+#   $1    container being deployed (excluded from the check)
+#   $2    what to call the group in the message
+#   $3    why only one, as a newline-separated block
+#   $4..  the group's container names
+#
+# Returns non-zero only if the user declines to stop the others.
+ensure_single_in_group() {
+    local self="$1" label="$2" why="$3"; shift 3
+    local other running=() line
+    SINGLE_GROUP_STOPPED=()
+    for other in "$@"; do
         [[ "$other" == "$self" ]] && continue
         docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$other" && running+=("$other")
     done
     (( ${#running[@]} )) || return 0
 
     echo >&2
-    print_warn "Another model provider is already running: ${running[*]}"
-    print_warn "Providers share the same GPU memory, so running two at once means"
-    print_warn "either an out-of-memory failure or constant model swapping."
+    print_warn "Another $label is already running: ${running[*]}"
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && print_warn "$line"
+    done <<< "$why"
     echo >&2
     local answer
     read -rp "Stop ${running[*]} and continue? (Y/n): " answer
@@ -269,15 +282,45 @@ ensure_single_provider() {
         return 1
     fi
     for other in "${running[@]}"; do
-        docker stop "$other" >/dev/null 2>&1 && print_info "Stopped $other." \
-            || print_warn "Could not stop $other — check 'docker ps'."
+        if docker stop "$other" >/dev/null 2>&1; then
+            print_info "Stopped $other."
+            SINGLE_GROUP_STOPPED+=("$other")
+        else
+            print_warn "Could not stop $other — check 'docker ps'."
+        fi
     done
+    return 0
+}
+
+# Agents are alternatives too, but NOT for the providers' reason: an agent is
+# a consumer and never loads a model, so there is no VRAM contention to cite.
+# You pick one assistant.
+ensure_single_agent() {
+    ensure_single_in_group "$1" "AI agent" \
+"Agents are alternatives, not companions — you pick one assistant.
+Several at once means several memories acting on the same workspace,
+all queueing against the one model provider." \
+        "${AI_AGENT_CONTAINERS[@]}"
+}
+
+# Providers are alternatives for a HARD technical reason: they all load
+# models into the same GPU memory, so two at once means either an
+# out-of-memory failure or constant swapping.
+#
+# $1 = the container name of the provider being deployed (excluded from the
+# check). Returns non-zero only if the user declines to stop the others.
+ensure_single_provider() {
+    ensure_single_in_group "$1" "model provider" \
+"Providers share the same GPU memory, so running two at once means
+either an out-of-memory failure or constant model swapping." \
+        "${AI_PROVIDER_CONTAINERS[@]}" || return 1
+    (( ${#SINGLE_GROUP_STOPPED[@]} )) || return 0
     # Consumers keep their old endpoint in .env, so they now point at a
     # container that isn't running. The visible symptom is an empty model
     # list with nothing explaining it; rerunning a consumer's deploy.sh
     # detects the change and offers to re-point it.
-    print_warn "Anything already using ${running[*]} (Open WebUI, agents) still points"
-    print_warn "at it. Rerun that service's deploy.sh to switch it over."
+    print_warn "Anything already using ${SINGLE_GROUP_STOPPED[*]} (Open WebUI, agents) still"
+    print_warn "points at it. Rerun that service's deploy.sh to switch it over."
     return 0
 }
 
@@ -356,6 +399,101 @@ detect_ai_provider() {
         return 0
     done
     return 0
+}
+
+# ── Where model weights live ────────────────────────────────────────────
+# One directory for every AI service, asked once and remembered in
+# ~/docker/.dockhub-env beside the environment answers.
+#
+# Bind mount rather than named volumes, deliberately. Named volumes are
+# easier (Docker fixes their ownership for you), but they hide the single
+# largest thing this project downloads inside /var/lib/docker/volumes, where
+# you cannot see what is using the space and cannot move it to a bigger disk
+# without relocating all of Docker. Models are 25+ GB for a LocalAI AIO set.
+#
+# What this does NOT buy you: sharing weights between providers. Ollama
+# repacks into a content-addressed blob store (blobs/sha256-… + manifests),
+# and llama.cpp and LocalAI both use GGUF but with different layouts and
+# names. They coexist under one budget; they do not reuse each other's
+# downloads. The win is visibility and relocation, not deduplication.
+AI_MODELS_DIR=""
+resolve_ai_models_dir() {
+    local env_file="$HOME/docker/.dockhub-env" stored answer default
+    default="$HOME/docker/ai-models"
+    mkdir -p "$HOME/docker"
+
+    stored=$(grep -a '^AI_MODELS_DIR=' "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    if [[ -n "$stored" ]]; then
+        AI_MODELS_DIR="$stored"
+        mkdir -p "$AI_MODELS_DIR" 2>/dev/null || true
+        return 0
+    fi
+
+    echo
+    print_info "Where should AI model weights be stored?"
+    print_info "This is the largest thing DockHub downloads — a full LocalAI set"
+    print_info "is 25+ GB. Keeping it in one folder lets you see the space with"
+    print_info "'du -sh', and point it at a second disk instead of moving Docker."
+    print_info "Asked once; every AI service reuses the answer."
+    echo
+    while true; do
+        read -rp "Directory (default: $default): " answer
+        AI_MODELS_DIR="${answer:-$default}"
+        # Absolute only: a relative path resolves against whatever directory
+        # deploy.sh happened to be run from, which is not the same place twice.
+        [[ "$AI_MODELS_DIR" == /* ]] && break
+        echo "Please give an absolute path, starting with '/'." >&2
+    done
+
+    if ! mkdir -p "$AI_MODELS_DIR" 2>/dev/null; then
+        print_error "Could not create $AI_MODELS_DIR. Check the path and permissions."
+    fi
+    [[ -f "$env_file" ]] || : > "$env_file"
+    set_env_value "AI_MODELS_DIR" "$AI_MODELS_DIR" "$env_file"
+    print_info "Saved to $env_file — change it there to relocate future deployments."
+    return 0
+}
+
+# Creates a service's model directory and PROVES the container can write to
+# it. $1 = host directory, $2 = the image that will mount it.
+#
+# This is the price of bind mounts. A named volume is chowned by Docker to
+# whatever the image needs; a host directory is not, so an image running as a
+# non-root user gets permission denied — and it surfaces mid-download, as an
+# error that reads like a network failure rather than a permissions one.
+#
+# Returns non-zero only when the container genuinely cannot write. A probe
+# that could not run at all is reported and passed, because failing a deploy
+# on a broken test is worse than not testing.
+prepare_model_dir() {
+    local dir="$1" image="$2" user rc=0
+    mkdir -p "$dir" || { print_warn "Could not create $dir."; return 1; }
+
+    user=$(docker image inspect --format '{{.Config.User}}' "$image" 2>/dev/null || true)
+    if [[ -n "$user" && "$user" != "root" && "$user" != "0" && "$user" != "0:0" ]]; then
+        # chown from INSIDE the image, so a user NAME resolves against that
+        # image's own /etc/passwd — alpine has never heard of 'node'.
+        docker run --rm --user 0 --entrypoint sh -v "$dir":/d "$image" \
+            -c "chown -R $user /d" >/dev/null 2>&1 \
+            || print_warn "Could not hand $dir to the image's '$user' user."
+    fi
+
+    docker run --rm --entrypoint sh -v "$dir":/d "$image" \
+        -c 'touch /d/.dockhub-write-test && rm -f /d/.dockhub-write-test' >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) return 0 ;;
+        125|126|127)
+            # Docker refused, or there is no shell to run the probe with.
+            print_info "Could not run a write test inside $image — continuing."
+            return 0
+            ;;
+        *)
+            print_warn "$image cannot write to $dir — the bind-mount permission trap."
+            print_warn "Fix the ownership and rerun:"
+            print_warn "  sudo chown -R \$(id -u):\$(id -g) $dir"
+            return 1
+            ;;
+    esac
 }
 
 # Where Docker actually stores volumes and images. NOT $HOME: models live in
