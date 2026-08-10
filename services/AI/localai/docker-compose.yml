@@ -50,12 +50,29 @@ services:
       # loop because it parses the value instead of checking it exists.
       DEBUG: ${LOCALAI_DEBUG:-false}
     volumes:
-      # A HOST DIRECTORY, not a named volume — see resolve_ai_models_dir() in
-      # lib/common.sh. Everything AIO downloads on first start lands here,
-      # 25+ GB on the GPU profile, which is exactly why it belongs somewhere
-      # you can see with 'du' and relocate to a second disk. Without a mount
-      # at all, that download repeats on every recreate.
-      - ${AI_MODELS_PATH:?AI_MODELS_PATH is unset — run deploy.sh, which resolves it}:/models
+      # FOUR paths, not one. Upstream is explicit that /models, /backends,
+      # /configuration and /data must all be persisted, and the container
+      # paths have to be exactly those names.
+      #
+      # Mounting only /models is a trap this project fell into and a live test
+      # caught: after removing and redeploying, LocalAI re-downloaded several
+      # gigabytes of CUDA backends even though 13 GB of models were still on
+      # disk. The models had survived; the BACKENDS had not, because they live
+      # in /backends and that was still inside the container.
+      #
+      # Split by what the data is, which lines up with how it is backed up:
+      #   models + backends → the shared AI models directory. Large,
+      #                       re-downloadable, deliberately skipped by backup.
+      #   configuration + data → the service's own directory. Small, yours,
+      #                       and captured by backup_localai().
+      #
+      # ⚠️ /backends materialises symlinks as real files on filesystems that
+      # cannot create links (some CIFS/SMB mounts), using more space. On a
+      # normal local filesystem this does not apply.
+      - ${AI_MODELS_PATH:?AI_MODELS_PATH is unset — run deploy.sh, which resolves it}/models:/models
+      - ${AI_MODELS_PATH}/backends:/backends
+      - ./configuration:/configuration
+      - ./data:/data
     networks:
       - ai-net
 

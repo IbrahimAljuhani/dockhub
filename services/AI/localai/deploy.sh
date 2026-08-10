@@ -193,9 +193,18 @@ fi
 # Created and PROVEN writable before compose starts. A bind mount the
 # container cannot write to fails later, part-way through a 25 GB download,
 # with an error that reads like a network problem — see prepare_model_dir().
-prepare_model_dir "$ENV_MODELS_PATH" "localai/localai:$ENV_TAG" \
+# All four of LocalAI's persistent paths, created before compose so they
+# exist with the right ownership rather than being created as root by Docker.
+# Only /models and /backends are the big ones; /configuration and /data live
+# with the service so the config-only backup captures them.
+mkdir -p "$ENV_MODELS_PATH/models" "$ENV_MODELS_PATH/backends" \
+         "$INSTALL_DIR/configuration" "$INSTALL_DIR/data"
+prepare_model_dir "$ENV_MODELS_PATH/models"   "localai/localai:$ENV_TAG" \
     || print_error "Fix the permissions above and rerun."
-print_info "Models: $ENV_MODELS_PATH"
+prepare_model_dir "$ENV_MODELS_PATH/backends" "localai/localai:$ENV_TAG" \
+    || print_error "Fix the permissions above and rerun."
+print_info "Models:   $ENV_MODELS_PATH/models"
+print_info "Backends: $ENV_MODELS_PATH/backends  ← keeping these is what makes a redeploy fast"
 
 print_info "Starting LocalAI..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
@@ -248,7 +257,8 @@ echo "────────────────────────�
 echo "🔌 API (internal):  http://localai:8080/v1   ← how other services reach it"
 [[ -n "$ENV_HOST_PORT" ]] && echo "🔌 API (host):      http://$SERVER_IP:$ENV_HOST_PORT   ⚠️ no authentication"
 echo "🖥️  Build:           $ENV_TAG"
-echo "📁 Model files:     $ENV_MODELS_PATH"
+echo "📁 Model files:     $ENV_MODELS_PATH/models"
+echo "🧩 Backends:        $ENV_MODELS_PATH/backends"
 echo "📜 Log:             $LOGFILE"
 echo "──────────────────────────────────────────────"
 echo
