@@ -32,11 +32,36 @@
 # already publishes a `rocm` image tag, so the work is in this file rather
 # than in every service.
 
+# ── CAPABILITY IS NOT CONSENT ───────────────────────────────────────────
+# GPU_DOCKER_OK answers "can containers use the GPU on this machine?".
+# That is a fact about the hardware, and detection settles it.
+#
+# It does NOT answer "should THIS deployment use it?" — a separate question
+# that only the person running the script can answer, and one with real
+# answers other than yes:
+#
+#   - The GPU is already spoken for. DockHub ships Jellyfin and Plex, and
+#     both use it for hardware transcoding. A model that seizes the card
+#     breaks the media server the household actually notices.
+#   - The model is bigger than the VRAM. 6 GB cannot hold a 14B model, but
+#     32 GB of system RAM can — slowly. Here the CPU works and the GPU fails.
+#   - Isolating a fault. "Is this CUDA?" is answered fastest by one CPU run.
+#   - Heat, fan noise and power draw on a machine that runs overnight.
+#
+# Conflating the two meant a working toolkit forced GPU use with no way out.
+# gpu_resolve_acceleration() asks the second question and persists the answer
+# in .env, so a rerun never silently overrides a deliberate choice.
+
 # Set by gpu_detect(). Callers should treat these as read-only.
 GPU_VENDOR=""        # nvidia | amd | none
 GPU_MODEL=""         # human-readable name from lspci
 GPU_DRIVER_OK=0      # layer 2: the host can talk to the GPU
-GPU_DOCKER_OK=0      # layer 3: containers can use the GPU  ← the one that matters
+GPU_DOCKER_OK=0      # layer 3: containers CAN use the GPU
+
+# Set by gpu_resolve_acceleration(). The flag services should actually branch
+# on when writing compose settings.
+AI_ACCELERATION=""   # gpu | cpu — what this deployment is configured to use
+GPU_ENABLED=0        # 1 only when the GPU both works AND was chosen
 
 # ── Layer 1: is there a GPU at all? ─────────────────────────────────────
 _gpu_detect_hardware() {
@@ -247,5 +272,63 @@ gpu_setup() {
             print_info "Skipped. This service will run on the CPU."
         fi
     fi
+    return 0
+}
+
+# ── The second question: SHOULD this deployment use it? ─────────────────
+# Call after gpu_setup(). Sets AI_ACCELERATION (gpu|cpu) and GPU_ENABLED.
+#
+# $1 = the value already stored in this deployment's .env, or empty on a
+#      first run. Callers persist AI_ACCELERATION back with set_env_value(),
+#      which is what makes the choice survive a rerun — the whole point.
+#
+# Deliberately silent when the answer is "gpu" and always loud when it is
+# "cpu": a deployment running slower than the hardware allows should say so
+# on every run, or six months later it reads as a mystery rather than a
+# decision.
+gpu_resolve_acceleration() {
+    local stored="${1:-}" answer
+    AI_ACCELERATION="cpu"
+    GPU_ENABLED=0
+
+    # No usable GPU — there is nothing to decide, so don't ask. Asking
+    # "GPU or CPU?" on a machine with no GPU is how a script teaches people
+    # to stop reading its prompts.
+    if (( ! GPU_DOCKER_OK )); then
+        if [[ "$stored" == "gpu" ]]; then
+            # Worth saying: the deployment asked for the GPU and isn't
+            # getting it. Silence here looks like the setting was honoured.
+            print_warn "This deployment is set to use the GPU, but containers cannot"
+            print_warn "reach one right now — it will run on the CPU. See above for why."
+        fi
+        return 0
+    fi
+
+    case "$stored" in
+        cpu)
+            print_info "Set to CPU only (AI_ACCELERATION=cpu in .env) — the GPU is"
+            print_info "available but deliberately unused. Change that line to 'gpu'"
+            print_info "and rerun to switch."
+            return 0
+            ;;
+        gpu)
+            AI_ACCELERATION="gpu"; GPU_ENABLED=1
+            return 0
+            ;;
+    esac
+
+    # First run on a machine where the GPU genuinely works.
+    echo >&2
+    print_info "The GPU works. Should this service use it?"
+    echo >&2
+    echo "   1) Yes, use the GPU — far faster  ← recommended" >&2
+    echo "   2) No, CPU only — keep the GPU free for something else (Plex or" >&2
+    echo "      Jellyfin transcoding), or run a model too large for its memory" >&2
+    read -rp "Choice (1-2): " answer
+    if [[ "$answer" == "2" ]]; then
+        print_info "CPU only. Saved to .env, so reruns won't quietly turn the GPU back on."
+        return 0
+    fi
+    AI_ACCELERATION="gpu"; GPU_ENABLED=1
     return 0
 }

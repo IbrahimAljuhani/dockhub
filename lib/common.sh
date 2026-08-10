@@ -84,6 +84,29 @@ read_env_value() {
     grep -a "^${key}=" "$file" 2>/dev/null | head -n1 | cut -d= -f2- || true
 }
 
+# The counterpart: write a key into an existing .env, replacing the line if
+# it's there and appending it if it isn't.
+#
+# The appending half is what matters. A deployment created before a setting
+# existed has no line to replace, and a bare `sed s|^KEY=.*|` silently does
+# nothing on that file — the script reports success while the setting never
+# lands. That is how an "existing deployments keep working" upgrade path
+# turns into "existing deployments quietly ignore the new option".
+#
+# $1 = key, $2 = value, $3 = path to the .env file.
+set_env_value() {
+    local key="$1" value="$2" file="$3"
+    [[ -f "$file" ]] || return 0
+    if grep -aq "^${key}=" "$file"; then
+        # '|' as the delimiter: values here are URLs and paths often enough
+        # that '/' would collide. See the Vulhub sed that failed silently on
+        # a '#' in the replacement.
+        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+    else
+        echo "${key}=${value}" >> "$file"
+    fi
+}
+
 # Validates a public domain/hostname. Rejects anything that isn't a plain
 # ASCII hostname — including a scheme, a path, a port, or an invisible
 # non-ASCII character pasted in by accident (a real hazard when typing a
