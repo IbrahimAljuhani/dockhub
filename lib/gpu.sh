@@ -288,13 +288,20 @@ gpu_setup() {
 # decision.
 gpu_resolve_acceleration() {
     local stored="${1:-}" answer
-    AI_ACCELERATION="cpu"
+    # Empty means UNDECIDED, which is not the same as "cpu". See below.
+    AI_ACCELERATION=""
     GPU_ENABLED=0
 
     # No usable GPU — there is nothing to decide, so don't ask. Asking
     # "GPU or CPU?" on a machine with no GPU is how a script teaches people
     # to stop reading its prompts.
     if (( ! GPU_DOCKER_OK )); then
+        # Carry a real answer forward, but do NOT invent one. Recording "cpu"
+        # here would be indistinguishable from a deliberate refusal, and the
+        # next run on a host that has since gained a driver would tell its
+        # owner the GPU is "deliberately unused" — a choice they never made —
+        # and never offer it. Undecided has to stay undecided.
+        AI_ACCELERATION="$stored"
         if [[ "$stored" == "gpu" ]]; then
             # Worth saying: the deployment asked for the GPU and isn't
             # getting it. Silence here looks like the setting was honoured.
@@ -306,6 +313,7 @@ gpu_resolve_acceleration() {
 
     case "$stored" in
         cpu)
+            AI_ACCELERATION="cpu"
             print_info "Set to CPU only (AI_ACCELERATION=cpu in .env) — the GPU is"
             print_info "available but deliberately unused. Change that line to 'gpu'"
             print_info "and rerun to switch."
@@ -325,10 +333,17 @@ gpu_resolve_acceleration() {
     echo "   2) No, CPU only — keep the GPU free for something else (Plex or" >&2
     echo "      Jellyfin transcoding), or run a model too large for its memory" >&2
     read -rp "Choice (1-2): " answer
-    if [[ "$answer" == "2" ]]; then
-        print_info "CPU only. Saved to .env, so reruns won't quietly turn the GPU back on."
-        return 0
-    fi
+    # Words as well as the number. Every other prompt in DockHub is (y/N) or
+    # (Y/n), so answering "n" here is a trained habit — and reading "n" as
+    # "yes, use the GPU" would invert the one setting whose entire purpose is
+    # to respect what was actually asked for.
+    case "${answer,,}" in
+        2|n|no|cpu)
+            AI_ACCELERATION="cpu"
+            print_info "CPU only. Saved to .env, so reruns won't quietly turn the GPU back on."
+            return 0
+            ;;
+    esac
     AI_ACCELERATION="gpu"; GPU_ENABLED=1
     return 0
 }

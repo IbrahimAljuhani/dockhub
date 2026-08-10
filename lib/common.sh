@@ -95,14 +95,27 @@ read_env_value() {
 #
 # $1 = key, $2 = value, $3 = path to the .env file.
 set_env_value() {
-    local key="$1" value="$2" file="$3"
+    local key="$1" value="$2" file="$3" escaped
     [[ -f "$file" ]] || return 0
     if grep -aq "^${key}=" "$file"; then
+        # The replacement text is NOT literal to sed. Three characters have
+        # to be neutralised before it goes in:
+        #   &   expands to the whole matched line
+        #   |   ends the s|||  expression (the delimiter chosen below)
+        #   \   starts an escape
+        # Caught by a test, not by reading: an API base URL of
+        # 'https://h/v1?a=1&b=2' wrote the OLD line into the middle of the
+        # new value. Values reaching here include user-typed URLs and API
+        # keys, so this is not hypothetical.
+        escaped=$(printf '%s' "$value" | sed -e 's/[\\&|]/\\&/g')
         # '|' as the delimiter: values here are URLs and paths often enough
         # that '/' would collide. See the Vulhub sed that failed silently on
         # a '#' in the replacement.
-        sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+        sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
     else
+        # Appending is plain text, so it needs no escaping — and it is why a
+        # .env written before a setting existed gains it instead of silently
+        # ignoring it.
         echo "${key}=${value}" >> "$file"
     fi
 }
@@ -345,13 +358,26 @@ detect_ai_provider() {
     return 0
 }
 
+# Where Docker actually stores volumes and images. NOT $HOME: models live in
+# named volumes under Docker's root directory, and on a host with a separate
+# /home partition those are different filesystems. Checking $HOME there can
+# report 400 GB free while the partition the download lands on has 5 GB —
+# a check that passes and then fails is worse than no check.
+docker_data_dir() {
+    local dir
+    dir=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)
+    [[ -n "$dir" && -d "$dir" ]] && { printf '%s' "$dir"; return 0; }
+    printf '%s' "${HOME}"
+}
+
 # Warns when there isn't room for what's about to be downloaded. Language
 # models are the only thing in DockHub measured in tens of gigabytes, so a
 # generic "enough disk?" check isn't enough — the caller passes what the
-# specific model needs. $1 = GB required, $2 = path to check.
+# specific model needs. $1 = GB required, $2 = path to check (defaults to
+# Docker's storage, which is where a pulled model actually lands).
 # Returns non-zero if short; the caller decides whether that's fatal.
 check_free_disk_gb() {
-    local need="$1" path="${2:-$HOME}" free
+    local need="$1" path="${2:-$(docker_data_dir)}" free
     free=$(df -BG --output=avail "$path" 2>/dev/null | tail -n1 | tr -dc '0-9') || return 0
     [[ -n "$free" ]] || return 0
     if (( free < need )); then
