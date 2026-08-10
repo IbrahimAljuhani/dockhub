@@ -235,19 +235,20 @@ echo "────────────────────────�
 echo
 if (( WAIT_RC == 0 )); then
     print_info "Self-test passed — LocalAI reports ready."
-    # Readiness and completeness are different claims (see the note above).
-    # A truncated .gguf is worse than a missing one: LocalAI finds the file,
-    # tries to parse it, and fails at load time with an error that reads like
-    # a model bug rather than an interrupted download.
+    # Readiness and completeness are different claims: LocalAI starts serving
+    # and finishes the remaining downloads behind you. Observed live — it
+    # reported ready with a file at 62%, and that file was complete and
+    # loading normally after a reboot a minute later. So this is information,
+    # NOT a fault, and deliberately suggests no cleanup: deleting a .partial
+    # would throw away an in-progress download and re-fetch gigabytes.
     PARTIALS=$(docker exec localai sh -c 'ls -1 /models/*.partial 2>/dev/null | wc -l' 2>/dev/null | tr -dc '0-9')
     if [[ -n "${PARTIALS:-}" ]] && (( PARTIALS > 0 )); then
         echo
-        print_warn "But $PARTIALS model file(s) are still half-downloaded (.partial):"
-        docker exec localai sh -c 'ls -1 /models/*.partial 2>/dev/null' | sed 's|.*/|     |' >&2
-        print_warn "Ready means the server is serving, not that every file arrived."
-        print_warn "Give it a few minutes and recheck, or force a clean re-fetch:"
-        print_warn "  docker exec localai sh -c 'rm -f /models/*.partial'"
-        print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD restart localai"
+        print_info "$PARTIALS file(s) are still downloading in the background:"
+        docker exec localai sh -c 'ls -1 /models/*.partial 2>/dev/null' | sed 's|.*/|     |'
+        print_info "That is normal — LocalAI serves while it finishes. Leave it alone;"
+        print_info "don't delete them or restart, or the download starts over. Watch with:"
+        print_info "  cd $INSTALL_DIR && $COMPOSE_CMD logs -f localai"
     fi
 else
     print_warn "Not ready yet after $WAIT_LABEL. The container is still running and its"

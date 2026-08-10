@@ -51,6 +51,11 @@ Because the names match OpenAI's, code written against the OpenAI API works agai
 
 > 💡 **LocalAI serves its own web interface on the same port.** If you published a host port, open `http://<server-ip>:<port>` and use **Install Models** in the left sidebar to browse the gallery and install with a click — no CLI needed. This is the easy path out of an empty deployment.
 >
+> **Two harmless things you will see, verified live on a full AIO GPU deployment:**
+>
+> - `ERROR guessDefaultsFromFile: panic while parsing gguf file` appears on **every** startup and is recovered from. LocalAI probes each file in `/models` to guess its defaults, and the multimodal projector (`*-mmproj-*.gguf`) is not a model file, so the probe fails on it. All models still import and `core/startup process completed!` still follows.
+> - `deploy.sh` reports ready while files are still `.partial`. LocalAI serves and finishes downloading behind you. A run that reported ready with a file at 62% had it complete and loading normally after a reboot a minute later. **Don't delete `.partial` files** — that discards an in-progress download.
+>
 > The bare root URL may answer **404 — Page Not Found** while the sidebar still renders around it. That is a routing quirk, not a broken deployment: the interface is being served, and the sidebar links (or the page's own "Return Home" button) work. Judge the deployment by `curl http://<server-ip>:<port>/readyz`, not by what `/` returns.
 
 > ⚠️ **AIO downloads its model set on first start, not at image pull.** The container is "running" long before it's usable, and on the GPU profile that's tens of gigabytes. `deploy.sh` waits on LocalAI's own `/readyz` and prints progress, so you can tell downloading from stuck.
@@ -102,7 +107,7 @@ cd ~/docker/localai
 |---|---|
 | Open `http://<server-ip>:8082` | LocalAI's own UI — "Install Models" in the sidebar browses the gallery |
 | `curl http://<server-ip>:8082/readyz` | The real health answer, unaffected by UI routing |
-| `docker exec localai sh -c 'ls /models/*.partial'` | Leftover `.partial` files mean a download was cut short |
+| `docker exec localai sh -c 'ls /models/*.partial'` | What is still downloading in the background (normal — don't delete these) |
 | `docker compose logs -f localai` | Follow downloads and inference |
 | `curl http://localhost:8082/v1/models` | What's actually loaded (if you published a host port) |
 | `docker exec localai local-ai models list` | Everything available in the gallery |
