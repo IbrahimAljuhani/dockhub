@@ -515,8 +515,19 @@ docker_data_dir() {
 # Docker's storage, which is where a pulled model actually lands).
 # Returns non-zero if short; the caller decides whether that's fatal.
 check_free_disk_gb() {
-    local need="$1" path="${2:-$(docker_data_dir)}" free
-    free=$(df -BG --output=avail "$path" 2>/dev/null | tail -n1 | tr -dc '0-9') || return 0
+    local need="$1" path="${2:-$(docker_data_dir)}" free probe
+    # df fails on a path that does not exist yet — and the caller's path
+    # usually does NOT, because the whole point is to check before creating
+    # and downloading. Returning "fine" there is the worst possible outcome:
+    # observed live, LocalAI's first deploy printed no disk check at all,
+    # while its second (where the directory survived a removal) printed one.
+    # Walk up to the nearest existing ancestor; it is on the same filesystem.
+    probe="$path"
+    while [[ -n "$probe" && ! -e "$probe" ]]; do
+        probe="${probe%/*}"
+    done
+    [[ -n "$probe" ]] || probe="/"
+    free=$(df -BG --output=avail "$probe" 2>/dev/null | tail -n1 | tr -dc '0-9') || return 0
     [[ -n "$free" ]] || return 0
     if (( free < need )); then
         print_warn "Only ${free} GB free on $path, and this needs about ${need} GB."
