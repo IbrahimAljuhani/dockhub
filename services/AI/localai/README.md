@@ -49,7 +49,9 @@ Because the names match OpenAI's, code written against the OpenAI API works agai
 
 **Empty** gives you a bare server and you configure each model yourself. A reasonable choice — but it leaves LocalAI doing roughly what Ollama does, with more effort, and it answers nothing at all until you install something.
 
-> 💡 **LocalAI serves its own web interface on the same port.** If you published a host port, open `http://<server-ip>:<port>` and use the **Models** tab to browse the gallery and install with a click — no CLI needed. This is the easy path out of an empty deployment.
+> 💡 **LocalAI serves its own web interface on the same port.** If you published a host port, open `http://<server-ip>:<port>` and use **Install Models** in the left sidebar to browse the gallery and install with a click — no CLI needed. This is the easy path out of an empty deployment.
+>
+> The bare root URL may answer **404 — Page Not Found** while the sidebar still renders around it. That is a routing quirk, not a broken deployment: the interface is being served, and the sidebar links (or the page's own "Return Home" button) work. Judge the deployment by `curl http://<server-ip>:<port>/readyz`, not by what `/` returns.
 
 > ⚠️ **AIO downloads its model set on first start, not at image pull.** The container is "running" long before it's usable, and on the GPU profile that's tens of gigabytes. `deploy.sh` waits on LocalAI's own `/readyz` and prints progress, so you can tell downloading from stuck.
 
@@ -98,7 +100,9 @@ cd ~/docker/localai
 
 | Command | Purpose |
 |---|---|
-| Open `http://<server-ip>:8082` | LocalAI's own UI — browse and install models from the gallery |
+| Open `http://<server-ip>:8082` | LocalAI's own UI — "Install Models" in the sidebar browses the gallery |
+| `curl http://<server-ip>:8082/readyz` | The real health answer, unaffected by UI routing |
+| `docker exec localai sh -c 'ls /models/*.partial'` | Leftover `.partial` files mean a download was cut short |
 | `docker compose logs -f localai` | Follow downloads and inference |
 | `curl http://localhost:8082/v1/models` | What's actually loaded (if you published a host port) |
 | `docker exec localai local-ai models list` | Everything available in the gallery |

@@ -183,8 +183,12 @@ print_info "Starting LocalAI..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start LocalAI. Check log: $LOGFILE"
 
-# /readyz is LocalAI's own readiness endpoint: it stays unready while the AIO
-# model set downloads, which is exactly the distinction worth waiting on.
+# /readyz is LocalAI's own readiness endpoint, and far better than "the
+# container is running" — but treat it as "the server is serving", not "every
+# AIO file finished downloading". A live run reported ready roughly half a
+# minute after a model file was still logging as .partial, so the two are not
+# the same claim. The post-deploy check below looks for leftovers rather than
+# trusting readiness to have covered them.
 #
 # The budget is scaled to what is actually being fetched. A measured AIO GPU
 # run on a fast connection took 25 minutes — five short of the flat 30-minute
@@ -231,6 +235,20 @@ echo "────────────────────────�
 echo
 if (( WAIT_RC == 0 )); then
     print_info "Self-test passed — LocalAI reports ready."
+    # Readiness and completeness are different claims (see the note above).
+    # A truncated .gguf is worse than a missing one: LocalAI finds the file,
+    # tries to parse it, and fails at load time with an error that reads like
+    # a model bug rather than an interrupted download.
+    PARTIALS=$(docker exec localai sh -c 'ls -1 /models/*.partial 2>/dev/null | wc -l' 2>/dev/null | tr -dc '0-9')
+    if [[ -n "${PARTIALS:-}" ]] && (( PARTIALS > 0 )); then
+        echo
+        print_warn "But $PARTIALS model file(s) are still half-downloaded (.partial):"
+        docker exec localai sh -c 'ls -1 /models/*.partial 2>/dev/null' | sed 's|.*/|     |' >&2
+        print_warn "Ready means the server is serving, not that every file arrived."
+        print_warn "Give it a few minutes and recheck, or force a clean re-fetch:"
+        print_warn "  docker exec localai sh -c 'rm -f /models/*.partial'"
+        print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD restart localai"
+    fi
 else
     print_warn "Not ready yet after $WAIT_LABEL. The container is still running and its"
     print_warn "log was moving, so this is not necessarily a failure — watch it with:"
@@ -247,7 +265,7 @@ else
     echo "📌 This build ships with NO models, so it cannot answer anything yet."
     if [[ -n "$ENV_HOST_PORT" ]]; then
         echo "   Easiest way to add some — LocalAI has its own web interface:"
-        echo "     http://$SERVER_IP:$ENV_HOST_PORT  →  Models tab  →  Install"
+        echo "     http://$SERVER_IP:$ENV_HOST_PORT  →  'Install Models' in the sidebar"
         echo "   Or from the command line:"
     else
         echo "   Add them from the gallery:"
