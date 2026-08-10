@@ -64,7 +64,11 @@ LocalAI's tags combine **hardware** and **content**:
 
 `deploy.sh` builds the tag from both halves: the hardware from what [`lib/gpu.sh`](../../../lib/gpu.sh) detected, the content from your answer. Nothing is guessed.
 
-> 💡 A small GPU is a real reason to choose the CPU build. If the GPU profile fails to load its models, set `LOCALAI_TAG=latest-aio-cpu` in `.env` and rerun — the failure message says so too.
+> 💡 **A modest GPU is not a reason to avoid the GPU build.** AIO detects how much VRAM the card actually has and starts with a matching profile — an 8 GB card gets the `gpu-8g` profile, with models sized for it. It adapts to your hardware rather than assuming a large card.
+>
+> The CPU build is a *fallback* for when GPU loading genuinely fails, not a requirement for smaller cards. If that happens, set `LOCALAI_TAG=latest-aio-cpu` in `.env` and rerun; the failure message says so too.
+>
+> Don't confuse the two limits: **disk** decides whether the model set can be downloaded (tens of GB for the GPU profile), **VRAM** decides how large a single model can be once loaded. They're unrelated, and only the second is about your card.
 
 ---
 

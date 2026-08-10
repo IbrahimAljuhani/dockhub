@@ -61,6 +61,10 @@ else
     echo "   2) Empty — no models. You add each one yourself afterwards."
     read -rp "Choice (1-2): " aio_choice
 
+    # These are DISK figures, not VRAM. The GPU profile's model set is simply
+    # larger on disk; it says nothing about how big a card you need. AIO reads
+    # the card's actual VRAM at startup and picks a profile to match — an 8 GB
+    # card gets gpu-8g, with models sized for it — so a modest GPU is fine.
     case "$aio_choice" in
         1) AIO_PART="aio-"; NEED_GB=$( (( GPU_DOCKER_OK )) && echo 40 || echo 25 ) ;;
         2) AIO_PART="";     NEED_GB=5 ;;
