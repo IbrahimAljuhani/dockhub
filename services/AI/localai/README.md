@@ -118,7 +118,11 @@ cd ~/docker/localai
 
 ## 💾 Backups
 
-**Not wired up, deliberately.** The one volume holds downloaded models — large, and re-downloadable. Nothing here is yours.
+**Backup saves the configuration and skips the models — on purpose.**
+
+This is the starkest case in DockHub. A full All-In-One GPU deployment is **25+ GB** of backends, GGUF and safetensors. The generic volume backup would gzip all of it into a staging directory and then gzip *that* — a long single-threaded pass needing about double the space free, to preserve files LocalAI re-fetches on its own at first start.
+
+The archive keeps `.env` and the compose files: the AIO-or-empty choice, the GPU/CPU decision, the image tag, the port. Restore, start, and it rebuilds its model set — the same 25 minutes it took the first time, from a 1 KB archive.
 
 ---
 

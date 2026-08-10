@@ -131,7 +131,11 @@ cd ~/docker/llama-cpp
 
 ## 💾 Backups
 
-**Not wired up, deliberately.** The only volume holds downloaded model files: large, and re-downloadable from Hugging Face at any time. Nothing here is yours. The whole configuration is `.env`, which is two lines.
+**Backup saves the configuration and skips the model — on purpose.**
+
+The `llama-cpp-models` volume holds GGUF files re-downloadable from Hugging Face at any time, and gzip cannot compress them meaningfully. Archiving gigabytes to preserve nothing is worse than not archiving.
+
+The archive keeps `.env` instead — and `.env` is what actually matters here, because `LLAMA_ARG_HF_REPO` *is* the model choice. Restore it, start the container, and the same model downloads itself.
 
 ---
 

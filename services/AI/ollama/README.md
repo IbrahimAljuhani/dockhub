@@ -143,9 +143,15 @@ cd ~/docker/ollama
 
 ## 💾 Backups
 
-The generic **Backup** in `services.sh` captures the `ollama_ollama-models` volume, which is every model you've pulled — often tens of gigabytes.
+**Backup saves the configuration and skips the models — on purpose.**
 
-That's usually **not worth backing up**: models are freely re-downloadable, and nothing in them is yours. Backing up `.env` is enough; re-pull the models on a new machine.
+`ollama_ollama-models` holds every model you've pulled, often tens of gigabytes of already-compressed weights. Archiving it would need roughly double that in free space and a long compression pass, to preserve a set of files that `ollama pull` re-fetches for free. None of it is yours.
+
+What the archive *does* contain is the part that can't be re-downloaded: `.env` (model choice, GPU/CPU decision, port, memory limit) and the compose files. Restoring it gives you the same deployment back; the models arrive on the next pull.
+
+```bash
+docker exec -it ollama ollama list      # what you'd need to re-pull
+```
 
 ---
 
