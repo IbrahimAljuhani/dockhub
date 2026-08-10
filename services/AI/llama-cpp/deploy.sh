@@ -140,7 +140,7 @@ pick_llama_model() {
 # than something that can be skipped past. $1 = what to say on refusal.
 confirm_model_disk() {
     (( MODEL_CHANGED )) || return 0
-    check_free_disk_gb "$MODEL_GB" "$HOME" && return 0
+    check_free_disk_gb "$MODEL_GB" && return 0
     local answer
     read -rp "Not much room. Download anyway? (y/N): " answer
     [[ "${answer,,}" == "y" ]] || print_error "$1"
@@ -178,7 +178,13 @@ else
 AI_ACCELERATION=$AI_ACCELERATION
 LLAMA_CPP_TAG=$( (( GPU_ENABLED )) && echo "server-cuda" || echo "server" )
 LLAMA_ARG_HF_REPO=$HF_REPO_VALUE
-LLAMA_ARG_N_GPU_LAYERS=
+# Commented out on purpose — an EMPTY value here is not "use the default",
+# it is a parse error. llama.cpp reads this one with stoi, and an empty
+# string put the container into a restart loop with:
+#   error while handling environment variable "LLAMA_ARG_N_GPU_LAYERS": stoi
+# Absent means auto, which is what you want. Uncomment and give it a NUMBER
+# only to split a model between GPU and CPU, e.g. LLAMA_ARG_N_GPU_LAYERS=20
+#LLAMA_ARG_N_GPU_LAYERS=
 LLAMA_ARG_N_PARALLEL=1
 EOF
     [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT" >> "$INSTALL_DIR/.env"

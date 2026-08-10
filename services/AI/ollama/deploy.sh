@@ -191,7 +191,7 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
     esac
 
     if [[ -n "$OLLAMA_MODEL" ]]; then
-        if ! check_free_disk_gb "$OLLAMA_MODEL_GB" "$HOME"; then
+        if ! check_free_disk_gb "$OLLAMA_MODEL_GB"; then
             read -rp "Not much room. Download anyway? (y/N): " disk_answer
             [[ "${disk_answer,,}" == "y" ]] || OLLAMA_MODEL=""
         fi

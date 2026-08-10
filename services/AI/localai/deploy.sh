@@ -89,7 +89,7 @@ else
         LOCALAI_TAG_VALUE="latest-${AIO_PART}cpu"
     fi
 
-    if ! check_free_disk_gb "$NEED_GB" "$HOME"; then
+    if ! check_free_disk_gb "$NEED_GB"; then
         read -rp "Not much room. Continue anyway? (y/N): " disk_answer
         [[ "${disk_answer,,}" == "y" ]] || print_error "Nothing was deployed."
     fi
