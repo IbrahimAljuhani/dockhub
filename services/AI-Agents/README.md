@@ -98,6 +98,26 @@ So DockHub deliberately **does not** try to automate it. Each `deploy.sh` prints
 
 ---
 
+## ⚠️ A green self-test does not mean a working agent
+
+Both agents here shipped a self-test that passed while the agent could not answer a single message. This is not a flaw in either script — it is a property of the category, and worth naming before you build a third.
+
+| What a deploy self-test can prove | What it cannot |
+|---|---|
+| The container is running | The model is eligible |
+| The web/API surface answers | Credentials for the model provider resolve |
+| The auth token works | The messaging channel is wired to a reachable person |
+| The config file parsed | The agent will actually reply |
+
+Two lived examples:
+
+- **Hermes** passed every check, then returned `agent init failed` to every message — the model's context window was 32,768 against a required 64,000. The gateway was healthy the whole time; the *agent* was not.
+- **Hermes again**, with WhatsApp: paired successfully, bridge connected, gateway running — and messages produced **no log line at all**, because the wizard's mode had been set for a two-number setup on a one-number phone. "Deny unknown senders" is the documented default, so silence was the correct behaviour and looked exactly like a fault.
+
+The habit that follows: **a deploy is not finished until a message has gone in and a reply has come out.** For an agent, that round trip is the only real test, and it is the one no `deploy.sh` can run for you.
+
+---
+
 ## 💾 Backups: the opposite of the providers
 
 Worth stating plainly, because the two categories look similar and are treated in exactly opposite ways.
