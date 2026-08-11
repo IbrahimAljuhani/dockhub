@@ -292,6 +292,43 @@ ensure_single_in_group() {
     return 0
 }
 
+# ── An agent's network posture ──────────────────────────────────────────
+# Open WebUI sits on main-net and that is fine: it displays a conversation
+# and executes nothing. An agent executes. THE ABILITY TO RUN COMMANDS is
+# what changes the posture, and it is the line services/AI-Agents draws.
+#
+# On main-net an agent reaches every other service by container name —
+# including Portainer, which mounts the Docker socket. The chain from "a web
+# page it read said so" to "root on the host" is one step long.
+#
+# So: ai-net always (the provider is all it needs), main-net only when asked
+# for, with the reason named rather than implied. Sets AGENT_ON_MAIN_NET.
+#
+# $1 = service name, used in the messages.
+AGENT_ON_MAIN_NET=0
+prompt_agent_network() {
+    local name="$1" answer
+    AGENT_ON_MAIN_NET=0
+    echo >&2
+    print_info "$name will run on 'ai-net', where it can reach the model provider."
+    print_info "That is all it needs to work."
+    echo >&2
+    print_warn "Joining 'main-net' as well would let NGINX Proxy Manager serve it on"
+    print_warn "a public domain — but it also lets $name reach every other DockHub"
+    print_warn "service by name, including Portainer and its Docker socket."
+    print_warn "An agent acts on text it did not write. Keep that in mind here."
+    echo >&2
+    read -rp "Also join 'main-net', so NPM can serve it on a domain? (y/N): " answer
+    if [[ "${answer,,}" == "y" ]]; then
+        AGENT_ON_MAIN_NET=1
+        ensure_main_net
+        print_warn "On 'main-net'. Give it its own credentials, never your primary ones."
+    else
+        print_info "'ai-net' only. Reach it on a host port from your LAN — no domain."
+    fi
+    return 0
+}
+
 # Agents are alternatives too, but NOT for the providers' reason: an agent is
 # a consumer and never loads a model, so there is no VRAM contention to cite.
 # You pick one assistant.
