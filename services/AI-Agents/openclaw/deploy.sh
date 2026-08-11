@@ -380,7 +380,16 @@ echo "   Paste it into 'Gateway Token' and press Connect. The field is"
 echo "   labelled optional because password auth is the alternative; with"
 echo "   this deployment the token is required."
 echo
-echo "   Then finish onboarding: it asks which model to use."
+echo "   Then CHANGE THE MODEL — the default is a cloud one this image"
+echo "   cannot run, and the first message fails with:"
+echo "       MissingAgentHarnessError: agent harness \"codex\" is not registered"
+echo "   Nothing is broken; pick your provider in the dashboard settings."
+echo
+echo "   ⚠️ Ignore the dashboard's 'Update now' button. In a container it"
+echo "      refuses with 'not-git-install' and tells you to run 'openclaw"
+echo "      update' — do NOT. That advice is for a host install. Update by"
+echo "      pulling the image, which keeps your config:"
+echo "          cd $INSTALL_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d"
 echo
 if [[ -n "$AI_PROVIDER_NAME" ]]; then
     echo "   When it asks for the model endpoint, paste EXACTLY this:"
@@ -391,9 +400,10 @@ if [[ -n "$AI_PROVIDER_NAME" ]]; then
     echo "      That is for Ollama running on the host. Yours is a container"
     echo "      on 'ai-net', so the address above is the correct one."
 else
-    echo "   No model provider is running yet. Deploy one first:"
-    echo "     Ollama is the simplest — services/AI/ollama/"
-    echo "   Or give OpenClaw a cloud API key during onboarding."
+    echo "   ⚠️ No model provider is running, so the agent has nothing to talk"
+    echo "      to. Deploy one first — Ollama is the simplest:"
+    echo "        services/AI/ollama/   (and pull a model when it offers)"
+    echo "      Or give OpenClaw a cloud API key during onboarding."
 fi
 echo
 echo "⚠️  Give it its OWN credentials — a bot token and an API key created"

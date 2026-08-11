@@ -122,6 +122,21 @@ OpenClaw configures its model in an **onboarding wizard**, not from environment 
 >
 > `deploy.sh` prints the right one for whichever provider it finds — llama.cpp and LocalAI use their OpenAI-compatible paths instead.
 
+### The agent cannot answer until you change the model
+
+A fresh install ships pointing at a **cloud** model, and the first message fails. Seen live:
+
+```
+[gateway] agent model: openai/gpt-5.5 (thinking=medium, fast=off)
+[diagnostic] MissingAgentHarnessError:
+             Requested agent harness "codex" is not registered.
+Embedded agent failed before reply
+```
+
+Nothing is broken — the default simply names a harness this image does not carry, and no local provider is selected. **Change the model in the dashboard's settings before expecting a reply.** The gateway loads an `ollama` plugin at startup (visible in its own log line listing the loaded plugins), so a local provider is a first-class option rather than a workaround.
+
+> 💡 Two prerequisites, both easy to miss: a provider must actually be **running** — `deploy.sh` prints `Provider: none running` when it is not, and that line is worth reading — and the model has to be **pulled** into it. A provider with no model produces the same "it does not answer" symptom for a completely different reason.
+
 ---
 
 ## 🖥️ Browser automation
@@ -141,7 +156,9 @@ cd ~/docker/openclaw
 | `curl http://<server-ip>:18789/readyz` | The real health answer — unauthenticated by design |
 | `docker compose logs -f openclaw` | Follow what the agent is doing |
 | `ls workspace/` | Files the agent has created |
-| `docker compose pull && docker compose up -d` | Update |
+| `docker compose pull && docker compose up -d` | **Update — the only correct way here** |
+
+> ⚠️ **Do not use the dashboard's "Update now" button, or `openclaw update`.** The dashboard notices new releases and offers to install them; in a container it correctly refuses with `Update skipped: not-git-install. Run 'openclaw update' from the CLI for a global reinstall.` **Do not follow that advice.** It is written for a host install. Updating inside a running container either fails or produces a container that has drifted from its image — and every trace of it disappears on the next recreate. Pull the new image instead; `./config` is a bind mount, so your token, pairing and settings survive.
 
 ---
 
