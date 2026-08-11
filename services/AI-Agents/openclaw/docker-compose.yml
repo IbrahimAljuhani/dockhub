@@ -47,6 +47,21 @@ services:
     container_name: openclaw
     restart: unless-stopped
     environment:
+      # ── THE GATEWAY REFUSES TO START UNCONFIGURED ───────────────────
+      # A live deploy crash-looped here with:
+      #   Missing config. Run `openclaw setup` or set gateway.mode=local
+      #   (or pass --allow-unconfigured).
+      # which is a chicken-and-egg: onboarding happens in the web UI, and
+      # the gateway will not serve that UI until it has config.
+      #
+      # `gateway.mode=local` is the setting the program itself names, and
+      # this is its environment form for headless/Docker use. Flagged
+      # honestly: the error text is authoritative, but the ENV VAR SPELLING
+      # comes from a third-party write-up — docs.openclaw.ai was
+      # unreachable and the upstream issue has no maintainer reply. If it
+      # turns out to be wrong it is inert, and deploy.sh detects the same
+      # failure and prints the exact alternatives.
+      OPENCLAW_GATEWAY_MODE: ${OPENCLAW_GATEWAY_MODE:-local}
       # Container timezone — schedules and reminders are only useful if the
       # agent agrees with you about what time it is.
       OPENCLAW_TZ: ${OPENCLAW_TZ:-UTC}

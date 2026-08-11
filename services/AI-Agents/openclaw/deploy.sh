@@ -206,6 +206,32 @@ WAIT_RC=$?
 set -e
 
 if (( WAIT_RC == 1 )); then
+    # Match the guidance to what the log actually says. The first live deploy
+    # hit exactly one failure, and a generic "check the logs" would have been
+    # useless when the container had already printed its own remedy.
+    FAILLOG=$(docker logs --tail 30 openclaw 2>&1 || true)
+    case "$FAILLOG" in
+        *"Missing config"*|*"gateway.mode"*)
+            echo
+            print_warn "The gateway refuses to start until it has configuration — and its"
+            print_warn "onboarding lives in the web UI it will not serve yet. That loop is"
+            print_warn "why OPENCLAW_GATEWAY_MODE=local is set in docker-compose.yml."
+            print_warn "Seeing this means that variable did not take. Break it by hand:"
+            echo >&2
+            print_warn "  cd $INSTALL_DIR"
+            print_warn "  $COMPOSE_CMD run --rm --entrypoint openclaw openclaw \\"
+            print_warn "      config set gateway.mode local"
+            print_warn "  $COMPOSE_CMD up -d"
+            echo >&2
+            print_warn "Then rerun this script. If the CLI name differs in your image,"
+            print_warn "the container's own message names the two other ways out:"
+            print_warn "  'openclaw setup', or the --allow-unconfigured flag."
+            ;;
+        *"permission denied"*|*"EACCES"*)
+            print_warn "A permissions problem on $INSTALL_DIR/config or /auth."
+            print_warn "Those are created mode 700 for your user; check ownership."
+            ;;
+    esac
     print_error "OpenClaw did not start. Full log: cd $INSTALL_DIR && $COMPOSE_CMD logs openclaw"
 fi
 
