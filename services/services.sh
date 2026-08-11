@@ -70,6 +70,13 @@ declare -A SERVICE_FILES=(
     # produced, not downloaded, and irreplaceable. The generic volume backup
     # is exactly right for them.
     [openclaw]="docker-compose.yml"
+    # No backup.sh for either agent, and deliberately: unlike the AI
+    # providers, an agent's volume is not re-downloadable weights. It is
+    # conversation history, accumulated memories, self-written skills and
+    # the personality file. The generic backup is exactly right for that —
+    # and both agents use bind mounts inside the install directory, so it
+    # captures them as part of the tree rather than via the volume loop.
+    [hermes]="docker-compose.yml"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
