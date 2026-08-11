@@ -46,6 +46,16 @@ services:
     image: ghcr.io/openclaw/openclaw:${OPENCLAW_TAG:-latest}
     container_name: openclaw
     restart: unless-stopped
+    # /readyz is unauthenticated by design, so `docker ps` can show real
+    # health rather than just "Up". start_period is generous because the
+    # gateway loads plugins before it answers — on the browser variant that
+    # is a lot of image to page in.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:18789/readyz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     environment:
       # ── TWO GATES, IN ORDER. BOTH FOUND BY RUNNING IT. ──────────────
       #

@@ -181,6 +181,24 @@ ENV_TAG=$(read_env_value "OPENCLAW_TAG" "$INSTALL_DIR/.env")
 mkdir -p "$INSTALL_DIR/config" "$INSTALL_DIR/workspace" "$INSTALL_DIR/auth"
 chmod 700 "$INSTALL_DIR/config" "$INSTALL_DIR/auth"
 
+# These are bind mounts, not named volumes, so Docker does NOT fix up their
+# ownership — the container writes as whatever uid it runs as. OpenClaw's
+# image mounts under /home/node, i.e. the `node` user, which is uid 1000 in
+# Node images. On a normal single-user Ubuntu host the first login account is
+# also 1000, so the two coincide and mode 700 still lets the container write.
+# That coincidence is doing real work, and it is worth saying out loud rather
+# than discovering it as an unexplained permission error on a host where the
+# deploying account is not 1000.
+DEPLOY_UID=$(id -u)
+if (( DEPLOY_UID != 1000 )); then
+    print_warn "Your user id is $DEPLOY_UID, not 1000. OpenClaw's container runs as"
+    print_warn "'node' (uid 1000) and writes into config/ and auth/, which are mode"
+    print_warn "700 and owned by you — so it may not be able to write at all."
+    print_warn "If the gateway fails with EACCES or a permissions error, widen them:"
+    print_warn "  chmod 770 $INSTALL_DIR/config $INSTALL_DIR/auth"
+    print_warn "  sudo chgrp 1000 $INSTALL_DIR/config $INSTALL_DIR/auth"
+fi
+
 # docker-compose.override.yml is fully owned by this script (never hand-edit
 # it), so it is always safe to regenerate from what .env says.
 OVERRIDE_BODY=$(
@@ -272,10 +290,23 @@ fi
 # serving the dashboard over HTTPS has to append their own origin, which the
 # README spells out.
 
-print_info "Pinning the Control UI origin allow-list..."
-(cd "$INSTALL_DIR" && $COMPOSE_CMD run --rm --entrypoint openclaw openclaw \
-    config set gateway.controlUi.allowedOrigins "$UI_ORIGINS" 2>&1 | tee -a "$LOGFILE") \
-    || print_warn "Could not write allowedOrigins. If the dashboard later says 'origin not allowed', set it by hand — see the README."
+# Written ONLY when the config has none — unlike gateway.mode, which is a
+# fixed value and safe to reassert every run. This list is something users
+# are told to customise: serving the dashboard over HTTPS means adding your
+# own domain, and the README says so. Rewriting it on every rerun would
+# silently revert that the next time anyone changed a memory limit, and the
+# symptom would be `origin not allowed` — the failure that took four rounds
+# to diagnose the first time.
+OPENCLAW_CONFIG_JSON="$INSTALL_DIR/config/openclaw.json"
+if [[ -f "$OPENCLAW_CONFIG_JSON" ]] && grep -q 'allowedOrigins' "$OPENCLAW_CONFIG_JSON"; then
+    print_info "Control UI origin allow-list already configured — left untouched."
+    print_info "  (see it with: grep -A4 allowedOrigins $OPENCLAW_CONFIG_JSON)"
+else
+    print_info "Pinning the Control UI origin allow-list..."
+    (cd "$INSTALL_DIR" && $COMPOSE_CMD run --rm --entrypoint openclaw openclaw \
+        config set gateway.controlUi.allowedOrigins "$UI_ORIGINS" 2>&1 | tee -a "$LOGFILE") \
+        || print_warn "Could not write allowedOrigins. If the dashboard later says 'origin not allowed', set it by hand — see the README."
+fi
 
 print_info "Starting OpenClaw..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
@@ -441,21 +472,16 @@ echo "      update' — do NOT. That advice is for a host install. Update by"
 echo "      pulling the image, which keeps your config:"
 echo "          cd $INSTALL_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d"
 echo
-if [[ -n "$AI_PROVIDER_NAME" ]]; then
-    echo "   When it asks for the model endpoint, paste EXACTLY this:"
-    echo
-    echo "       $AI_PROVIDER_BASE_URL"
-    echo
-    echo "   ⚠️ OpenClaw's own docs say 'http://host.docker.internal:11434'."
-    echo "      That is for Ollama running on the host. Yours is a container"
-    echo "      on 'ai-net', so the address above is the correct one."
-else
+# The endpoint is already printed in the wizard walkthrough above; repeating
+# it here — after the update warning, no less — was leftover from before that
+# section existed. Only the no-provider case still needs saying.
+if [[ -z "$AI_PROVIDER_NAME" ]]; then
     echo "   ⚠️ No model provider is running, so the agent has nothing to talk"
     echo "      to. Deploy one first — Ollama is the simplest:"
     echo "        services/AI/ollama/   (and pull a model when it offers)"
     echo "      Or give OpenClaw a cloud API key during onboarding."
+    echo
 fi
-echo
 echo "⚠️  Give it its OWN credentials — a bot token and an API key created"
 echo "   for this agent. An agent with your primary key can spend it."
 echo
