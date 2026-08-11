@@ -64,6 +64,12 @@ declare -A SERVICE_FILES=(
     [open-webui]="docker-compose.yml"
     [llama-cpp]="docker-compose.yml backup.sh"
     [localai]="docker-compose.yml backup.sh"
+    # AI-Agents: NO backup.sh, and that is the deliberate opposite of the
+    # providers above. A provider's volume is downloaded weights; an agent's
+    # holds memories, learned skills, conversations and workspace files —
+    # produced, not downloaded, and irreplaceable. The generic volume backup
+    # is exactly right for them.
+    [openclaw]="docker-compose.yml"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
