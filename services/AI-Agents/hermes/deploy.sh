@@ -532,7 +532,26 @@ fi
 
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
-CONFIGURED_MODEL=$(grep -E '^\s*model:' "$CONFIG_YAML" 2>/dev/null | tail -1 | sed 's/.*model:[[:space:]]*//' || true)
+# ── Reading the model back is not as simple as it looks ────────────────
+# deploy.sh writes `model: <name>` on first run, which upstream accepts —
+# and then REWRITES the file in its own shape, where the name lives under
+# `default:` and `model:` is a bare section header:
+#
+#   model:
+#     provider: custom
+#     base_url: http://ollama:11434/v1
+#     default: gemma4:e4b        <-- the name is here
+#   _config_version: 34
+#
+# Grepping `model:` against that returns the header and an empty value, so
+# a rerun would report "none configured" for a perfectly working agent.
+# Try the canonical key first, then the one we write.
+CONFIGURED_MODEL=$(grep -E '^[[:space:]]*default:[[:space:]]*[^[:space:]]' "$CONFIG_YAML" 2>/dev/null \
+    | tail -1 | sed 's/.*default:[[:space:]]*//' | tr -d '"' || true)
+if [[ -z "$CONFIGURED_MODEL" ]]; then
+    CONFIGURED_MODEL=$(grep -E '^[[:space:]]*model:[[:space:]]*[^[:space:]]' "$CONFIG_YAML" 2>/dev/null \
+        | tail -1 | sed 's/.*model:[[:space:]]*//' | tr -d '"' || true)
+fi
 
 echo
 echo "──────────────────────────────────────────────"
