@@ -397,92 +397,160 @@ else
     print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD logs -f openclaw"
 fi
 
+# ── The long-form guidance goes to a FILE, not the terminal ─────────────
+# OpenClaw needed five separate discoveries to reach a working agent, and
+# each one added a paragraph here until the deploy ended in ~60 lines of
+# instructions nobody reads to the bottom of. Same fix the rest of DockHub
+# already uses for NPM snippets: generate the detail next to the deployment
+# and print a short pointer. The terminal gets what you do NEXT; the file
+# keeps why, and what to ignore.
+NEXT_STEPS="$INSTALL_DIR/NEXT-STEPS.txt"
+TUNNEL_PORT="${ENV_HOST_PORT:-18789}"
+PROVIDER_URL_HINT="${AI_PROVIDER_BASE_URL:-http://ollama:11434}"
+
+cat > "$NEXT_STEPS" <<EOF
+OpenClaw — getting to a working agent
+Generated $(date '+%F %T') by deploy.sh
+
+Three things stand between a running gateway and an agent that answers.
+None of them are faults; each is a deliberate choice by OpenClaw that a
+containerised deployment meets differently from a laptop install.
+
+
+1. THE DASHBOARD WILL NOT OPEN OVER PLAIN HTTP
+------------------------------------------------------------------
+The control UI derives a device identity with Web Crypto, and browsers
+only expose that API in a "secure context": HTTPS, or localhost. Browsing
+to this server's IP over http:// fails however correct your token is:
+
+    control ui requires device identity
+    (use HTTPS or localhost secure context)
+
+A browser rule, not an OpenClaw bug. This is the one place DockHub's usual
+"publish a port and browse to it" does not work.
+
+  Option A — SSH tunnel. Nothing to configure, and it also satisfies the
+  origin allow-list, which contains localhost only:
+
+      ssh -L $TUNNEL_PORT:localhost:$TUNNEL_PORT $(whoami)@$SERVER_IP
+
+  Leave it open, then browse to  http://localhost:$TUNNEL_PORT
+
+  Option B — HTTPS through NGINX Proxy Manager. Needs 'main-net', so
+  redeploy and answer yes to that question. Your domain then has to be
+  added to the allow-list, which localhost-only does not cover:
+
+      cd $INSTALL_DIR
+      $COMPOSE_CMD run --rm --entrypoint openclaw openclaw config set gateway.controlUi.allowedOrigins '["https://your.domain"]'
+
+  deploy.sh writes that list only when it is absent, so a customised one
+  survives future reruns.
+
+
+2. THE TOKEN
+------------------------------------------------------------------
+    cat $SECRETS_FILE
+
+Paste it into "Gateway Token" and press Connect. The field is labelled
+optional because password auth is the alternative; here the token is
+required — the gateway refuses to listen on 0.0.0.0 without credentials,
+which is why deploy.sh generates one rather than leaving it to onboarding.
+
+Leave the password field EMPTY. A stray value there produces
+"token_mismatch" even when the token itself is right.
+
+
+3. GIVE IT A MODEL
+------------------------------------------------------------------
+A fresh install points at a cloud model with no key, so the first message
+fails with:
+
+    MissingAgentHarnessError: agent harness "codex" is not registered
+
+"codex" is OpenAI's runtime. The error means no auth — not a missing
+install. Fix it with the wizard:
+
+    cd $INSTALL_DIR
+    $COMPOSE_CMD run --rm -it --entrypoint openclaw openclaw configure
+
+  Answer: Model -> More... -> Ollama -> Ollama -> Local only
+
+  >>> At "Ollama base URL" it offers http://127.0.0.1:11434. WRONG HERE:
+  >>> inside this container that address is OpenClaw itself. Use:
+  >>>
+  >>>     $PROVIDER_URL_HINT
+  >>>
+  >>> Upstream's docs make the same mistake in a different form and say
+  >>> host.docker.internal. Both assume Ollama runs on the host; in
+  >>> DockHub it is a container on 'ai-net', reached by name.
+
+Then pick models — only ones you have actually pulled. Check with:
+
+    docker exec ollama ollama list
+
+The wizard configures the provider but does NOT set the default model, so
+finish the job and restart:
+
+    $COMPOSE_CMD run --rm --entrypoint openclaw openclaw models set ollama/<model>
+    $COMPOSE_CMD restart openclaw
+
+Confirm — the startup line should name your model, not openai/gpt-5.5:
+
+    $COMPOSE_CMD logs --tail 20 openclaw | grep "agent model"
+
+
+WHAT TO IGNORE
+------------------------------------------------------------------
+* The dashboard's "Update now" button. In a container it refuses with
+  "not-git-install" and suggests 'openclaw update'. DO NOT run that — it
+  is advice for a host install, and an in-container update either fails or
+  drifts from the image and vanishes on the next recreate. Update with:
+
+      cd $INSTALL_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d
+
+  Your config is a bind mount, so token, pairing and settings survive.
+
+* "Realtime voice provider openai is not configured" — the Talk feature
+  wants an OpenAI key. Unrelated to chat.
+
+
+WORTH KNOWING
+------------------------------------------------------------------
+* 'configure' is not just for models. Channels, credentials, skills and
+  gateway settings all live there. It is the main tool for this service.
+* Give the agent its OWN credentials — a bot token and an API key created
+  for it. An agent holding your primary key can spend it.
+EOF
+# 644, not 600: this is documentation, and it holds no secret — only the
+# path to the file that does. Locking it down would just make it unreadable
+# to a second admin on the same box for no gain.
+chmod 644 "$NEXT_STEPS"
+
 echo
-echo "📌 NEXT — ⚠️ READ THIS BEFORE OPENING THE DASHBOARD."
+echo "📌 THREE STEPS to a working agent — detail in NEXT-STEPS.txt:"
 echo
-echo "   The control UI needs a BROWSER SECURE CONTEXT. It builds a device"
-echo "   identity with Web Crypto, and browsers only expose that over HTTPS"
-echo "   or on localhost. Browsing to this server's IP over plain http://"
-echo "   fails no matter how correct your token is — the log says:"
-echo "       control ui requires device identity"
-echo "       (use HTTPS or localhost secure context)"
+echo "   1. Tunnel. The dashboard needs HTTPS or localhost, so the"
+echo "      server's IP over http:// will NOT work:"
+echo "        ssh -L $TUNNEL_PORT:localhost:$TUNNEL_PORT $(whoami)@$SERVER_IP"
+echo "      then open  http://localhost:$TUNNEL_PORT"
 echo
-echo "   This is a browser rule, not an OpenClaw fault, and it is the one"
-echo "   place where DockHub's usual 'publish a port and browse to it' does"
-echo "   NOT work. Two ways round it:"
+echo "   2. Paste the token into 'Gateway Token' (leave password empty):"
+echo "        cat $SECRETS_FILE"
 echo
-echo "   1) SSH tunnel — works now, nothing to configure:"
-echo
-if [[ -n "$ENV_HOST_PORT" ]]; then
-    echo "          ssh -L $ENV_HOST_PORT:localhost:$ENV_HOST_PORT $(whoami)@$SERVER_IP"
-    echo "          then open  http://localhost:$ENV_HOST_PORT"
-else
-    echo "          ssh -L 18789:localhost:18789 $(whoami)@$SERVER_IP"
-    echo "          (no host port published, so the tunnel is the only route)"
-fi
-echo
-echo "      This also satisfies the origin allow-list, which the gateway"
-echo "      seeds with localhost only."
-echo
-echo "   2) HTTPS through NGINX Proxy Manager — needs 'main-net' and a"
-echo "      domain, so rerun and answer yes to the main-net question. Then"
-echo "      add your domain to the allow-list, which localhost-only misses:"
-echo "          cd $INSTALL_DIR && $COMPOSE_CMD run --rm --entrypoint openclaw \\"
-echo "              openclaw config set gateway.controlUi.allowedOrigins \\"
-echo "              '[\"https://your.domain\"]'"
-echo
-echo "   Once the page connects, get the token with:"
-echo
-echo "       cat $SECRETS_FILE"
-echo
-echo "   Paste it into 'Gateway Token' and press Connect. The field is"
-echo "   labelled optional because password auth is the alternative; with"
-echo "   this deployment the token is required."
-echo
-echo "   Then GIVE IT A MODEL. The default is a cloud one with no key, so"
-echo "   the first message fails with:"
-echo "       MissingAgentHarnessError: agent harness \"codex\" is not registered"
-echo "   ('codex' is OpenAI's runtime — the error means no auth, not a bug.)"
-echo
-echo "   Run the wizard and answer Model -> More... -> Ollama -> Local only:"
-echo "       cd $INSTALL_DIR && $COMPOSE_CMD run --rm -it \\"
-echo "           --entrypoint openclaw openclaw configure"
-echo
-echo "   🔴 At 'Ollama base URL' it offers http://127.0.0.1:11434 — WRONG"
-echo "      here, that is OpenClaw talking to itself. Replace it with the"
-echo "      container name:"
-if [[ -n "$AI_PROVIDER_NAME" ]]; then
-    echo "          $AI_PROVIDER_BASE_URL"
-else
-    echo "          http://ollama:11434"
-fi
-echo
-echo "   The wizard sets the provider but NOT the default model, so finish"
-echo "   with (using a model you have actually pulled):"
-echo "       $COMPOSE_CMD run --rm --entrypoint openclaw openclaw \\"
-echo "           models set ollama/<model>"
-echo "       $COMPOSE_CMD restart openclaw"
-echo
-echo "   Keep 'configure' in mind afterwards — it is not just for models."
-echo "   Channels, credentials, skills and gateway settings all live there."
-echo
-echo "   ⚠️ Ignore the dashboard's 'Update now' button. In a container it"
-echo "      refuses with 'not-git-install' and tells you to run 'openclaw"
-echo "      update' — do NOT. That advice is for a host install. Update by"
-echo "      pulling the image, which keeps your config:"
-echo "          cd $INSTALL_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d"
-echo
-# The endpoint is already printed in the wizard walkthrough above; repeating
-# it here — after the update warning, no less — was leftover from before that
-# section existed. Only the no-provider case still needs saying.
+echo "   3. Give it a model — the default is a cloud one it cannot run:"
+echo "        cd $INSTALL_DIR"
+echo "        $COMPOSE_CMD run --rm -it --entrypoint openclaw openclaw configure"
+echo "        $COMPOSE_CMD run --rm --entrypoint openclaw openclaw models set ollama/<model>"
+echo "        $COMPOSE_CMD restart openclaw"
+echo "      ⚠️  The wizard offers http://127.0.0.1:11434 — wrong here."
+echo "          Use  $PROVIDER_URL_HINT"
 if [[ -z "$AI_PROVIDER_NAME" ]]; then
-    echo "   ⚠️ No model provider is running, so the agent has nothing to talk"
-    echo "      to. Deploy one first — Ollama is the simplest:"
-    echo "        services/AI/ollama/   (and pull a model when it offers)"
-    echo "      Or give OpenClaw a cloud API key during onboarding."
     echo
+    echo "   ⚠️  No provider is running yet, so step 3 has nothing to point at."
+    echo "       Deploy Ollama first (services/AI/ollama/) and pull a model."
 fi
-echo "⚠️  Give it its OWN credentials — a bot token and an API key created"
-echo "   for this agent. An agent with your primary key can spend it."
+echo
+echo "📄 Why each step exists, and what to ignore:"
+echo "     $NEXT_STEPS"
 echo
 echo "To manage: cd $INSTALL_DIR && $COMPOSE_CMD [ps|logs -f|stop|restart]"
