@@ -259,6 +259,11 @@ echo "🔌 API (internal):  http://localai:8080/v1   ← how other services reac
 echo "🖥️  Build:           $ENV_TAG"
 echo "📁 Model files:     $ENV_MODELS_PATH/models"
 echo "🧩 Backends:        $ENV_MODELS_PATH/backends"
+# LocalAI runs as root inside the container and creates the backend
+# directories with permissions the host user cannot read. Plain `du` there
+# fails per-directory AND silently under-reports the total, so say which
+# command actually gives a correct number.
+echo "   (LocalAI creates the backend dirs as root — measure with 'sudo du -sh')"
 echo "📜 Log:             $LOGFILE"
 echo "──────────────────────────────────────────────"
 echo

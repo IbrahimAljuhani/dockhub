@@ -108,11 +108,27 @@ cd ~/docker/localai
 | Open `http://<server-ip>:8082` | LocalAI's own UI — "Install Models" in the sidebar browses the gallery |
 | `curl http://<server-ip>:8082/readyz` | The real health answer, unaffected by UI routing |
 | `docker exec localai sh -c 'ls /models/*.partial'` | What is still downloading in the background (normal — don't delete these) |
+| `sudo du -sh ~/docker/ai-models/localai/*` | Space used by models and backends — **`sudo` is required**, see below |
 | `docker compose logs -f localai` | Follow downloads and inference |
 | `curl http://localhost:8082/v1/models` | What's actually loaded (if you published a host port) |
 | `docker exec localai local-ai models list` | Everything available in the gallery |
 | `docker exec localai local-ai models install <name>` | Add one |
 | `docker compose pull && docker compose up -d` | Update |
+
+---
+
+## 📦 Where the space goes
+
+Four paths are persisted, because upstream requires all four — `/models`, `/backends`, `/configuration` and `/data`. DockHub splits them by what the data *is*:
+
+| Path | Lives in | Why |
+|---|---|---|
+| `/models` · `/backends` | `~/docker/ai-models/localai/` | Large, re-downloadable. Skipped by backup. |
+| `/configuration` · `/data` | `~/docker/localai/` | Small, yours. Captured by backup. |
+
+**Mounting only `/models` was a real bug, caught by a live test.** After removing and redeploying, LocalAI re-downloaded gigabytes of CUDA backends while 13 GB of models sat untouched on disk — the models had survived, the backends had not. With all four mounted, the same remove-and-redeploy reaches ready in **seconds** with no downloads at all.
+
+> ⚠️ **`du` needs `sudo` here.** LocalAI runs as root inside the container and creates the backend directories unreadable by your host user. Plain `du` fails per-directory *and* silently under-reports the total. Use `sudo du -sh ~/docker/ai-models/localai/*`.
 
 ---
 
