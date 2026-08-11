@@ -235,9 +235,13 @@ cd ~/docker/openclaw
 
 ## 💾 Backups
 
-**The full volume backup, and that is the opposite of the [providers](../AI/).**
+**Everything is backed up, and that is the opposite of the [providers](../AI/).**
 
-A provider's volume holds downloaded weights — re-fetchable, skipped on purpose. OpenClaw's holds **memories, learned behaviour, conversations and workspace files**. It *produced* those; nothing re-downloads them. So there is no `backup.sh` here: the generic backup in `services.sh` is already correct.
+A provider's volume holds downloaded weights — re-fetchable, skipped on purpose. OpenClaw's data is **memories, learned behaviour, conversations, credentials and workspace files**. It *produced* those; nothing re-downloads them. So there is no `backup.sh` here — the generic backup is already right.
+
+Note the mechanism differs too: this service declares **no named volumes at all**. `config/`, `workspace/` and `auth/` are bind mounts inside `~/docker/openclaw/`, so they are captured as part of the install directory rather than as separate volume archives.
+
+> ⚠️ **The archive contains live credentials** — the gateway token, your model API key, and any messaging tokens you added. `backup_service_generic` writes it mode `600`; keep it that way if you copy it anywhere.
 
 ---
 
