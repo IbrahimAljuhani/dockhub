@@ -47,21 +47,39 @@ services:
     container_name: openclaw
     restart: unless-stopped
     environment:
-      # ── THE GATEWAY REFUSES TO START UNCONFIGURED ───────────────────
-      # A live deploy crash-looped here with:
-      #   Missing config. Run `openclaw setup` or set gateway.mode=local
-      #   (or pass --allow-unconfigured).
-      # which is a chicken-and-egg: onboarding happens in the web UI, and
-      # the gateway will not serve that UI until it has config.
+      # ── TWO GATES, IN ORDER. BOTH FOUND BY RUNNING IT. ──────────────
       #
-      # `gateway.mode=local` is the setting the program itself names, and
-      # this is its environment form for headless/Docker use. Flagged
-      # honestly: the error text is authoritative, but the ENV VAR SPELLING
-      # comes from a third-party write-up — docs.openclaw.ai was
-      # unreachable and the upstream issue has no maintainer reply. If it
-      # turns out to be wrong it is inert, and deploy.sh detects the same
-      # failure and prints the exact alternatives.
-      OPENCLAW_GATEWAY_MODE: ${OPENCLAW_GATEWAY_MODE:-local}
+      # GATE 1 — `Missing config. Run 'openclaw setup' or set
+      # gateway.mode=local (or pass --allow-unconfigured).`
+      # A chicken-and-egg: onboarding lives in the web UI, and the gateway
+      # will not serve that UI until it has config.
+      #
+      # There is NO environment variable for this. `OPENCLAW_GATEWAY_MODE`
+      # was tried and is INERT — two live deploys with it set crash-looped
+      # identically. It came from a third-party write-up, was shipped
+      # flagged as unverified, and the flag was right. It is named here
+      # only so nobody adds it back.
+      #
+      # The setting has to be written into the config file, which deploy.sh
+      # does before first start with the image's own CLI:
+      #     compose run --rm --entrypoint openclaw openclaw \
+      #         config set gateway.mode local
+      # That writes into ./config, which is mounted, so it persists.
+      #
+      # GATE 2 — clearing gate 1 revealed this one:
+      #   `Refusing to bind gateway to auto without auth.`
+      #   `Container environment detected — the gateway defaults to`
+      #   `bind=auto (0.0.0.0) for port-forwarding compatibility.`
+      #   `Set OPENCLAW_GATEWAY_TOKEN or OPENCLAW_GATEWAY_PASSWORD ...`
+      #
+      # Good behaviour on OpenClaw's part: it will not put an unauthenticated
+      # agent on 0.0.0.0 just because a container makes that convenient. Note
+      # the contrast with the providers in services/AI/, which have no auth at
+      # all — this one refuses to be that.
+      #
+      # deploy.sh generates the token and keeps a copy in a 600 secrets file,
+      # the same as every other DockHub service that has credentials.
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
       # Container timezone — schedules and reminders are only useful if the
       # agent agrees with you about what time it is.
       OPENCLAW_TZ: ${OPENCLAW_TZ:-UTC}
