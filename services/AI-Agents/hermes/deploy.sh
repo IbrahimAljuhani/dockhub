@@ -475,6 +475,20 @@ print_info "Starting Hermes..."
 # fails because the tool is missing looks exactly like a service that never
 # came up. Detect once, then build the probe from what is really there.
 # Python is the one thing an application written in Python must ship.
+#
+# A note on the key travelling in this command line. wait_for_container_ready
+# runs `docker exec hermes sh -c "$probe"`, so the bearer token is visible in
+# the container's own process list for the moment the probe runs. Judged
+# acceptable rather than overlooked: the same token is already in
+# $INSTALL_DIR/.env and in /opt/data/.env inside the container, readable by
+# the same user and by the agent itself, so this discloses nothing new to
+# anyone. Nothing tees it to deploy.log either.
+#
+# The alternative — probing WITHOUT the key and accepting 401 as proof of
+# life, the way Open WebUI does — would remove even that, but it would only
+# prove something is listening. Sending the key proves three things at once:
+# the server is up, the key is right, and config.yaml parsed. That is worth
+# more here than closing a window onto a secret its holder already has.
 print_info "Waiting for the API to answer..."
 if docker exec hermes sh -c 'command -v curl' >/dev/null 2>&1; then
     HERMES_PROBE="curl -fsS -H 'Authorization: Bearer $ENV_API_KEY' http://localhost:8642/v1/models"
@@ -524,7 +538,7 @@ if (( WAIT_RC == 1 )); then
             print_warn "Hermes wants configuration that data/config.yaml did not satisfy."
             print_warn "Writing that file is meant to replace the wizard; if it did not,"
             print_warn "run the wizard directly and tell us what it asked:"
-            print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD run --rm -it hermes setup"
+            print_warn "  docker exec -it hermes hermes setup"
             ;;
     esac
     print_error "Hermes did not start. Full log: cd $INSTALL_DIR && $COMPOSE_CMD logs hermes"
@@ -594,10 +608,33 @@ usable now. What remains is giving it a way to reach you.
 Hermes' natural interface is OUTBOUND messaging, not a web page. Add a
 channel — Telegram is the quickest, via a bot token from @BotFather:
 
-    cd $INSTALL_DIR
-    $COMPOSE_CMD run --rm -it hermes channels add
+    docker exec -it hermes hermes channels add
 
-Discord, Slack, WhatsApp, Signal and email are all supported the same way.
+Discord, Slack, WhatsApp, Signal and email are all supported the same way,
+and each has its own shortcut — 'hermes whatsapp', 'hermes telegram'.
+
+>>> USE 'docker exec', NOT 'docker compose run'.
+>>>
+>>> This image is supervised by s6: its entrypoint starts the gateway AND
+>>> the dashboard whatever command you pass. So 'compose run' quietly
+>>> brings up a SECOND, competing Hermes beside the one already running,
+>>> then floods your interactive prompt with its startup banner —
+>>>
+>>>     Choose [1/2]: → Using web dist from HERMES_WEB_DIST: ...
+>>>     ⚕ Hermes Gateway Starting...
+>>>
+>>> and leaves an "exited UNCLEANLY" note in the lifecycle ledger when the
+>>> extra one is killed. 'docker exec' runs inside the container that is
+>>> already up, which is what these commands actually want.
+
+When a wizard finishes it may tell you to "start the gateway: hermes
+gateway". DON'T — it is already running as the container's main process,
+and that advice is written for a host install. To pick up the channel you
+just added, restart the container:
+
+    cd $INSTALL_DIR && $COMPOSE_CMD restart hermes
+
+Then message the bot. Replies are prefixed '⚕ Hermes Agent'.
 
 For a quick check without any channel, talk to the API directly:
 
@@ -678,8 +715,9 @@ echo
 echo "📌 NEXT — the model is already configured, so this is about reaching it:"
 echo
 echo "   Add a messaging channel (Telegram is quickest):"
-echo "     cd $INSTALL_DIR"
-echo "     $COMPOSE_CMD run --rm -it hermes channels add"
+echo "     docker exec -it hermes hermes channels add"
+echo "   ⚠️  'docker exec', never 'compose run' — this image is s6-supervised,"
+echo "       so 'run' starts a SECOND gateway and buries the prompt."
 if [[ "$ENV_DASHBOARD" == "1" ]]; then
     echo
     echo "   Dashboard — bound to the server's localhost, so tunnel in:"

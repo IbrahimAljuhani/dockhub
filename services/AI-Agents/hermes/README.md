@@ -155,18 +155,75 @@ cd ~/docker/hermes
 
 | Command | Purpose |
 |---|---|
-| `docker compose run --rm -it hermes channels add` | **Add a messaging channel** — the main way you talk to it |
-| `docker compose run --rm -it hermes setup` | Upstream's interactive wizard, if you want it |
+| `docker exec -it hermes hermes channels add` | **Add a messaging channel** — the main way you talk to it |
+| `docker exec -it hermes hermes whatsapp` | Per-platform shortcuts also exist: `telegram`, `discord`, `slack` … |
+| `docker exec -it hermes hermes status` | Model, provider, which channels are configured, gateway PID |
+| `docker exec -it hermes hermes setup` | Upstream's interactive wizard, if you want it |
 | `docker compose logs -f hermes` | Follow the agent |
 | `nano data/config.yaml` | Model, then `restart` |
 | `nano data/SOUL.md` | The agent's personality |
 | `docker compose pull && docker compose up -d` | Update — your data is a bind mount and survives |
+
+> 🔴 **`docker exec`, never `docker compose run`.** This image is supervised by **s6**: its entrypoint starts the gateway *and* the dashboard whatever command you pass it. So `compose run` silently brings up a **second, competing Hermes** next to the one already running, floods your interactive prompt with its own startup banner —
+>
+> ```
+> Choose [1/2]: → Using web dist from HERMES_WEB_DIST: ...
+> ⚕ Hermes Gateway Starting...
+> HERMES_DASHBOARD_READY port=9119
+> ```
+>
+> — and leaves `Previous gateway life … exited UNCLEANLY` in the lifecycle ledger once the extra one is torn down. Found live while adding a WhatsApp channel. `docker exec` runs inside the container that is already up, which is what every command in this table actually wants.
+>
+> Note this differs from [OpenClaw](../openclaw/), where `compose run` is correct — that image has no supervisor, so a throwaway container really is throwaway.
+
+> ⚠️ **When a wizard finishes and says "start the gateway: `hermes gateway`" — don't.** It is already running as the container's main process. That instruction is written for a host install, and following it inside the container starts a second gateway beside the first. Restart the container instead, which is what "pick up the new configuration" means here:
+>
+> ```bash
+> docker compose restart hermes
+> ```
+>
+> This is the **third** upstream instruction in this category that assumes a laptop: OpenClaw's dashboard offers an `openclaw update` that cannot work in a container, its wizard defaults Ollama to `127.0.0.1`, and Hermes' channel setup ends by telling you to start something that is already started. None of them are bugs — they are simply written for the install shape their authors expect. Read every "next step" from upstream with that in mind.
 
 Check the API by hand:
 
 ```bash
 curl -H "Authorization: Bearer <key>" http://localhost:8642/v1/models
 ```
+
+---
+
+## 📱 Adding a channel — one decision depends on hardware you may not have
+
+```bash
+docker exec -it hermes hermes channels add     # or: hermes whatsapp
+```
+
+WhatsApp's wizard opens with a choice that decides whether anything will ever work, and the answer depends on how many phone numbers you own:
+
+| Mode | Needs | How you talk to it |
+|---|---|---|
+| **1. Separate bot number** | **TWO numbers** — the wizard says so: *"Requires a second phone number"* | Others message the bot's number |
+| **2. Personal number (self-chat)** | One number | You message yourself |
+
+> 🔴 **Picking mode 1 with a single number produces total silence.** Verified live. The QR gets scanned by your phone, so *your* number becomes the bot; the allow-list then holds that same number; and reaching "the bot" would mean messaging yourself — which is mode 2's job. Mode `bot` does not pick up self-chat, so the message never reaches Hermes at all.
+>
+> The tell is that **the log stays completely empty** — no rejection, no error, nothing. Combined with the startup warning that messaging platforms *"deny unknown senders"* by default, silence is the designed outcome for anything unrecognised. Re-run the wizard and choose **2**, then `docker compose restart hermes`.
+>
+### Changing the mode afterwards
+
+**The wizard asks this once in the life of a deployment.** Re-running it prints `✓ Mode: separate bot number` as a statement and moves on — it only re-offers the allow-list and re-pairing. And `hermes whatsapp --help` carries **no options at all**, so there is no reset flag to reach for. Both verified.
+
+The way back is to remove what it reads, so the question returns:
+
+```bash
+sed -i '/^WHATSAPP_MODE=/d' ~/docker/hermes/data/.env
+docker exec -it hermes hermes whatsapp          # now asks again — choose 2
+docker compose restart hermes
+```
+
+Answer **N** to "Re-pair?" — the session is fine, only the mode was wrong. Then WhatsApp → **Message Yourself**.
+
+> Don't guess the value and write it into `.env` by hand. `bot` is mode 1's; mode 2's could be `self`, `personal`, or something else, and a plausible-looking wrong value fails **exactly as silently** as the problem you are trying to fix. Let the wizard write it.
 
 ---
 
