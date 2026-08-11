@@ -496,7 +496,11 @@ finish the job and restart:
 
 Confirm — the startup line should name your model, not openai/gpt-5.5:
 
-    $COMPOSE_CMD logs --tail 20 openclaw | grep "agent model"
+    $COMPOSE_CMD logs openclaw | grep "agent model" | tail -1
+
+(No --tail on the logs: that line is printed at startup, and a connected
+dashboard pushes dozens of WebSocket lines above it within seconds. Search
+the whole log and take the last match instead.)
 
 
 WHAT TO IGNORE

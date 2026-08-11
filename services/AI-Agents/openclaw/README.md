@@ -177,7 +177,15 @@ Model names are `provider/model` — the schema's own example is `ollama/qwen3:8
 > docker compose restart openclaw
 > ```
 >
-> Then the startup line reads `agent model: ollama/…` instead of `openai/gpt-5.5`. Also: the model picker offers names you have **not pulled**. Only pick models that `docker exec ollama ollama list` actually shows, or the first message fails.
+> Confirm it took:
+>
+> ```bash
+> docker compose logs openclaw | grep "agent model" | tail -1
+> ```
+>
+> It should name your model instead of `openai/gpt-5.5`. **Don't add `--tail` to `logs` here** — that line is printed at startup, and a connected dashboard pushes dozens of WebSocket lines above it within seconds, so a tail window returns nothing and looks like failure.
+>
+> Also: the model picker offers names you have **not pulled**. Only pick models that `docker exec ollama ollama list` actually shows, or the first message fails.
 
 > ⚠️ The wizard also touches gateway settings. Re-check `gateway.mode` and `gateway.controlUi.allowedOrigins` in `config/openclaw.json` when it finishes, and re-apply them if they went missing — `openclaw.json.bak` and `openclaw.json.last-good` sit beside it.
 
