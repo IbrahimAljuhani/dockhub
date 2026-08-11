@@ -1,0 +1,104 @@
+# OpenClaw — a personal AI assistant, and the first AGENT in DockHub.
+#
+# The difference from everything in services/AI/ is not size or complexity:
+# Open WebUI shows you a conversation, OpenClaw ACTS on one. It reads pages,
+# runs tools, and takes instructions from text nobody on your side wrote.
+# See ../README.md for the threat model that shapes every choice below.
+#
+# ── WE DO NOT USE UPSTREAM'S setup.sh ───────────────────────────────────
+# OpenClaw's documented path is `./scripts/docker/setup.sh`, which BUILDS
+# the image locally by default — a multi-gigabyte Node build on your server,
+# needing its own heap tuning on small hosts. Official pre-built images
+# exist, so DockHub pulls one and brings its own compose file, exactly like
+# every other service here.
+#
+# ── THE IMAGE, AND A REAL TRAP ──────────────────────────────────────────
+# GHCR is the primary registry:      ghcr.io/openclaw/openclaw
+# Docker Hub carries a mirror:       openclaw/openclaw
+# ⚠️ Docker Hub also carries a crowd of UNOFFICIAL forks under similar
+# names. For a container that will hold your messaging tokens and run
+# tools on your behalf, pulling a lookalike is not a small mistake — this
+# file pins the GHCR path so there is nothing to get wrong.
+#
+# Variants exist (slim, browser, extended-stable). deploy.sh offers the
+# browser variant separately, because it is much larger and most people
+# never need it.
+#
+# ── NO DOCKER SOCKET ────────────────────────────────────────────────────
+# Checked against upstream's own Docker documentation rather than assumed:
+# the socket is needed only for SANDBOX mode, where agent tools run in
+# separate containers. The gateway itself does not need it. So it is absent
+# here and offered explicitly by deploy.sh, which is what lets this service
+# honour the category rule — the agent needs tools, not your host.
+#
+# ── ai-net, AND main-net ONLY IF ASKED ──────────────────────────────────
+# ai-net is all it needs: the model provider. main-net would additionally
+# let it reach every other service by container name, Portainer included.
+# deploy.sh asks, and writes the second network into the override file.
+#
+# This is a single-instance service, under ~/docker/openclaw/.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it
+# (and the generated .env) to ~/docker/openclaw/ and runs it from there.
+
+services:
+  openclaw:
+    image: ghcr.io/openclaw/openclaw:${OPENCLAW_TAG:-latest}
+    container_name: openclaw
+    restart: unless-stopped
+    environment:
+      # ── TWO GATES, IN ORDER. BOTH FOUND BY RUNNING IT. ──────────────
+      #
+      # GATE 1 — `Missing config. Run 'openclaw setup' or set
+      # gateway.mode=local (or pass --allow-unconfigured).`
+      # A chicken-and-egg: onboarding lives in the web UI, and the gateway
+      # will not serve that UI until it has config.
+      #
+      # There is NO environment variable for this. `OPENCLAW_GATEWAY_MODE`
+      # was tried and is INERT — two live deploys with it set crash-looped
+      # identically. It came from a third-party write-up, was shipped
+      # flagged as unverified, and the flag was right. It is named here
+      # only so nobody adds it back.
+      #
+      # The setting has to be written into the config file, which deploy.sh
+      # does before first start with the image's own CLI:
+      #     compose run --rm --entrypoint openclaw openclaw \
+      #         config set gateway.mode local
+      # That writes into ./config, which is mounted, so it persists.
+      #
+      # GATE 2 — clearing gate 1 revealed this one:
+      #   `Refusing to bind gateway to auto without auth.`
+      #   `Container environment detected — the gateway defaults to`
+      #   `bind=auto (0.0.0.0) for port-forwarding compatibility.`
+      #   `Set OPENCLAW_GATEWAY_TOKEN or OPENCLAW_GATEWAY_PASSWORD ...`
+      #
+      # Good behaviour on OpenClaw's part: it will not put an unauthenticated
+      # agent on 0.0.0.0 just because a container makes that convenient. Note
+      # the contrast with the providers in services/AI/, which have no auth at
+      # all — this one refuses to be that.
+      #
+      # deploy.sh generates the token and keeps a copy in a 600 secrets file,
+      # the same as every other DockHub service that has credentials.
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN}
+      # Container timezone — schedules and reminders are only useful if the
+      # agent agrees with you about what time it is.
+      OPENCLAW_TZ: ${OPENCLAW_TZ:-UTC}
+      # mDNS/Bonjour discovery. Off: this is a server, not a laptop looking
+      # for peers on the LAN, and it is one less thing listening.
+      OPENCLAW_DISABLE_BONJOUR: "1"
+    volumes:
+      # Config, credentials and agent state. This is the directory that
+      # holds your messaging tokens and model keys — hence 700 in deploy.sh.
+      - ./config:/home/node/.openclaw
+      # Where the agent does its work: files it creates, repos it clones.
+      # Deliberately a subdirectory rather than the whole config tree, so
+      # "the agent's workspace" and "the agent's credentials" are separable.
+      - ./workspace:/home/node/.openclaw/workspace
+      # Auth profile secrets live in their own path upstream.
+      - ./auth:/home/node/.config/openclaw
+    networks:
+      - ai-net
+
+networks:
+  ai-net:
+    external: true
