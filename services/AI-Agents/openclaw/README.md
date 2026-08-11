@@ -86,7 +86,26 @@ code=1008 reason=control ui requires device identity
 
 The control UI derives a **device identity** using Web Crypto, and browsers only expose that API in a *secure context*: HTTPS, or `localhost`. Reaching the server by IP over `http://` fails however correct your token is. This is a browser rule; OpenClaw cannot opt out of it, and neither can this repo.
 
-The gateway also seeds an origin allow-list containing **only** `http://localhost:18789` and `http://127.0.0.1:18789`.
+### The origin allow-list is seeded in memory, not written
+
+A second trap, and a nastier one because it strikes *after* things are working. At startup the gateway says:
+
+```
+seeded gateway.controlUi.allowedOrigins ["http://localhost:18789", ...]
+Applied for this runtime WITHOUT WRITING CONFIG
+```
+
+Observed live: the dashboard paired, connected, and ran happily for two and a half minutes — then every request from the **same** origin began failing with `origin not allowed`, with no restart in between. A config write during ordinary use displaces the un-persisted seed, and restarting does not restore it, because the file on disk now has the last word.
+
+`deploy.sh` therefore **writes the list explicitly** rather than inheriting it, using the published host port because that is the origin your *browser* shows through the tunnel — not the container's 18789. If you ever need to set it by hand:
+
+```bash
+cd ~/docker/openclaw
+docker compose run --rm --entrypoint openclaw openclaw \
+    config set gateway.controlUi.allowedOrigins \
+    '["http://localhost:18789","http://127.0.0.1:18789"]'
+docker compose restart openclaw
+```
 
 ### Two ways round it
 

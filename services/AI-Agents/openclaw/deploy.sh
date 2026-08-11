@@ -249,6 +249,34 @@ print_info "Setting gateway.mode=local in the config..."
     config set gateway.mode local 2>&1 | tee -a "$LOGFILE") \
     || print_warn "Could not write gateway.mode — the start below will say so."
 
+# ── Gate 3: pin the Control UI origin allow-list ────────────────────────
+# The gateway seeds this at startup and says so plainly:
+#   "seeded gateway.controlUi.allowedOrigins [...] Applied for this runtime
+#    WITHOUT WRITING CONFIG"
+# In memory only. A live session proved what that costs: the dashboard
+# connected and worked for two and a half minutes, then every request from
+# the SAME origin started failing with `origin not allowed` — a config write
+# during normal use displaced the un-persisted seed, and no restart brings it
+# back, because the file now says otherwise.
+#
+# So write it rather than inherit it. The origin is whatever the BROWSER
+# shows, which for the SSH-tunnel route is localhost on the published port —
+# not the container's 18789 and not the server's IP.
+if [[ -n "$ENV_HOST_PORT" ]]; then
+    UI_ORIGINS="[\"http://localhost:$ENV_HOST_PORT\",\"http://127.0.0.1:$ENV_HOST_PORT\"]"
+else
+    UI_ORIGINS="[\"http://localhost:18789\",\"http://127.0.0.1:18789\"]"
+fi
+# No domain is added here: this script never asks for one — main-net is a
+# yes/no question, and the domain lives in NGINX Proxy Manager. Anyone
+# serving the dashboard over HTTPS has to append their own origin, which the
+# README spells out.
+
+print_info "Pinning the Control UI origin allow-list..."
+(cd "$INSTALL_DIR" && $COMPOSE_CMD run --rm --entrypoint openclaw openclaw \
+    config set gateway.controlUi.allowedOrigins "$UI_ORIGINS" 2>&1 | tee -a "$LOGFILE") \
+    || print_warn "Could not write allowedOrigins. If the dashboard later says 'origin not allowed', set it by hand — see the README."
+
 print_info "Starting OpenClaw..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start OpenClaw. Check log: $LOGFILE"
