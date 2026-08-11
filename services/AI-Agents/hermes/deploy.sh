@@ -68,6 +68,50 @@ list_provider_models() {
         | sed 's/.*"\([^"]*\)"$/\1/' || true
 }
 
+# ── Hermes needs a 64K context window, and will not start without one ───
+# Found the hard way: a deploy that passed every check still refused to
+# answer, with
+#   "Model qwen2.5-coder:7b has a context window of 32,768 tokens, which
+#    is below the minimum 64,000 required by Hermes Agent."
+# A 7B coding model was a perfectly reasonable pick and is simply
+# ineligible. Better to say so while choosing than after the first message.
+#
+# Only Ollama publishes this: /api/tags carries context_length per model,
+# while the OpenAI-compatible /v1/models does not. So the check is real
+# where it can be and honest ("unknown") where it cannot.
+HERMES_MIN_CONTEXT=64000
+
+ollama_context_lengths() {
+    local base="$1"
+    # RS='"name":"' starts every record at a model, so a context_length
+    # found in a record belongs to that model and cannot bleed in from
+    # its neighbour — which a flat grep over the whole document would.
+    docker run --rm --network ai-net alpine \
+        wget -qO- --timeout=5 "$base/api/tags" 2>/dev/null \
+        | awk -v RS='"name":"' 'NR>1 {
+              name = substr($0, 1, index($0, "\"") - 1)
+              cl = "?"
+              if (match($0, /"context_length"[[:space:]]*:[[:space:]]*[0-9]+/)) {
+                  seg = substr($0, RSTART, RLENGTH)
+                  sub(/.*:[[:space:]]*/, "", seg)
+                  cl = seg
+              }
+              print name "\t" cl
+          }' || true
+}
+
+# Echoes the context length for one model, or nothing if unknown.
+context_length_of() {
+    local model="$1" line name cl
+    while IFS=$'\t' read -r name cl; do
+        [[ "$name" == "$model" ]] || continue
+        [[ "$cl" == "?" ]] && return 0
+        echo "$cl"
+        return 0
+    done <<< "${MODEL_CONTEXTS:-}"
+    return 0
+}
+
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
 else
@@ -131,6 +175,16 @@ else
         print_info "Asking it which models it serves..."
         mapfile -t PROVIDER_MODELS < <(list_provider_models "$AI_PROVIDER_BASE_URL")
 
+        MODEL_CONTEXTS=""
+        if [[ "$AI_PROVIDER_NAME" == "ollama" ]]; then
+            MODEL_CONTEXTS=$(ollama_context_lengths "$AI_PROVIDER_BASE_URL")
+        fi
+
+        echo
+        print_warn "Hermes requires a context window of at least ${HERMES_MIN_CONTEXT} tokens"
+        print_warn "and refuses to run below it. Many good small models are under that —"
+        print_warn "qwen2.5-coder:7b reports 32,768, for example, and is rejected."
+
         if (( ${#PROVIDER_MODELS[@]} == 1 )); then
             HERMES_MODEL_VALUE="${PROVIDER_MODELS[0]}"
             print_info "It serves exactly one model: $HERMES_MODEL_VALUE"
@@ -144,7 +198,14 @@ else
                 print_warn "Pick a CHAT model. This list also has speech and image ones."
             i=1
             for m in "${PROVIDER_MODELS[@]}"; do
-                echo "   $i) $m"
+                mctx=$(context_length_of "$m")
+                if [[ -z "$mctx" ]]; then
+                    echo "   $i) $m"
+                elif (( mctx < HERMES_MIN_CONTEXT )); then
+                    echo "   $i) $m   — ${mctx} ctx  ❌ too small for Hermes"
+                else
+                    echo "   $i) $m   — ${mctx} ctx  ✅"
+                fi
                 i=$((i + 1))
             done
             read -rp "Choice (1-${#PROVIDER_MODELS[@]}): " model_choice
@@ -162,6 +223,39 @@ else
             print_warn "The provider may have none installed yet. Check with:"
             print_warn "  docker exec $AI_PROVIDER_NAME sh -c 'command -v ollama >/dev/null && ollama list'"
             read -rp "Model name to configure anyway (blank to skip): " HERMES_MODEL_VALUE
+        fi
+
+        # Verify whatever was settled on, however it was settled on — the
+        # single-model path never saw a menu, and that is exactly the case
+        # that bit us: one model, taken without comment, rejected later.
+        HERMES_CONTEXT_OVERRIDE=""
+        if [[ -n "$HERMES_MODEL_VALUE" ]]; then
+            CHOSEN_CTX=$(context_length_of "$HERMES_MODEL_VALUE")
+            if [[ -n "$CHOSEN_CTX" ]] && (( CHOSEN_CTX < HERMES_MIN_CONTEXT )); then
+                echo
+                print_warn "$HERMES_MODEL_VALUE reports ${CHOSEN_CTX} tokens — below Hermes'"
+                print_warn "minimum of ${HERMES_MIN_CONTEXT}. Deployed as-is it will start, then answer"
+                print_warn "every message with 'agent init failed'."
+                echo >&2
+                print_info "Two ways forward:"
+                print_info "  1) Pull a bigger-context model and rerun. llama3.1:8b reports"
+                print_info "     131,072 and is a similar size:"
+                print_info "       docker exec -it ollama ollama pull llama3.1:8b"
+                print_info "  2) Override it — but ONLY if you know the server is"
+                print_info "     under-reporting and the model's true window is 64K+."
+                print_info "     Hermes' own error message suggests this."
+                echo >&2
+                read -rp "Set model.context_length anyway? Enter a number, or blank to continue unchanged: " HERMES_CONTEXT_OVERRIDE
+                if [[ -n "$HERMES_CONTEXT_OVERRIDE" ]]; then
+                    if [[ ! "$HERMES_CONTEXT_OVERRIDE" =~ ^[0-9]+$ ]] \
+                       || (( HERMES_CONTEXT_OVERRIDE < HERMES_MIN_CONTEXT )); then
+                        print_warn "Not a number, or still below ${HERMES_MIN_CONTEXT} — ignoring it."
+                        HERMES_CONTEXT_OVERRIDE=""
+                    else
+                        print_info "config.yaml will declare context_length: $HERMES_CONTEXT_OVERRIDE"
+                    fi
+                fi
+            fi
         fi
     else
         print_warn "No model provider is running on 'ai-net'."
@@ -295,6 +389,12 @@ model:
   base_url: ${HERMES_BASE_URL_VALUE}
   api_key: "${HERMES_CLOUD_KEY:-none}"
 EOF
+    # Only written when you asked for it: Hermes reads the model's own
+    # reported window otherwise, and declaring a number larger than the
+    # truth buys an "agent init failed" for a context overflow later.
+    if [[ -n "${HERMES_CONTEXT_OVERRIDE:-}" ]]; then
+        echo "  context_length: ${HERMES_CONTEXT_OVERRIDE}" >> "$CONFIG_YAML"
+    fi
     chmod 600 "$CONFIG_YAML"
     print_info "Wrote data/config.yaml — model ${HERMES_MODEL_VALUE} via ${HERMES_BASE_URL_VALUE}"
 else
@@ -501,7 +601,31 @@ secure-context requirement — the previous agent in this category does, and
 there a tunnel is mandatory. Here it is simply the more private default.
 
 
-3. CHANGING THE MODEL
+3. IF EVERY MESSAGE COMES BACK "agent init failed"
+------------------------------------------------------------------
+Hermes requires a context window of at least ${HERMES_MIN_CONTEXT} tokens and says so
+only when you talk to it — the container starts and the API answers
+regardless:
+
+    Model <name> has a context window of 32,768 tokens, which is below
+    the minimum 64,000 required by Hermes Agent.
+
+deploy.sh checks this while you choose, but a model swapped in afterwards
+is not checked. Pull one with a bigger window:
+
+    docker exec -it ollama ollama pull llama3.1:8b     # reports 131,072
+
+then set it in config.yaml as below. If instead your server under-reports
+a window the model genuinely has, override it:
+
+    model:
+      context_length: 131072
+
+Only when the true window really is 64K+. A number larger than the truth
+just moves the failure to a context overflow later.
+
+
+4. CHANGING THE MODEL
 ------------------------------------------------------------------
     nano $INSTALL_DIR/data/config.yaml
     $COMPOSE_CMD restart hermes

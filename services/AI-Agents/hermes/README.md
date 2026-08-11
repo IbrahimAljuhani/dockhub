@@ -101,6 +101,37 @@ model:
   api_key: "none"
 ```
 
+### 🔴 The model needs a 64K context window
+
+**Hermes refuses to run below 64,000 tokens**, and the failure is late and confusing: the container starts, the API answers, the self-test passes — and then every message comes back as
+
+```
+agent init failed: Model qwen2.5-coder:7b has a context window of 32,768 tokens,
+which is below the minimum 64,000 required by Hermes Agent.
+```
+
+Found live. A 7B coding model is a perfectly reasonable pick and is simply ineligible; `llama3.1:8b` reports 131,072 and works.
+
+`deploy.sh` now checks before you commit. Ollama publishes `context_length` per model on `/api/tags` — the OpenAI-compatible `/v1/models` does not — so the menu is annotated where the number is knowable and says nothing where it isn't:
+
+```
+   1) qwen2.5-coder:7b   — 32768 ctx  ❌ too small for Hermes
+   2) llama3.1:8b        — 131072 ctx  ✅
+```
+
+The check also runs when a provider serves **exactly one** model and there is no menu at all — which is precisely the case that got through the first time.
+
+If your server under-reports a window the model really has, Hermes' own error suggests the override, and `deploy.sh` will write it for you:
+
+```yaml
+model:
+  context_length: 131072
+```
+
+Only do that when you know the true window is 64K+. Declaring a number larger than the truth simply moves the failure to a context overflow later.
+
+---
+
 `provider: custom` is upstream's shape for any OpenAI-compatible endpoint, which all three DockHub providers are. `deploy.sh` asks the running provider what it serves — one query to `/v1/models`, made from a container **on `ai-net`**, because that is the vantage point whose answer means anything — and writes the file.
 
 > 💡 **Upstream's docs get the address right**, which is worth noting: they say to use the container name for an inference server on the same Docker network. OpenClaw's docs say `host.docker.internal` and its wizard offers `127.0.0.1`, both wrong inside a container, and that cost a full debugging round.
