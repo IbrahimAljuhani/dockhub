@@ -767,6 +767,12 @@ backup_service_generic() {
     fi
 
     tar czf "$backup_root/${ts}.tar.gz" -C "$staging" .
+    # 600, not the umask default. Every service's install_dir holds its .env,
+    # and many hold a generated secrets file too — database passwords, API
+    # keys, an agent's messaging tokens. Those are created 600 at the source;
+    # leaving the archive that contains them world-readable would undo that
+    # for anyone with an account on this host.
+    chmod 600 "$backup_root/${ts}.tar.gz"
     rm -rf "$staging"
     print_info "Backup saved: $backup_root/${ts}.tar.gz"
 }
@@ -822,6 +828,12 @@ backup_service_config_only() {
     fi
 
     tar czf "$backup_root/${ts}.tar.gz" -C "$staging" .
+    # 600, not the umask default. Every service's install_dir holds its .env,
+    # and many hold a generated secrets file too — database passwords, API
+    # keys, an agent's messaging tokens. Those are created 600 at the source;
+    # leaving the archive that contains them world-readable would undo that
+    # for anyone with an account on this host.
+    chmod 600 "$backup_root/${ts}.tar.gz"
     rm -rf "$staging"
     print_info "Backup saved: $backup_root/${ts}.tar.gz"
 }
