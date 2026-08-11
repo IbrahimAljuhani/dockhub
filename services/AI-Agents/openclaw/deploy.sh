@@ -121,11 +121,13 @@ else
     prompt_mem_limit "openclaw" "2g"
 
     # Its own web gateway, on 18789. Unlike the providers this DOES have
-    # authentication — a gateway token generated during onboarding — so a
+    # authentication — a gateway token, which deploy.sh generates because
+    # the gateway refuses to listen without one — so a
     # host port is a reasonable default rather than an exposure.
     echo
     print_info "OpenClaw serves its own web interface on 18789, protected by a"
-    print_info "gateway token it generates during onboarding."
+    print_info "gateway token generated below — unlike the AI providers, this one"
+    print_info "refuses to listen without authentication."
     prompt_host_port "18789"
 
     # The gateway refuses to bind 0.0.0.0 without credentials, and inside a
@@ -337,8 +339,18 @@ else
 fi
 
 echo
-echo "📌 NEXT: finish onboarding in the web interface. It generates your"
-echo "   gateway token and asks which model to use."
+echo "📌 NEXT — the dashboard opens asking to connect, and shows"
+echo "   'Could not connect' until you give it the token. That is the"
+echo "   normal first screen, not a fault. Get the token with:"
+echo
+echo "       cat $SECRETS_FILE"
+echo
+echo "   Paste it into 'Gateway Token' and press Connect. Leave the"
+echo "   WebSocket URL as ws:// — wss:// is only for a gateway behind"
+echo "   HTTPS. The token field is labelled optional because password"
+echo "   auth is the alternative; with this deployment it is required."
+echo
+echo "   Then finish onboarding: it asks which model to use."
 echo
 if [[ -n "$AI_PROVIDER_NAME" ]]; then
     echo "   When it asks for the model endpoint, paste EXACTLY this:"
