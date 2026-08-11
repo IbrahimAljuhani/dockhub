@@ -75,6 +75,41 @@ Note that OpenClaw reaches *you* **outbound** over messaging — so in normal us
 
 ---
 
+## 🔐 The dashboard will not open over plain HTTP
+
+**The one place DockHub's usual "publish a host port and browse to it" does not work.** Verified live: the gateway starts, `/readyz` answers, the token is accepted — and the WebSocket still closes:
+
+```
+code=1008 reason=control ui requires device identity
+                (use HTTPS or localhost secure context)
+```
+
+The control UI derives a **device identity** using Web Crypto, and browsers only expose that API in a *secure context*: HTTPS, or `localhost`. Reaching the server by IP over `http://` fails however correct your token is. This is a browser rule; OpenClaw cannot opt out of it, and neither can this repo.
+
+The gateway also seeds an origin allow-list containing **only** `http://localhost:18789` and `http://127.0.0.1:18789`.
+
+### Two ways round it
+
+**1. SSH tunnel — nothing to configure, and it satisfies both rules at once:**
+
+```bash
+ssh -L 18789:localhost:18789 you@your-server
+```
+
+Leave that open and browse to `http://localhost:18789`. The browser now sees `localhost`, so the secure context exists *and* the origin matches the seeded allow-list. This is also the more private option: the dashboard never crosses your LAN in clear text, and you can skip publishing the host port entirely.
+
+**2. HTTPS through NGINX Proxy Manager** — requires answering **yes** to the `main-net` question, with everything that implies above. Your domain then has to be added to the allow-list, which the localhost-only default does not cover:
+
+```bash
+cd ~/docker/openclaw
+docker compose run --rm --entrypoint openclaw openclaw \
+    config set gateway.controlUi.allowedOrigins '["https://your.domain"]'
+```
+
+> ⚠️ **Note the tension.** DockHub's safe default for an agent — `ai-net` only, no domain — collides with OpenClaw's own security requirement, which wants HTTPS. The SSH tunnel resolves it without weakening either: no `main-net`, no exposed port, and a genuine secure context.
+
+---
+
 ## 🧩 Giving it a model — the one step that isn't scripted
 
 OpenClaw configures its model in an **onboarding wizard**, not from environment variables. DockHub doesn't fake that; `deploy.sh` prints the exact endpoint to paste, discovered from whichever provider is running.

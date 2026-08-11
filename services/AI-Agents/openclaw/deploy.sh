@@ -339,16 +339,46 @@ else
 fi
 
 echo
-echo "📌 NEXT — the dashboard opens asking to connect, and shows"
-echo "   'Could not connect' until you give it the token. That is the"
-echo "   normal first screen, not a fault. Get the token with:"
+echo "📌 NEXT — ⚠️ READ THIS BEFORE OPENING THE DASHBOARD."
+echo
+echo "   The control UI needs a BROWSER SECURE CONTEXT. It builds a device"
+echo "   identity with Web Crypto, and browsers only expose that over HTTPS"
+echo "   or on localhost. Browsing to this server's IP over plain http://"
+echo "   fails no matter how correct your token is — the log says:"
+echo "       control ui requires device identity"
+echo "       (use HTTPS or localhost secure context)"
+echo
+echo "   This is a browser rule, not an OpenClaw fault, and it is the one"
+echo "   place where DockHub's usual 'publish a port and browse to it' does"
+echo "   NOT work. Two ways round it:"
+echo
+echo "   1) SSH tunnel — works now, nothing to configure:"
+echo
+if [[ -n "$ENV_HOST_PORT" ]]; then
+    echo "          ssh -L $ENV_HOST_PORT:localhost:$ENV_HOST_PORT $(whoami)@$SERVER_IP"
+    echo "          then open  http://localhost:$ENV_HOST_PORT"
+else
+    echo "          ssh -L 18789:localhost:18789 $(whoami)@$SERVER_IP"
+    echo "          (no host port published, so the tunnel is the only route)"
+fi
+echo
+echo "      This also satisfies the origin allow-list, which the gateway"
+echo "      seeds with localhost only."
+echo
+echo "   2) HTTPS through NGINX Proxy Manager — needs 'main-net' and a"
+echo "      domain, so rerun and answer yes to the main-net question. Then"
+echo "      add your domain to the allow-list, which localhost-only misses:"
+echo "          cd $INSTALL_DIR && $COMPOSE_CMD run --rm --entrypoint openclaw \\"
+echo "              openclaw config set gateway.controlUi.allowedOrigins \\"
+echo "              '[\"https://your.domain\"]'"
+echo
+echo "   Once the page connects, get the token with:"
 echo
 echo "       cat $SECRETS_FILE"
 echo
-echo "   Paste it into 'Gateway Token' and press Connect. Leave the"
-echo "   WebSocket URL as ws:// — wss:// is only for a gateway behind"
-echo "   HTTPS. The token field is labelled optional because password"
-echo "   auth is the alternative; with this deployment it is required."
+echo "   Paste it into 'Gateway Token' and press Connect. The field is"
+echo "   labelled optional because password auth is the alternative; with"
+echo "   this deployment the token is required."
 echo
 echo "   Then finish onboarding: it asks which model to use."
 echo
