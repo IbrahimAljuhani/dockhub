@@ -141,7 +141,47 @@ OpenClaw configures its model in an **onboarding wizard**, not from environment 
 >
 > `deploy.sh` prints the right one for whichever provider it finds — llama.cpp and LocalAI use their OpenAI-compatible paths instead.
 
-### The agent cannot answer until you change the model
+### The recipe, verified step by step
+
+Onboarding is **not** UI-only — there is a full interactive wizard in the CLI, and `docker compose run -it` drives it fine:
+
+```bash
+cd ~/docker/openclaw
+docker compose run --rm -it --entrypoint openclaw openclaw configure
+```
+
+| Prompt | Answer |
+|---|---|
+| Where will the Gateway run? | `Local (this machine)` — "No gateway detected" here is normal; this is a throwaway container, not the running one |
+| What do you want to configure? | `Model` |
+| Model/auth provider | `More…` |
+| Model/auth provider | `Ollama` |
+| Ollama auth method | `Ollama` |
+| Ollama mode | `Local only` |
+| **Ollama base URL** | **`http://ollama:11434`** |
+
+> 🔴 **The base URL is the whole trick, and the wizard's default is wrong here.** It offers `http://127.0.0.1:11434`, which inside the OpenClaw container means *OpenClaw itself* — so it fails with `Ollama could not be reached`. This is the **third** form of the same mistake in this one service: upstream's docs say `host.docker.internal`, the wizard says `127.0.0.1`, and both assume Ollama runs on the host. In DockHub it is a container on `ai-net`, reached by name.
+
+The wizard verifies the URL by connecting, so if it accepts the value, the path is proven. You can confirm independently first:
+
+```bash
+docker exec openclaw sh -c 'wget -qO- http://ollama:11434/api/tags'
+```
+
+Model names are `provider/model` — the schema's own example is `ollama/qwen3:8b`, so a pulled `llama3.1:8b` becomes **`ollama/llama3.1:8b`**.
+
+> ⚠️ **The wizard does not set the default model.** Verified: after a clean run it wrote the provider, the model list and `model.fallbacks`, but `models status` still reported `Default: openai/gpt-5.5`. A fallback is not a default. Finish the job explicitly:
+>
+> ```bash
+> docker compose run --rm --entrypoint openclaw openclaw models set ollama/llama3.1:8b
+> docker compose restart openclaw
+> ```
+>
+> Then the startup line reads `agent model: ollama/…` instead of `openai/gpt-5.5`. Also: the model picker offers names you have **not pulled**. Only pick models that `docker exec ollama ollama list` actually shows, or the first message fails.
+
+> ⚠️ The wizard also touches gateway settings. Re-check `gateway.mode` and `gateway.controlUi.allowedOrigins` in `config/openclaw.json` when it finishes, and re-apply them if they went missing — `openclaw.json.bak` and `openclaw.json.last-good` sit beside it.
+
+### Why the default fails the way it does
 
 A fresh install ships pointing at a **cloud** model, and the first message fails. Seen live:
 
@@ -172,6 +212,10 @@ cd ~/docker/openclaw
 
 | Command | Purpose |
 |---|---|
+| `docker compose run --rm -it --entrypoint openclaw openclaw configure` | **The main one.** Models, channels, credentials, gateway, skills — the agent's whole configuration lives here |
+| `docker compose run --rm --entrypoint openclaw openclaw models status` | Which model is actually the default, and whether its auth resolves |
+| `docker compose run --rm --entrypoint openclaw openclaw models set ollama/<model>` | Change the default model |
+| `docker compose run --rm --entrypoint openclaw openclaw doctor` | Upstream's own health checks and fixes |
 | `curl http://<server-ip>:18789/readyz` | The real health answer — unauthenticated by design |
 | `docker compose logs -f openclaw` | Follow what the agent is doing |
 | `ls workspace/` | Files the agent has created |

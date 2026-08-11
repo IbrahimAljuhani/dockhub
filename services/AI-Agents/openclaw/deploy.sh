@@ -408,10 +408,32 @@ echo "   Paste it into 'Gateway Token' and press Connect. The field is"
 echo "   labelled optional because password auth is the alternative; with"
 echo "   this deployment the token is required."
 echo
-echo "   Then CHANGE THE MODEL — the default is a cloud one this image"
-echo "   cannot run, and the first message fails with:"
+echo "   Then GIVE IT A MODEL. The default is a cloud one with no key, so"
+echo "   the first message fails with:"
 echo "       MissingAgentHarnessError: agent harness \"codex\" is not registered"
-echo "   Nothing is broken; pick your provider in the dashboard settings."
+echo "   ('codex' is OpenAI's runtime — the error means no auth, not a bug.)"
+echo
+echo "   Run the wizard and answer Model -> More... -> Ollama -> Local only:"
+echo "       cd $INSTALL_DIR && $COMPOSE_CMD run --rm -it \\"
+echo "           --entrypoint openclaw openclaw configure"
+echo
+echo "   🔴 At 'Ollama base URL' it offers http://127.0.0.1:11434 — WRONG"
+echo "      here, that is OpenClaw talking to itself. Replace it with the"
+echo "      container name:"
+if [[ -n "$AI_PROVIDER_NAME" ]]; then
+    echo "          $AI_PROVIDER_BASE_URL"
+else
+    echo "          http://ollama:11434"
+fi
+echo
+echo "   The wizard sets the provider but NOT the default model, so finish"
+echo "   with (using a model you have actually pulled):"
+echo "       $COMPOSE_CMD run --rm --entrypoint openclaw openclaw \\"
+echo "           models set ollama/<model>"
+echo "       $COMPOSE_CMD restart openclaw"
+echo
+echo "   Keep 'configure' in mind afterwards — it is not just for models."
+echo "   Channels, credentials, skills and gateway settings all live there."
 echo
 echo "   ⚠️ Ignore the dashboard's 'Update now' button. In a container it"
 echo "      refuses with 'not-git-install' and tells you to run 'openclaw"
