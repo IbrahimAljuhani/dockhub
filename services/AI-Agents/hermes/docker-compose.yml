@@ -62,6 +62,32 @@
 # say to use the container name for an inference server on the same Docker
 # network. deploy.sh takes it from detect_ai_provider() either way.
 #
+# ── 5. THE SOCKET IS HALF A DECISION ────────────────────────────────────
+# Mounting /var/run/docker.sock is optional and off by default. What is NOT
+# obvious is that saying yes leaves a second choice unmade, and its default
+# is the weak one:
+#
+#   agent runs a command
+#     └─ inside THIS container          (terminal.backend: local — default)
+#          └─ which now holds the socket
+#               └─ docker run --privileged -v /:/host …
+#                    └─ root on the host
+#
+# Hermes says so itself on every start, recommending terminal.backend:
+# docker, which runs each tool call in a hardened throwaway container —
+# all capabilities dropped bar DAC_OVERRIDE/CHOWN/FOWNER, no-new-privileges,
+# a 256-process cap, nosuid tmpfs for /tmp and /var/tmp.
+#
+# That setting lives in config.yaml, not here, so deploy.sh asks a follow-up
+# question and writes it with `hermes config set`. HERMES_SANDBOX in .env is
+# only DockHub's record of your answer — the container never reads it, which
+# is why you will not find it in the environment block below.
+#
+# NOT set by this repo: terminal.docker_image, the image those sandbox
+# containers run from. Upstream shows it in an example but documents no
+# default, and an invented image name turns "sandboxed" into "broken at the
+# first tool call". Left alone, and flagged in the deploy output instead.
+#
 # ── PORTS ───────────────────────────────────────────────────────────────
 #   8642  OpenAI-compatible API server  (API_SERVER_*)
 #   9119  web dashboard                 (HERMES_DASHBOARD=1)

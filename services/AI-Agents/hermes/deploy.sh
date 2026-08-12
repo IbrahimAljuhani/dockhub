@@ -585,6 +585,17 @@ elif [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
     if docker exec hermes hermes config set terminal.backend docker 2>&1 | tee -a "$LOGFILE"; then
         (cd "$INSTALL_DIR" && $COMPOSE_CMD restart hermes >/dev/null 2>&1) \
             || print_warn "Set the backend but could not restart — do it yourself."
+        # The backend is set; the IMAGE those sandbox containers run from is a
+        # separate key, `terminal.docker_image`, and this script does NOT set
+        # it. Upstream's docs show it in an example but never state a default,
+        # so there is no value here that is known-correct — and inventing an
+        # image name is how you turn "sandboxed" into "silently broken at the
+        # first tool call". Flagged rather than guessed.
+        print_warn "Note: the sandbox IMAGE is a separate setting this script does not"
+        print_warn "touch. If tool calls fail once the agent tries to run something,"
+        print_warn "that is the likely cause — set it and restart:"
+        print_warn "  docker exec -it hermes hermes config get terminal"
+        print_warn "  docker exec -it hermes hermes config set terminal.docker_image <image>"
     else
         print_warn "Could not set terminal.backend. The agent will run unsandboxed"
         print_warn "beside the Docker socket until you set it by hand:"
@@ -834,6 +845,49 @@ container localhost is Hermes itself:
 (Upstream's docs say this correctly, which is worth noting because the
 other agent in this category has documentation that does not.)
 
+
+$( if [[ "$ENV_SOCK" == "1" ]]; then cat <<SANDBOX_EOF
+5. THE DOCKER SOCKET YOU MOUNTED
+------------------------------------------------------------------
+You said yes to /var/run/docker.sock, so the agent can use Docker as a
+tool. That also means:
+
+    agent runs a command
+      └─ inside the hermes container
+           └─ which holds docker.sock
+                └─ docker run --privileged -v /:/host …
+                     └─ root on this whole host
+
+Current state: agent commands run $( [[ "$ENV_SANDBOX" == "1" ]] && echo "in a SANDBOX container" || echo "UNSANDBOXED, in this container" ).
+
+$( if [[ "$ENV_SANDBOX" == "1" ]]; then cat <<INNER_EOF
+The sandbox (terminal.backend=docker) drops ALL Linux capabilities, adds
+back only DAC_OVERRIDE/CHOWN/FOWNER, sets no-new-privileges, limits
+processes to 256, and mounts /tmp and /var/tmp as nosuid tmpfs.
+
+  >>> deploy.sh sets the BACKEND but not the IMAGE those containers run.
+  >>> 'terminal.docker_image' has no value here that is known-correct, so
+  >>> it was left alone rather than guessed. If the agent fails the moment
+  >>> it tries to run a command, look there first:
+  >>>     docker exec -it hermes hermes config get terminal
+
+Upstream notes its usual dangerous-command checks are SKIPPED under this
+backend, because the container is the boundary instead.
+INNER_EOF
+else cat <<INNER_EOF
+You declined the sandbox, so the agent's shell shares this container with
+the socket — the widest reach of the three possible setups. To change it:
+
+    docker exec -it hermes hermes config set terminal.backend docker
+    $COMPOSE_CMD restart hermes
+INNER_EOF
+fi )
+
+If the agent does not actually need Docker as a tool, redeploying without
+the socket is stronger than any sandbox and costs nothing.
+
+SANDBOX_EOF
+fi )
 
 WORTH KNOWING
 ------------------------------------------------------------------
