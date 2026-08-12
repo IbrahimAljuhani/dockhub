@@ -861,7 +861,7 @@ just moves the failure to a context overflow later.
 4. CHANGING THE MODEL
 ------------------------------------------------------------------
     nano $INSTALL_DIR/data/config.yaml
-    $COMPOSE_CMD restart hermes
+    docker restart hermes
 
 deploy.sh writes that file only when it is absent, so your edits and
 anything the agent or wizard writes there survive future reruns.
@@ -908,7 +908,7 @@ You declined the sandbox, so the agent's shell shares this container with
 the socket — the widest reach of the three possible setups. To change it:
 
     docker exec -it hermes hermes config set terminal.backend docker
-    $COMPOSE_CMD restart hermes
+    docker restart hermes
 INNER_EOF
 fi )
 

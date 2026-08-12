@@ -133,7 +133,7 @@ The setting is written with Hermes' own CLI rather than hand-edited YAML — the
 
 ```bash
 docker exec -it hermes hermes config set terminal.backend docker
-docker compose restart hermes
+docker restart hermes
 ```
 
 ### What the sandbox actually gets — checked, not assumed
@@ -217,7 +217,7 @@ To change the model later:
 
 ```bash
 nano ~/docker/hermes/data/config.yaml
-docker compose restart hermes
+docker restart hermes
 ```
 
 ---
@@ -254,7 +254,7 @@ cd ~/docker/hermes
 > ⚠️ **When a wizard finishes and says "start the gateway: `hermes gateway`" — don't.** It is already running as the container's main process. That instruction is written for a host install, and following it inside the container starts a second gateway beside the first. Restart the container instead, which is what "pick up the new configuration" means here:
 >
 > ```bash
-> docker compose restart hermes
+> docker restart hermes
 > ```
 >
 > This is the **third** upstream instruction in this category that assumes a laptop: OpenClaw's dashboard offers an `openclaw update` that cannot work in a container, its wizard defaults Ollama to `127.0.0.1`, and Hermes' channel setup ends by telling you to start something that is already started. None of them are bugs — they are simply written for the install shape their authors expect. Read every "next step" from upstream with that in mind.
@@ -282,7 +282,7 @@ WhatsApp's wizard opens with a choice that decides whether anything will ever wo
 
 > 🔴 **Picking mode 1 with a single number produces total silence.** Verified live. The QR gets scanned by your phone, so *your* number becomes the bot; the allow-list then holds that same number; and reaching "the bot" would mean messaging yourself — which is mode 2's job. Mode `bot` does not pick up self-chat, so the message never reaches Hermes at all.
 >
-> The tell is that **the log stays completely empty** — no rejection, no error, nothing. Combined with the startup warning that messaging platforms *"deny unknown senders"* by default, silence is the designed outcome for anything unrecognised. Re-run the wizard and choose **2**, then `docker compose restart hermes`.
+> The tell is that **the log stays completely empty** — no rejection, no error, nothing. Combined with the startup warning that messaging platforms *"deny unknown senders"* by default, silence is the designed outcome for anything unrecognised. Re-run the wizard and choose **2**, then `docker restart hermes`.
 >
 ### Changing the mode afterwards
 
@@ -293,7 +293,7 @@ The way back is to remove what it reads, so the question returns:
 ```bash
 sed -i '/^WHATSAPP_MODE=/d' ~/docker/hermes/data/.env
 docker exec -it hermes hermes whatsapp          # now asks again — choose 2
-docker compose restart hermes
+docker restart hermes
 ```
 
 Answer **N** to "Re-pair?" — the session is fine, only the mode was wrong. Then WhatsApp → **Message Yourself**.
