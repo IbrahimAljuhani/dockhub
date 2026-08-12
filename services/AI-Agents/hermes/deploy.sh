@@ -565,44 +565,13 @@ print_info "Starting Hermes..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Hermes. Check log: $LOGFILE"
 
-# Deliberately AFTER `up -d`: `docker exec` needs a container to exist, and
-# on a first deploy there is none before this point. The CLI only writes a
-# file, so it does not need the gateway to have finished booting — but the
-# gateway does need restarting to read it, which is why that follows here
-# and the self-test comes after both.
-# Written ONLY when config.yaml does not already name a backend. Asserting
-# it on every run would repeat the exact mistake caught in OpenClaw's origin
-# allow-list: this is a setting the user is invited to change, and a rerun
-# to adjust a memory limit must not quietly drag it back. Someone who moved
-# to `local` on purpose gets to keep that. It also avoids an unnecessary
-# restart — which drops live sessions — on every subsequent deploy.
-if [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]] \
-   && grep -qE '^[[:space:]]*backend:' "$CONFIG_YAML" 2>/dev/null; then
-    CURRENT_BACKEND=$(grep -E '^[[:space:]]*backend:' "$CONFIG_YAML" | tail -1 | sed 's/.*backend:[[:space:]]*//' | tr -d '"')
-    print_info "Terminal backend already set to '${CURRENT_BACKEND}' — left alone."
-elif [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
-    print_info "Setting terminal.backend=docker (agent commands run sandboxed)..."
-    if docker exec hermes hermes config set terminal.backend docker 2>&1 | tee -a "$LOGFILE"; then
-        (cd "$INSTALL_DIR" && $COMPOSE_CMD restart hermes >/dev/null 2>&1) \
-            || print_warn "Set the backend but could not restart — do it yourself."
-        # The backend is set; the IMAGE those sandbox containers run from is a
-        # separate key, `terminal.docker_image`, and this script does NOT set
-        # it. Upstream's docs show it in an example but never state a default,
-        # so there is no value here that is known-correct — and inventing an
-        # image name is how you turn "sandboxed" into "silently broken at the
-        # first tool call". Flagged rather than guessed.
-        print_warn "Note: the sandbox IMAGE is a separate setting this script does not"
-        print_warn "touch. If tool calls fail once the agent tries to run something,"
-        print_warn "that is the likely cause — set it and restart:"
-        print_warn "  docker exec -it hermes hermes config get terminal"
-        print_warn "  docker exec -it hermes hermes config set terminal.docker_image <image>"
-    else
-        print_warn "Could not set terminal.backend. The agent will run unsandboxed"
-        print_warn "beside the Docker socket until you set it by hand:"
-        print_warn "  docker exec -it hermes hermes config set terminal.backend docker"
-        print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD restart hermes"
-    fi
-fi
+# SANDBOX_STATE is what actually happened, not what was asked for. The
+# summary box reads THIS, never ENV_SANDBOX — a first cut printed
+# "sandboxed" from the user's answer while the command that would have made
+# it true had failed three lines earlier. That is the same class of lie this
+# category's README warns about in "a green self-test does not mean a
+# working agent", and it is worse than the failure it hid.
+SANDBOX_STATE="off"
 
 # ── Self-test ───────────────────────────────────────────────────────────
 # /v1/models WITH the key: it proves the API server is up, that the key
@@ -683,6 +652,53 @@ if (( WAIT_RC == 1 )); then
     print_error "Hermes did not start. Full log: cd $INSTALL_DIR && $COMPOSE_CMD logs hermes"
 fi
 
+# ── The sandbox, set only once the container is genuinely up ────────────
+# This used to run immediately after `up -d` and failed on a live host with:
+#
+#   PermissionError: [Errno 13] Permission denied: '/opt/data/.env'
+#
+# — because s6's cont-init was still running. Its own log narrates the race:
+# "[stage2] Changing hermes UID to 1000", "chowned supervise/ trees". The
+# CLI does only write a file, so the earlier comment claiming it need not
+# wait for the gateway was true and useless: it does need to wait for the
+# INIT. The self-test above is exactly the proof that init has finished, so
+# the work belongs here, after it.
+#
+# Written ONLY when config.yaml does not already name a backend — the same
+# rule as OpenClaw's origin allow-list. Someone who moved to `local` on
+# purpose keeps it, and reruns do not force an unnecessary restart that
+# would drop live sessions.
+if [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
+    if grep -qE '^[[:space:]]*backend:' "$CONFIG_YAML" 2>/dev/null; then
+        SANDBOX_STATE=$(grep -E '^[[:space:]]*backend:' "$CONFIG_YAML" | tail -1 | sed 's/.*backend:[[:space:]]*//' | tr -d '"')
+        print_info "Terminal backend already set to '$SANDBOX_STATE' — left alone."
+    else
+        print_info "Setting terminal.backend=docker (agent commands run sandboxed)..."
+        if docker exec hermes hermes config set terminal.backend docker 2>&1 | tee -a "$LOGFILE"; then
+            SANDBOX_STATE="docker"
+            (cd "$INSTALL_DIR" && $COMPOSE_CMD restart hermes >/dev/null 2>&1) \
+                || print_warn "Set the backend but could not restart — do it yourself."
+            # The backend is set; the IMAGE those sandbox containers run from
+            # is a separate key, `terminal.docker_image`, and this script does
+            # NOT set it. Upstream shows it in an example but documents no
+            # default, and inventing an image name is how "sandboxed" becomes
+            # "silently broken at the first tool call". Flagged, not guessed.
+            print_warn "Note: the sandbox IMAGE is a separate setting this script does not"
+            print_warn "touch. If tool calls fail once the agent tries to run something,"
+            print_warn "that is the likely cause — inspect and set it:"
+            print_warn "  docker exec -it hermes hermes config get terminal"
+            print_warn "  docker exec -it hermes hermes config set terminal.docker_image <image>"
+        else
+            # SANDBOX_STATE stays "off" — the summary must report the failure,
+            # not the intention.
+            print_warn "Could not set terminal.backend, so the agent's shell stays in THIS"
+            print_warn "container, beside the Docker socket. Retry once it has settled:"
+            print_warn "  docker exec -it hermes hermes config set terminal.backend docker"
+            print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD restart hermes"
+        fi
+    fi
+fi
+
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 # ── Reading the model back is not as simple as it looks ────────────────
@@ -718,11 +734,17 @@ fi
 echo "🕸️  Networks:        $( [[ "$ENV_MAIN_NET" == "1" ]] && echo "ai-net + main-net" || echo "ai-net only" )"
 if [[ "$ENV_SOCK" == "1" ]]; then
     echo "🔌 Docker socket:   MOUNTED ⚠️"
-    if [[ "$ENV_SANDBOX" == "1" ]]; then
-        echo "🧱 Agent shell:     sandboxed (terminal.backend=docker)"
-    else
-        echo "🧱 Agent shell:     ⚠️ UNSANDBOXED, in this container beside the socket"
-    fi
+    # SANDBOX_STATE, never ENV_SANDBOX: one is what happened, the other is
+    # what was asked for, and they are not the same line.
+    case "$SANDBOX_STATE" in
+        docker) echo "🧱 Agent shell:     sandboxed (terminal.backend=docker)" ;;
+        off)    if [[ "$ENV_SANDBOX" == "1" ]]; then
+                    echo "🧱 Agent shell:     ⚠️ SANDBOX REQUESTED BUT NOT APPLIED — see above"
+                else
+                    echo "🧱 Agent shell:     ⚠️ UNSANDBOXED, in this container beside the socket"
+                fi ;;
+        *)      echo "🧱 Agent shell:     terminal.backend=$SANDBOX_STATE" ;;
+    esac
 else
     echo "🔌 Docker socket:   not mounted ✅"
 fi
