@@ -136,7 +136,29 @@ docker exec -it hermes hermes config set terminal.backend docker
 docker compose restart hermes
 ```
 
-> ⚠️ **One thing this repo did not verify:** whether the sandbox container itself is denied the Docker socket. Reasoning says it must be — moving the agent's shell off the container that holds the socket is the entire point — but upstream's security page does not say so, and reasoning is not evidence. If you depend on that boundary, check it: `docker exec -it hermes hermes config get terminal`.
+### What the sandbox actually gets — checked, not assumed
+
+`hermes config get terminal` on a live deployment answers the two questions upstream's docs leave open:
+
+```
+backend: docker
+docker_image: nikolaik/python-nodejs:python3.11-nodejs20
+docker_volumes: []
+docker_network: true
+container_cpu: 1
+container_memory: 5120
+container_disk: 51200
+container_persistent: true
+docker_run_as_host_user: false
+```
+
+Three things worth reading off that:
+
+- **The image has a default.** No extra configuration is needed to make the sandbox work — an earlier version of this repo warned otherwise, and the warning was wrong.
+- **`docker_volumes: []` — nothing is mounted in, so the sandbox does not receive the Docker socket.** That is the boundary the whole exercise depends on, and it is now verified rather than reasoned.
+- **`container_memory: 5120`** — the sandbox may claim 5 GB. On a host already running a model provider, that is worth knowing before the agent starts work.
+
+`container_persistent: true` matches upstream's note that one long-lived container is reused for all tool calls rather than one per call.
 
 **If the agent does not actually need Docker as a tool, option A is stronger than any sandbox and costs nothing.** What is never granted cannot be misused.
 

@@ -678,16 +678,23 @@ if [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
             SANDBOX_STATE="docker"
             (cd "$INSTALL_DIR" && $COMPOSE_CMD restart hermes >/dev/null 2>&1) \
                 || print_warn "Set the backend but could not restart — do it yourself."
-            # The backend is set; the IMAGE those sandbox containers run from
-            # is a separate key, `terminal.docker_image`, and this script does
-            # NOT set it. Upstream shows it in an example but documents no
-            # default, and inventing an image name is how "sandboxed" becomes
-            # "silently broken at the first tool call". Flagged, not guessed.
-            print_warn "Note: the sandbox IMAGE is a separate setting this script does not"
-            print_warn "touch. If tool calls fail once the agent tries to run something,"
-            print_warn "that is the likely cause — inspect and set it:"
-            print_warn "  docker exec -it hermes hermes config get terminal"
-            print_warn "  docker exec -it hermes hermes config set terminal.docker_image <image>"
+            # An earlier version warned here that the sandbox IMAGE might be
+            # unset, because upstream's docs show `terminal.docker_image` in an
+            # example without stating a default. Checking a live deployment
+            # settled it — there IS one, and the whole terminal block comes
+            # pre-populated:
+            #
+            #   docker_image: nikolaik/python-nodejs:python3.11-nodejs20
+            #   docker_volumes: []          <- and so: no Docker socket inside
+            #   container_memory: 5120      <- 5 GB, worth knowing on a small host
+            #   container_persistent: true
+            #
+            # The warning was removed rather than softened: pointing a user at
+            # a setting that is already correct costs attention for nothing,
+            # and this deploy has enough real warnings competing for it.
+            print_info "Sandbox ready. Its container image, limits and (empty) volume"
+            print_info "list are Hermes' own defaults — inspect with:"
+            print_info "  docker exec -it hermes hermes config get terminal"
         else
             # SANDBOX_STATE stays "off" — the summary must report the failure,
             # not the intention.

@@ -83,10 +83,19 @@
 # only DockHub's record of your answer — the container never reads it, which
 # is why you will not find it in the environment block below.
 #
-# NOT set by this repo: terminal.docker_image, the image those sandbox
-# containers run from. Upstream shows it in an example but documents no
-# default, and an invented image name turns "sandboxed" into "broken at the
-# first tool call". Left alone, and flagged in the deploy output instead.
+# Nothing else needs setting. That was an open question here for a while —
+# upstream shows `terminal.docker_image` in an example without naming a
+# default — and a live deployment answered it:
+#
+#   docker_image:         nikolaik/python-nodejs:python3.11-nodejs20
+#   docker_volumes:       []        <- so the sandbox gets NO Docker socket
+#   container_memory:     5120      <- 5 GB, on a host also running a model
+#   container_persistent: true      <- one reused container, not one per call
+#
+# The empty volume list is the load-bearing line: it is what makes moving
+# the agent's shell into a sandbox mean anything, and it is now verified
+# rather than reasoned. Inspect any deployment with:
+#   docker exec -it hermes hermes config get terminal
 #
 # ── PORTS ───────────────────────────────────────────────────────────────
 #   8642  OpenAI-compatible API server  (API_SERVER_*)
