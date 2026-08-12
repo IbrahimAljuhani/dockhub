@@ -14,8 +14,8 @@ Agents that **do work for you**. You talk to one and it acts, using tools — it
 
 | | What it's for | Image | Port |
 |---|---|---|---|
-| 🚧 [**OpenClaw**](openclaw/) | A personal assistant reachable over messaging, with a web gateway of its own. The broadest control plane of the three. | `ghcr.io/openclaw/openclaw` | `18789` |
-| 🚧 [**Hermes**](hermes/) | A leaner, more personal assistant with a **learning loop** — built for repeated and scheduled work that should improve over time. Reachable over Telegram, Discord, Slack, WhatsApp, Signal or email, and exposes its own OpenAI-compatible gateway. | `nousresearch/hermes-agent` | `8642` · `9119` |
+| ✅ [**OpenClaw**](openclaw/) | A personal assistant reachable over messaging, with a web gateway of its own. The broadest control plane of the three. | `ghcr.io/openclaw/openclaw` | `18789` |
+| ✅ [**Hermes**](hermes/) | A leaner, more personal assistant with a **learning loop** — built for repeated and scheduled work that should improve over time. Reachable over Telegram, Discord, Slack, WhatsApp, Signal or email, and exposes its own OpenAI-compatible gateway. | `nousresearch/hermes-agent` | `8642` · `9119` |
 | 🚧 [**OpenHands**](openhands/) | A **software engineering** agent. It writes code, runs it, and browses — a different job from the two above. | `docker.openhands.dev/openhands/openhands` | `3001` |
 
 > OpenHands publishes on `3000` upstream. DockHub defaults it to **`3001`**, because `3000` is [Open WebUI](../AI/open-webui/)'s default — and Open WebUI is exactly what someone deploying an agent is likely to already be running.
@@ -84,15 +84,19 @@ Agents never load a model, so there is no VRAM contention to cite. `deploy.sh` o
 
 Every agent here needs one — a provider from [AI](../AI/) on this server, or a cloud API key. Neither is assumed.
 
-**But none of the three can be configured entirely from a script**, and they disagree on how:
+**And they disagree completely on how** — which decided how far each `deploy.sh` could go:
 
-| | Where the model is configured |
-|---|---|
-| OpenClaw | An onboarding wizard |
-| Hermes | A setup wizard, then `config.yaml` |
-| OpenHands | **The web UI only** — no environment variable exists for it |
+| | Where the model is configured | Scriptable? |
+|---|---|---|
+| **Hermes** | `data/config.yaml`, a plain file | ✅ **Yes** — `deploy.sh` writes it, and the agent works when the script ends |
+| OpenClaw | An onboarding wizard, no environment variable | ❌ No — five manual steps follow the deploy |
+| OpenHands | **The web UI only** | ❌ No |
 
-So DockHub deliberately **does not** try to automate it. Each `deploy.sh` prints the exact endpoint to paste, discovered from whichever provider is running, and leaves the wizard to do its job — the same choice made for the NGINX Proxy Manager steps in [ERPNext](../ERP/erpnext/).
+This was the single biggest difference between building the first agent and the second. OpenClaw took ten rounds and five discovered gates; Hermes worked on the first live deploy, and a config file rather than a wizard is most of why.
+
+Where it *can* be scripted, DockHub does it: Hermes' `deploy.sh` asks the running provider what models it serves — one query to `/v1/models`, made from a container **on `ai-net`**, because that is the only vantage point whose answer means anything — and writes the choice in.
+
+Where it cannot, DockHub **does not fake it**. `deploy.sh` prints the exact endpoint to paste and leaves the wizard alone, the same choice made for the NGINX Proxy Manager steps in [ERPNext](../ERP/erpnext/).
 
 > ⚠️ **Upstream docs will tell you `http://host.docker.internal:11434` for Ollama. That is wrong here.** It assumes Ollama runs on the host. In DockHub it's a container on `ai-net`, so the address is **`http://ollama:11434`** — and `deploy.sh` prints the right one for you.
 
@@ -115,6 +119,22 @@ Two lived examples:
 - **Hermes again**, with WhatsApp: paired successfully, bridge connected, gateway running — and messages produced **no log line at all**, because the wizard's mode had been set for a two-number setup on a one-number phone. "Deny unknown senders" is the documented default, so silence was the correct behaviour and looked exactly like a fault.
 
 The habit that follows: **a deploy is not finished until a message has gone in and a reply has come out.** For an agent, that round trip is the only real test, and it is the one no `deploy.sh` can run for you.
+
+---
+
+## 🧭 Five questions to ask an agent image before writing a line
+
+Every one of these cost at least a round when it was discovered by running into it instead. They share a root: **these programs assume a human sitting at a terminal on `localhost`**, and a container with a scripted deploy is neither.
+
+| Ask | Because, in practice |
+|---|---|
+| **Does it refuse to start unconfigured?** | OpenClaw crash-looped on `Missing config`, and **no environment variable existed** for the setting it wanted — only its own CLI could write it |
+| **Does it demand auth on a non-loopback bind?** | Both do, and both **fail closed**. That is good behaviour, but it means credentials must exist *before* first start, not after |
+| **Does its web UI need a browser secure context?** | OpenClaw's does — Web Crypto for a device identity — so plain `http://` to a server IP **cannot work**, however correct the token. An SSH tunnel is mandatory there. Hermes has no such rule |
+| **Is its config seeded in memory or written to disk?** | OpenClaw seeds its origin allow-list *without writing it*. The dashboard worked for two and a half minutes, then broke with no restart in between |
+| **Is the image supervised?** | Hermes runs under **s6**, so `docker compose run` starts a *second* gateway beside the first. OpenClaw has no supervisor and `run` is fine. **Same command, opposite outcomes** — use `docker exec` for Hermes |
+
+And one that only shows up later: **what does the container run as?** Hermes uses **uid 10000**, so `PUID`/`PGID` are mandatory with a bind mount. OpenClaw uses `node` — uid 1000 — which happens to match a first Ubuntu account, so it works by coincidence rather than design.
 
 ---
 
