@@ -87,6 +87,43 @@ ssh -L 9119:localhost:9119 you@your-server
 
 The Docker socket is **optional**. Upstream ships `docker-cli` in the image and suggests the mount so the agent can use Docker as a tool. Convenience, not a requirement — the same ruling this repo made for OpenClaw.
 
+### Saying yes to the socket gets a second question
+
+Mounting it creates a chain that is easy to miss, and Hermes names it at every startup:
+
+> *API server is network-accessible (0.0.0.0) AND the terminal backend is `local` (unsandboxed). Agent work dispatched through this endpoint runs as the host user with full terminal/file access. Strongly consider a sandboxed backend (`terminal.backend: docker`).*
+
+```
+agent runs a command
+  └─ inside the hermes container        ← terminal.backend: local (the default)
+       └─ which now holds docker.sock
+            └─ so it can:  docker run --privileged -v /:/host …
+                 └─ root on the whole host
+```
+
+Three possible setups, and the default is the weakest of them:
+
+| | Socket | Backend | The agent can reach |
+|---|---|---|---|
+| **A** | ❌ | `local` | its own container only |
+| **B** | ✅ | `docker` | a hardened per-session container |
+| **C** | ✅ | `local` | **the entire host** |
+
+`deploy.sh` therefore asks a **second** question when you mount the socket, defaulting to the sandbox. Answering the first `y` should not silently buy you **C**.
+
+What **B** actually applies, per upstream's security page: **all Linux capabilities dropped**, then only `DAC_OVERRIDE`, `CHOWN` and `FOWNER` added back; `no-new-privileges`; a 256-process limit; `/tmp` and `/var/tmp` as `nosuid` tmpfs. Upstream notes that its usual dangerous-command checks are *skipped* under this backend, "because the container itself is the security boundary".
+
+The setting is written with Hermes' own CLI rather than hand-edited YAML — the tool knows its schema, a guessed nesting does not:
+
+```bash
+docker exec -it hermes hermes config set terminal.backend docker
+docker compose restart hermes
+```
+
+> ⚠️ **One thing this repo did not verify:** whether the sandbox container itself is denied the Docker socket. Reasoning says it must be — moving the agent's shell off the container that holds the socket is the entire point — but upstream's security page does not say so, and reasoning is not evidence. If you depend on that boundary, check it: `docker exec -it hermes hermes config get terminal`.
+
+**If the agent does not actually need Docker as a tool, option A is stronger than any sandbox and costs nothing.** What is never granted cannot be misused.
+
 ---
 
 ## 🧩 The model, configured at deploy time

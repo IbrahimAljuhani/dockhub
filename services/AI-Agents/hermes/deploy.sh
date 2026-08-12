@@ -135,12 +135,50 @@ else
     print_warn "           container, which is root-equivalent on this host"
     print_warn "Hermes runs fine WITHOUT it. This is not required."
     read -rp "Mount /var/run/docker.sock? (y/N): " sock_answer
+    HERMES_SANDBOX_VALUE=0
     if [[ "${sock_answer,,}" == "y" ]]; then
         HERMES_SOCK_VALUE=1
         print_warn "Docker socket enabled. Keep this host behind a firewall."
+
+        # ── The follow-up question, and why it exists ────────────────────
+        # Saying yes above creates a chain that is easy to miss: the agent's
+        # shell runs INSIDE this container (terminal.backend defaults to
+        # 'local'), this container now holds the Docker socket, and so the
+        # agent can start a privileged container and reach the whole host.
+        # Hermes says so itself at every startup:
+        #
+        #   API server is network-accessible (0.0.0.0) AND the terminal
+        #   backend is 'local' (unsandboxed). Agent work dispatched through
+        #   this endpoint runs as the host user with full terminal/file
+        #   access. Strongly consider a sandboxed backend
+        #   (terminal.backend: docker).
+        #
+        # Leaving that as the silent default is the real problem — not that
+        # sandboxing is missing, but that the weakest combination is what
+        # you get for answering one 'y'. So ask.
+        echo >&2
+        print_warn "That alone leaves the agent's own shell inside THIS container —"
+        print_warn "the one now holding the socket. Hermes warns about it on every"
+        print_warn "start, and the way out is its 'docker' terminal backend:"
+        print_warn "  local  (default) — agent commands run here, beside the socket"
+        print_warn "  docker           — each tool call runs in a separate hardened"
+        print_warn "                     container: ALL capabilities dropped, then"
+        print_warn "                     only DAC_OVERRIDE/CHOWN/FOWNER added back,"
+        print_warn "                     no-new-privileges, 256-process limit,"
+        print_warn "                     nosuid tmpfs for /tmp and /var/tmp"
+        echo >&2
+        read -rp "Run agent commands in a sandbox container (recommended)? (Y/n): " sandbox_answer
+        if [[ "${sandbox_answer,,}" == "n" ]]; then
+            print_warn "Sandbox declined. The agent's shell shares this container with the"
+            print_warn "socket — the widest reach of the three possible setups."
+        else
+            HERMES_SANDBOX_VALUE=1
+            print_info "Sandbox enabled. deploy.sh will set terminal.backend=docker."
+        fi
     else
         HERMES_SOCK_VALUE=0
-        print_info "No Docker socket. Tools run inside the Hermes container."
+        print_info "No Docker socket. Tools run inside the Hermes container, which"
+        print_info "cannot reach the host — the strongest option, and free."
     fi
 
     # ── The dashboard ───────────────────────────────────────────────────
@@ -309,6 +347,7 @@ PGID=$(id -g)
 API_SERVER_KEY=$API_KEY_VALUE
 HERMES_DASHBOARD=$HERMES_DASHBOARD_VALUE
 HERMES_SOCK=$HERMES_SOCK_VALUE
+HERMES_SANDBOX=$HERMES_SANDBOX_VALUE
 AGENT_ON_MAIN_NET=$AGENT_ON_MAIN_NET
 EOF
     if (( HERMES_DASHBOARD_VALUE )); then
@@ -356,6 +395,7 @@ fi
 ENV_MEM_LIMIT=$(read_env_value "MEM_LIMIT" "$INSTALL_DIR/.env")
 ENV_HOST_PORT=$(read_env_value "HOST_PORT" "$INSTALL_DIR/.env")
 ENV_SOCK=$(read_env_value "HERMES_SOCK" "$INSTALL_DIR/.env")
+ENV_SANDBOX=$(read_env_value "HERMES_SANDBOX" "$INSTALL_DIR/.env")
 ENV_MAIN_NET=$(read_env_value "AGENT_ON_MAIN_NET" "$INSTALL_DIR/.env")
 ENV_DASHBOARD=$(read_env_value "HERMES_DASHBOARD" "$INSTALL_DIR/.env")
 ENV_API_KEY=$(read_env_value "API_SERVER_KEY" "$INSTALL_DIR/.env")
@@ -461,9 +501,42 @@ print_info "Pulling the image (first run downloads it)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD pull 2>&1 | tee -a "$LOGFILE") \
     || print_warn "Pull failed — the start below will report the real error."
 
+# ── The sandbox setting, written with Hermes' own CLI ───────────────────
+# `hermes config set` rather than hand-edited YAML, for the reason OpenClaw
+# taught: the tool knows its own schema, a guessed nesting does not. And it
+# is idempotent, so this is safe to reassert on every run.
+#
+# Written only when the socket is mounted, because the docker backend needs
+# the socket to create its containers — asking Hermes to sandbox without it
+# would swap a working setup for a broken one.
+#
+# Not verified from upstream docs, so NOT assumed here: whether the sandbox
+# container itself receives the socket. Reasoning says it should not — the
+# whole point is moving the agent's shell off the container that has it —
+# but the security page is silent on it. If you rely on that boundary,
+# confirm it yourself:
+#   docker exec -it hermes hermes config get terminal
 print_info "Starting Hermes..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Hermes. Check log: $LOGFILE"
+
+# Deliberately AFTER `up -d`: `docker exec` needs a container to exist, and
+# on a first deploy there is none before this point. The CLI only writes a
+# file, so it does not need the gateway to have finished booting — but the
+# gateway does need restarting to read it, which is why that follows here
+# and the self-test comes after both.
+if [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
+    print_info "Setting terminal.backend=docker (agent commands run sandboxed)..."
+    if docker exec hermes hermes config set terminal.backend docker 2>&1 | tee -a "$LOGFILE"; then
+        (cd "$INSTALL_DIR" && $COMPOSE_CMD restart hermes >/dev/null 2>&1) \
+            || print_warn "Set the backend but could not restart — do it yourself."
+    else
+        print_warn "Could not set terminal.backend. The agent will run unsandboxed"
+        print_warn "beside the Docker socket until you set it by hand:"
+        print_warn "  docker exec -it hermes hermes config set terminal.backend docker"
+        print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD restart hermes"
+    fi
+fi
 
 # ── Self-test ───────────────────────────────────────────────────────────
 # /v1/models WITH the key: it proves the API server is up, that the key
@@ -577,7 +650,16 @@ else
     echo "🖥️  Dashboard:       off"
 fi
 echo "🕸️  Networks:        $( [[ "$ENV_MAIN_NET" == "1" ]] && echo "ai-net + main-net" || echo "ai-net only" )"
-echo "🔌 Docker socket:   $( [[ "$ENV_SOCK" == "1" ]] && echo "MOUNTED ⚠️" || echo "not mounted ✅" )"
+if [[ "$ENV_SOCK" == "1" ]]; then
+    echo "🔌 Docker socket:   MOUNTED ⚠️"
+    if [[ "$ENV_SANDBOX" == "1" ]]; then
+        echo "🧱 Agent shell:     sandboxed (terminal.backend=docker)"
+    else
+        echo "🧱 Agent shell:     ⚠️ UNSANDBOXED, in this container beside the socket"
+    fi
+else
+    echo "🔌 Docker socket:   not mounted ✅"
+fi
 echo "🧠 Model:           ${CONFIGURED_MODEL:-none configured}"
 echo "📁 Agent data:      $INSTALL_DIR/data  (memory, skills, sessions)"
 echo "🔑 Credentials:     $SECRETS_FILE"
