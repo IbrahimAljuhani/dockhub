@@ -1,0 +1,99 @@
+# OpenHands — the third AGENT in DockHub, and the one that is not an assistant.
+#
+# OpenClaw and Hermes are personal assistants: you message them and they act.
+# OpenHands is a SOFTWARE ENGINEERING assistant — it writes code, runs it,
+# and browses. Different job, different risk shape, and the only service in
+# this category that cannot be deployed without the Docker socket.
+#
+# Read services/AI-Agents/README.md first. The category threat model is what
+# every decision below comes from.
+#
+# ── 1. THE SOCKET IS REQUIRED, NOT OFFERED ──────────────────────────────
+# OpenHands starts a fresh runtime container per session — that is how it
+# sandboxes the code it writes from itself. To do that it must reach the
+# Docker daemon.
+#
+# So the ruling this repo made for the other two ("optional, off by
+# default") cannot apply. There is no OpenHands without the socket, and
+# deploy.sh therefore asks for a TYPED acknowledgement rather than a y/n.
+#
+# The intent is security-POSITIVE — isolation is the point. The effect on
+# the host is the same one that makes Portainer sensitive: anything reaching
+# that socket can start a privileged container, which is root-equivalent.
+# What differs from Portainer is who holds the trigger: you, versus a
+# language model acting on text it did not write.
+#
+# ── 2. IT HAS NO AUTHENTICATION. THIS IS THE IMPORTANT ONE. ─────────────
+# The other two agents in this category REFUSE to bind a non-loopback
+# address without credentials. OpenHands has no such gate — it boots
+# straight to a settings screen, and anyone who can reach the port has a
+# fully privileged agent with the Docker socket behind it.
+#
+# Upstream says so itself: bind 127.0.0.1, reach it through a reverse proxy
+# with TLS, and expose it only behind an API key plus a firewall or VPN.
+# The "hardened" third-party offering adds HTTP basic auth in nginx IN FRONT
+# of OpenHands — because OpenHands does not have any.
+#
+# Hence the host port here is published to 127.0.0.1 ONLY, never the LAN.
+# The documented route in is an SSH tunnel:
+#     ssh -L 3001:localhost:3001 you@server
+# Same treatment as Hermes' dashboard, for a stronger reason.
+#
+# ── 3. PORT 3001, NOT 3000 ──────────────────────────────────────────────
+# Upstream publishes 3000. That is Open WebUI's default in this catalogue —
+# and Open WebUI is exactly what someone deploying an agent already runs.
+# Redmine and Juice Shop are on it too. So DockHub defaults to 3001.
+#
+# ── 4. TWO IMAGES, NOT ONE ──────────────────────────────────────────────
+# The app image below, plus a runtime image it pulls at session start:
+#     AGENT_SERVER_IMAGE_REPOSITORY / AGENT_SERVER_IMAGE_TAG
+# Pinned in .env rather than floating, because a runtime that silently
+# changes under a working setup is a debugging problem nobody wants. Both
+# are pulled up front by deploy.sh so the first session is not a surprise
+# multi-gigabyte download.
+#
+# ── 5. THE MODEL IS SET IN THE UI, AND ONLY THERE ───────────────────────
+# No environment variable configures it. Unlike Hermes — whose config.yaml
+# let deploy.sh write the model in — this one cannot be scripted at all.
+# deploy.sh prints the exact endpoint to paste and leaves it at that.
+#
+# This is a single-instance service, under ~/docker/openhands/.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it
+# (and the generated .env) to ~/docker/openhands/ and runs it from there.
+
+services:
+  openhands:
+    image: docker.openhands.dev/openhands/openhands:${OPENHANDS_TAG:-1.8}
+    container_name: openhands
+    restart: unless-stopped
+    environment:
+      # Which runtime image sessions get. Repository and tag are separate
+      # variables upstream, so they stay separate here.
+      AGENT_SERVER_IMAGE_REPOSITORY: ${AGENT_SERVER_IMAGE_REPOSITORY}
+      AGENT_SERVER_IMAGE_TAG: ${AGENT_SERVER_IMAGE_TAG}
+      # Upstream's own run command sets this. Kept because their default
+      # runtime configuration may reference it; DockHub's own guidance
+      # always points at container names on ai-net instead.
+      LOG_ALL_EVENTS: "true"
+    volumes:
+      # Settings, secrets, conversations and the agent's working copies.
+      # A bind mount, not a named volume: this is real user data — the
+      # Backup option in the menu should capture it as part of the tree,
+      # exactly as for the other two agents.
+      - ./state:/.openhands
+      # ⚠️ Required. See block 1. deploy.sh will not write this file at all
+      # unless you typed the acknowledgement.
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      # Upstream's documented run command includes this. Left in place
+      # because their runtime spawning may rely on it — but note it is NOT
+      # how you reach a DockHub model provider. Those are containers on
+      # ai-net, reached by name: http://ollama:11434
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ai-net
+
+networks:
+  ai-net:
+    external: true

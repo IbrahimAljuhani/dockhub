@@ -1,7 +1,154 @@
-# 🚧 OpenHands
+# 🙌 OpenHands
 
-**Status:** Not built yet — coming soon.
+<sub>Part of [AI-Agents](../README.md) — read the category's threat model before deploying any agent.</sub>
 
-Part of the **AI-Agents** category in [DockHub](../../../README.md)'s services roadmap. It's already listed in [`services.sh`](../../services.sh)'s menu (shows "coming soon" if picked) and in [`services/README.md`](../../README.md)'s roadmap table — this folder is just a placeholder until it's actually built.
+**A software-engineering assistant.** It writes code, runs it, and browses the web to get a task done.
 
-Want to help build this one, or need it sooner? Open an issue on the [DockHub repo](https://github.com/IbrahimAljuhani/dockhub).
+That is a different job from its neighbours here, and worth saying plainly so nobody arrives expecting the wrong thing: [OpenClaw](../openclaw/) and [Hermes](../hermes/) are **personal assistants** you message on Telegram or WhatsApp. OpenHands is a **developer tool** you open in a browser and give a coding task to. Same category — an agent that does work for you — different work.
+
+---
+
+## 📗 What you get
+
+| | |
+|---|---|
+| **Interface** | A web UI, reached over an SSH tunnel |
+| **Docker socket** | **Required** — not optional, unlike the other two |
+| **Authentication** | **None.** See below; it shapes every other decision |
+| **Port** | `3001` on `127.0.0.1` — deliberately not your LAN |
+| **Model** | Set in the UI only. No environment variable exists |
+| **Containers** | Two: the app, plus a runtime it starts per session |
+| **State** | `~/docker/openhands/state` — settings, conversations, working copies |
+
+---
+
+## 🔴 The Docker socket is required, and DockHub asks you to type
+
+Every other service in this repo either does not want the socket or treats it as an extra. OpenHands cannot run without it: it starts a **fresh runtime container per session**, which is how the code it writes stays out of OpenHands itself.
+
+So the intent is security-*positive*. The effect on the host is not:
+
+```
+agent runs code
+  └─ OpenHands starts a runtime container for it
+       └─ using /var/run/docker.sock
+            └─ which can also start:  docker run --privileged -v /:/host …
+                 └─ root on the whole host
+```
+
+`deploy.sh` will not proceed on a keypress. It prints the full chain and asks you to type **`i-accept`**.
+
+> The typing is not security theatre disguised as friction — it plainly is not harder than pressing `y`. Its actual job is that **it cannot be answered by habit**: every other prompt in this repo takes `y` or Enter, so a reflex answer lands nowhere and you have to look up. What earns the gate is the warning, not the keystroke.
+
+**DockHub does not refuse this**, and refusing would be inconsistent: core infrastructure already runs **Portainer** on the same socket. The difference is who holds the trigger — you, or a language model acting on text it did not write.
+
+If you only want an assistant, [OpenClaw](../openclaw/) and [Hermes](../hermes/) do that job with the socket **off**.
+
+---
+
+## 🔴 It has no authentication. This is the decisive fact.
+
+The other two agents here **refuse to start** unless you give them credentials — OpenClaw wants a gateway token, Hermes an API key. Checked against upstream, OpenHands has no such gate: it boots straight to a usable settings screen, and **anyone who reaches the port has a fully privileged agent with the Docker socket behind it**.
+
+Upstream says the same in its own words: bind `127.0.0.1`, reach it through a reverse proxy with TLS, and expose it only behind an API key plus a firewall or VPN. The third-party "hardened" build of OpenHands adds HTTP basic auth **in nginx, in front** — precisely because OpenHands has none.
+
+So `deploy.sh` publishes the port to **`127.0.0.1` on the server**, never the LAN:
+
+```bash
+ssh -L 3001:localhost:3001 you@your-server
+```
+
+Then browse `http://localhost:3001`.
+
+> This is the same treatment Hermes' dashboard gets, for a stronger reason. There it is a privacy preference; here it is the only thing standing between your LAN and a root-equivalent agent.
+
+### If you put it behind NGINX Proxy Manager
+
+Possible — answer **yes** to the `main-net` question — but **add an Access List on the proxy host**. NPM's basic auth is then the only login OpenHands will ever have. Without it you have published a privileged agent to whoever finds the domain.
+
+---
+
+## 🔌 Port 3001, not 3000
+
+Upstream publishes on `3000`. In this catalogue that is [Open WebUI](../../AI/open-webui/)'s default — and Open WebUI is exactly what someone deploying an agent already runs — as well as Redmine's and Juice Shop's. DockHub defaults to **3001**, and warns if you type 3000 anyway.
+
+---
+
+## 📦 Two images, both pinned
+
+| | |
+|---|---|
+| App | `docker.openhands.dev/openhands/openhands:1.8` |
+| Session runtime | `ghcr.io/openhands/agent-server:1.26.0-python` |
+
+Both are pinned in `.env` rather than floating on `latest`, and that is not caution for its own sake: **`ghcr.io/openhands/agent-server:latest` does not exist** — verified, it returns 404 — while `1.26.0-python` does. Upstream's own documented command names explicit versions too.
+
+`deploy.sh` pulls **both** up front. Otherwise the runtime is fetched when you start your first session, inside a web UI with no progress bar, which is indistinguishable from a hang.
+
+Watch the runtime appear when a session starts:
+
+```bash
+docker ps --filter ancestor=ghcr.io/openhands/agent-server:1.26.0-python
+```
+
+---
+
+## 🧩 The model — UI only
+
+No environment variable configures it. This is the sharpest contrast with [Hermes](../hermes/), whose model lives in a config file that `deploy.sh` writes, so its agent works the moment the script ends. Here nothing can be scripted; `deploy.sh` prints the endpoint and stops.
+
+On first load, choose the OpenAI-compatible / custom provider option and paste the **container name**:
+
+```
+http://ollama:11434/v1
+```
+
+> ⚠️ Not `localhost`, not the server's IP, and **not `host.docker.internal`** — even though the compose file sets that hostname. It is there because upstream's runtime machinery uses it internally; it is not the address of your model. In DockHub the provider is a container on `ai-net`, reached by name. `deploy.sh` prints the right one for whichever provider it finds.
+
+Any API key value will do for a local provider — the protocol requires the field, the server ignores it.
+
+---
+
+## 🛠️ Management Commands
+
+```bash
+cd ~/docker/openhands
+```
+
+| Command | Purpose |
+|---|---|
+| `ssh -L 3001:localhost:3001 you@server` | The only way in — run it from your machine |
+| `docker compose logs -f openhands` | Follow the app |
+| `docker ps --filter ancestor=ghcr.io/openhands/agent-server:1.26.0-python` | Is a session runtime alive? |
+| `docker compose pull && docker compose up -d` | Update — your state is a bind mount and survives |
+
+---
+
+## 💾 Backups
+
+`state/` holds settings, credentials you entered in the UI, conversations and the agent's working copies. **Real user data**, like the other two agents — so the standard volume backup is right, and worth taking before you let it loose on anything you care about.
+
+---
+
+## ⚠️ What a successful deploy does *not* prove
+
+The self-test checks that the web server answers. It cannot check the model, the credentials, or whether the agent can run a single command — **none of that exists until you configure it in the UI**.
+
+This service is the clearest case in the repo of the rule in the [category README](../README.md): *a green self-test does not mean a working agent*. The only real test is giving it a task and watching it act.
+
+---
+
+## 📌 Notes & Deviations
+
+- **Typed acknowledgement**, not `y/n` — the only prompt in DockHub that works this way.
+- **The gate is re-checked on rerun.** `.env` records that it was accepted; a file that was hand-made, copied from another host, or predates the key makes `deploy.sh` refuse rather than mount the socket on an unacknowledged deployment.
+- **`127.0.0.1` binding is not offered as a choice.** `prompt_host_port` — used everywhere else — offers a LAN binding, and a LAN binding on an unauthenticated privileged agent is not something this repo should present as routine.
+- **`main-net` is offered with the category's standard warning**, consistent with the other two agents rather than a special case. The loopback binding stands either way: no network choice fixes missing authentication.
+- **Both images pre-pulled**, because the second one is invisible from the UI.
+- **No `lib/gpu.sh`** — an agent never loads a model; the provider does.
+
+---
+
+## 📜 License
+
+OpenHands is licensed separately — see the [official repository](https://github.com/All-Hands-AI/OpenHands). This deployment wrapper follows the same [MIT license](../../../LICENSE) as the rest of DockHub.
