@@ -50,6 +50,22 @@ Upstream runs its processes as a non-root `hermes` user, **uid 10000 by default*
 
 Upstream also suggests `chmod -R 755 ~/.hermes` when ownership goes wrong. **This repo deliberately does not**, because that directory contains `.env` with your model and messaging API keys. Matching the uid fixes the problem without widening permissions on a credential store.
 
+### The uid is re-checked on every deploy, not frozen
+
+Writing `id -u` into `.env` once is correct until the deployment moves — and **restore is exactly that case**. A backup taken here and unpacked on a host whose account is `1001` would carry `PUID=1000`, so the container would run as a user that does not own its own data directory. The symptom is an opaque permission error that names no uid at all.
+
+So `deploy.sh` compares them every run and corrects the drift. It also tells you the half it cannot do itself:
+
+```
+[!] This deployment was created by uid 1000, but you are 1001.
+[!] Updating PUID/PGID so the container runs as you.
+[!] Some files under data/ are still owned by the old user, and only
+[!] root can hand them over. Hermes will fail to write until you run:
+[!]   sudo chown -R 1001:1001 ~/docker/hermes/data
+```
+
+Changing `PUID` alone is not enough — the *files* still belong to the old uid, and chowning another user's files needs root, which this script deliberately does not have.
+
 ---
 
 ## 🔐 Authentication is mandatory, and it fails closed

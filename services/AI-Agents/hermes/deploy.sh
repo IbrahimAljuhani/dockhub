@@ -379,8 +379,16 @@ EOF
             echo "    loopback, so these are what make it run at all."
         fi
         echo
-        echo "  All three live in .env. Changing one means editing .env and"
-        echo "  restarting; the session secret change signs everyone out."
+        if (( HERMES_DASHBOARD_VALUE )); then
+            echo "  All of these live in .env. Changing one means editing .env and"
+            echo "  restarting; changing the session secret signs everyone out."
+        else
+            # Says "three" only when there are three. The dashboard is off by
+            # default, and a secrets file that miscounts its own contents is
+            # a small thing that costs trust in the larger ones.
+            echo "  This lives in .env. Changing it means editing .env and restarting."
+            echo "  The dashboard is off, so there is no username or password to keep."
+        fi
     } > "$SECRETS_FILE"
     chmod 600 "$SECRETS_FILE"
     print_info "Generated .env and saved the credentials to $SECRETS_FILE."
@@ -406,6 +414,43 @@ ENV_API_KEY=$(read_env_value "API_SERVER_KEY" "$INSTALL_DIR/.env")
 # rather than root's, which is what Docker would do on first mount.
 mkdir -p "$INSTALL_DIR/data"
 chmod 700 "$INSTALL_DIR/data"
+
+# ── PUID/PGID are re-asserted, not frozen at first deploy ───────────────
+# Baking `id -u` into .env once is right until the deployment moves. Restore
+# is the case that makes it real, and this repo has proven restore works: a
+# backup taken here and unpacked on a host whose account is 1001 would carry
+# PUID=1000, so the container would run as a user that does not own its own
+# data directory — and the failure surfaces as an opaque permission error
+# rather than anything naming uids.
+#
+# So compare every run and correct the drift. Note that fixing PUID alone is
+# only half the job: the FILES still belong to the old uid, and a chown
+# across another user's files needs root, which this script deliberately
+# does not have. Hence: detect, correct what we can, and hand over the exact
+# command for what we cannot.
+CURRENT_UID=$(id -u)
+CURRENT_GID=$(id -g)
+ENV_PUID=$(read_env_value "PUID" "$INSTALL_DIR/.env")
+if [[ -n "$ENV_PUID" && "$ENV_PUID" != "$CURRENT_UID" ]]; then
+    echo
+    print_warn "This deployment was created by uid $ENV_PUID, but you are $CURRENT_UID."
+    print_warn "Updating PUID/PGID so the container runs as you."
+    set_env_value "PUID" "$CURRENT_UID" "$INSTALL_DIR/.env"
+    set_env_value "PGID" "$CURRENT_GID" "$INSTALL_DIR/.env"
+
+    # -print -quit stops at the first offender: this is a question with a
+    # yes/no answer, and the data tree can hold thousands of session files.
+    if [[ -n "$(find "$INSTALL_DIR/data" -maxdepth 2 ! -user "$CURRENT_UID" -print -quit 2>/dev/null)" ]]; then
+        print_warn "Some files under data/ are still owned by the old user, and only"
+        print_warn "root can hand them over. Hermes will fail to write until you run:"
+        print_warn "  sudo chown -R $CURRENT_UID:$CURRENT_GID $INSTALL_DIR/data"
+    fi
+elif [[ -z "$ENV_PUID" ]]; then
+    # A .env from before this key existed. Append rather than leave the
+    # compose file interpolating an empty value into the container.
+    set_env_value "PUID" "$CURRENT_UID" "$INSTALL_DIR/.env"
+    set_env_value "PGID" "$CURRENT_GID" "$INSTALL_DIR/.env"
+fi
 
 # ── config.yaml, written rather than wizarded ───────────────────────────
 # The whole reason this service can deploy in one pass. Written ONLY when
@@ -525,7 +570,17 @@ print_info "Starting Hermes..."
 # file, so it does not need the gateway to have finished booting — but the
 # gateway does need restarting to read it, which is why that follows here
 # and the self-test comes after both.
-if [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
+# Written ONLY when config.yaml does not already name a backend. Asserting
+# it on every run would repeat the exact mistake caught in OpenClaw's origin
+# allow-list: this is a setting the user is invited to change, and a rerun
+# to adjust a memory limit must not quietly drag it back. Someone who moved
+# to `local` on purpose gets to keep that. It also avoids an unnecessary
+# restart — which drops live sessions — on every subsequent deploy.
+if [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]] \
+   && grep -qE '^[[:space:]]*backend:' "$CONFIG_YAML" 2>/dev/null; then
+    CURRENT_BACKEND=$(grep -E '^[[:space:]]*backend:' "$CONFIG_YAML" | tail -1 | sed 's/.*backend:[[:space:]]*//' | tr -d '"')
+    print_info "Terminal backend already set to '${CURRENT_BACKEND}' — left alone."
+elif [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
     print_info "Setting terminal.backend=docker (agent commands run sandboxed)..."
     if docker exec hermes hermes config set terminal.backend docker 2>&1 | tee -a "$LOGFILE"; then
         (cd "$INSTALL_DIR" && $COMPOSE_CMD restart hermes >/dev/null 2>&1) \
