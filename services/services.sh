@@ -77,6 +77,7 @@ declare -A SERVICE_FILES=(
     # and both agents use bind mounts inside the install directory, so it
     # captures them as part of the tree rather than via the volume loop.
     [hermes]="docker-compose.yml"
+    [openhands]="docker-compose.yml"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
