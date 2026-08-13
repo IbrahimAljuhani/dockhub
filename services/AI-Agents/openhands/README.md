@@ -80,6 +80,34 @@ So the runtime *is* reachable from your LAN, and no firewall rule can pin ports 
 
 Which leaves an inversion worth remembering: **the machine-to-machine API authenticates; the human-facing UI does not.** OpenHands guards the channel between its two containers and leaves the front door on `3001` open — which is exactly why that door stays on `127.0.0.1`.
 
+### And the runtime has to answer back — which loopback alone forbids
+
+The two containers talk in both directions, and the return leg is where a loopback-only binding quietly breaks the product:
+
+| Direction | How |
+|---|---|
+| app → runtime | Docker socket, then a published session port |
+| **runtime → app** | **HTTP POST to `OH_WEBHOOKS_0_BASE_URL`** |
+
+Every agent event — its reply, its tool calls, its output — reaches you only over that second arrow. Its default value, confirmed by `docker inspect` on a live runtime, is:
+
+```
+OH_WEBHOOKS_0_BASE_URL=http://host.docker.internal:3000/api/v1/webhooks
+```
+
+The runtime is started on the **default bridge**, so `openhands` does not resolve there; `host.docker.internal` is its only route home, and it points at the docker0 gateway. Bind the app to `127.0.0.1` alone and that gateway has nothing listening on it. The result is the worst failure shape available:
+
+```
+Failed to post events to webhook … All connection attempts failed   ← runtime log
+Queued pending message … (position: 2)                              ← app log
+```
+
+**No error in the UI.** The message is filed in a queue and never answered, which reads exactly like a broken model — and sends you off to check the one thing that is fine.
+
+So `deploy.sh` publishes the port twice: `127.0.0.1:<port>` for you, and `<docker0 gateway>:<port>` for the runtime, with `OH_WEBHOOKS_0_BASE_URL` pointed at the second. The gateway address is read from Docker rather than assumed to be `172.17.0.1`.
+
+> ⚠️ **The cost, stated plainly.** The gateway is not reachable from your LAN, so the tunnel-only rule for humans is intact. It *is* reachable from every other container on the default bridge — so an unauthenticated agent holding the Docker socket is exposed to anything else running on this host. That is accepted here because it does not exceed the trust already granted by mounting that socket, and because without it the service does not work at all. It is not accepted quietly, which is why it is written down.
+
 ### It also does not ask before acting
 
 The first live session logged this on startup:
@@ -197,6 +225,9 @@ That test has been run. On a live server the second container appeared as `oh-ag
 - **The gate is re-checked on rerun.** `.env` records that it was accepted; a file that was hand-made, copied from another host, or predates the key makes `deploy.sh` refuse rather than mount the socket on an unacknowledged deployment.
 - **`127.0.0.1` binding is not offered as a choice.** `prompt_host_port` — used everywhere else — offers a LAN binding, and a LAN binding on an unauthenticated privileged agent is not something this repo should present as routine.
 - **`main-net` is offered with the category's standard warning**, consistent with the other two agents rather than a special case. The loopback binding stands either way: no network choice fixes missing authentication.
+- **The port is published twice** — `127.0.0.1` for you, the docker0 gateway for the session runtime's callback. The second binding is not a convenience; without it the agent's answers never reach the app and every message queues in silence. The gateway address is read from Docker, not assumed.
+- **`OH_WEBHOOKS_0_BASE_URL` is set explicitly** rather than left at its default, so the callback follows the port you chose instead of hard-coded `3000` — which would collide with Open WebUI.
+- **A rerun warns if the installed `docker-compose.yml` predates that fix.** Deployments made earlier look healthy and are not, so the script says so instead of leaving you to find it the hard way.
 - **Both images pre-pulled**, because the second one is invisible from the UI.
 - **No `lib/gpu.sh`** — an agent never loads a model; the provider does.
 

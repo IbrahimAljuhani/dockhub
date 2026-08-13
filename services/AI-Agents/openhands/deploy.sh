@@ -147,6 +147,19 @@ fi
 
 if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
     print_info "Existing docker-compose.yml found at $INSTALL_DIR — keeping it (not overwritten). Delete it yourself first if you want the latest version from this repo."
+    # Not-overwriting is the right default — but this particular key is the
+    # difference between a working agent and one that queues every message
+    # in silence. A deployment made before it existed looks healthy and is
+    # not, so say so rather than letting the user rediscover it the hard way.
+    if ! grep -q "OH_WEBHOOKS_0_BASE_URL" "$INSTALL_DIR/docker-compose.yml"; then
+        echo
+        print_warn "That kept file predates the session-callback fix. Without it the"
+        print_warn "agent receives your messages and its answers never arrive back —"
+        print_warn "no error, just silence. To take the fix:"
+        print_warn "    rm $INSTALL_DIR/docker-compose.yml && bash $0"
+        print_warn "Your .env, state/ and conversations are untouched by that."
+        echo
+    fi
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 fi
@@ -173,12 +186,37 @@ fi
 mkdir -p "$INSTALL_DIR/state"
 chmod 700 "$INSTALL_DIR/state"
 
+# ── The gateway address ─────────────────────────────────────────────────
+# Asked of Docker rather than assumed. 172.17.0.1 is the common default,
+# but a host with a custom default-address-pool, or one where docker0 was
+# renumbered, will differ — and a wrong address here fails in the worst
+# way available: silently, at the first message, long after deploy said
+# everything was fine.
+DOCKER0_GW=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)
+if [[ ! "$DOCKER0_GW" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    DOCKER0_GW="172.17.0.1"
+    print_warn "Could not read the docker0 gateway from Docker — assuming $DOCKER0_GW."
+    print_warn "If conversations never get a reply, this is the first thing to check."
+fi
+
 OVERRIDE_BODY=$(
     [[ -n "$ENV_MEM_LIMIT" ]] && echo "    mem_limit: $ENV_MEM_LIMIT"
     echo "    ports:"
     # 127.0.0.1 explicitly. Without the prefix Docker binds 0.0.0.0 and
     # publishes an unauthenticated privileged agent to the whole LAN.
     echo "      - \"127.0.0.1:$ENV_PORT:3000\""
+    # Second binding, on the docker0 gateway — NOT a convenience.
+    #
+    # Session runtimes are started on the default bridge network, where
+    # the name `openhands` does not resolve. Their only route back to the
+    # app is host.docker.internal, which is this gateway. With loopback
+    # alone the callback finds nothing listening, every agent event is
+    # dropped, and messages queue in pending_messages with no visible
+    # error. See block 6 of docker-compose.yml.
+    #
+    # Still not the LAN: the gateway is reachable from containers on this
+    # host, not from your network. The tunnel rule for humans is intact.
+    echo "      - \"$DOCKER0_GW:$ENV_PORT:3000\""
     if [[ "$ENV_MAIN_NET" == "1" ]]; then
         echo "    networks:"
         echo "      - ai-net"
@@ -279,6 +317,7 @@ echo "────────────────────────�
 echo "🌐 Web UI:        127.0.0.1:$ENV_PORT on the server — tunnel to reach it"
 echo "🕸️  Networks:      $( [[ "$ENV_MAIN_NET" == "1" ]] && echo "ai-net + main-net" || echo "ai-net only" )"
 echo "🔌 Docker socket: MOUNTED ⚠️  (required by this service)"
+echo "↩️  Callback:      $DOCKER0_GW:$ENV_PORT — session runtimes answer here"
 echo "🔓 Login:         none — OpenHands has no authentication of its own"
 echo "📦 Session image: $ENV_RUNTIME_REPO:$ENV_RUNTIME_TAG"
 if [[ -n "$AI_PROVIDER_NAME" ]]; then
@@ -362,8 +401,8 @@ fi )
 
   >>> Use the CONTAINER NAME. Not localhost, not the server's IP, not
   >>> host.docker.internal — inside this container those mean the wrong
-  >>> machine. The compose file sets host.docker.internal because
-  >>> upstream's runtime uses it internally; it is not your model address.
+  >>> machine. The compose file does set host.docker.internal, but for
+  >>> the session runtime's callback (section 4), not for your model.
 
 
 3. THE FIRST SESSION STARTS A SECOND CONTAINER
@@ -375,6 +414,43 @@ not a long silent wait.
 Watch it happen:
 
     docker ps --filter ancestor=$ENV_RUNTIME_REPO:$ENV_RUNTIME_TAG
+
+
+4. IF YOU SEND A MESSAGE AND NOTHING EVER COMES BACK
+------------------------------------------------------------------
+The symptom is distinctive: no error, no spinner that stops, no red
+text. The message is simply never answered. It looks like a broken
+model, and it usually is not.
+
+That runtime container does not just receive work — it POSTS every
+result back to the app over HTTP:
+
+    $DOCKER0_GW:$ENV_PORT   (as host.docker.internal, from inside it)
+
+If that leg is down, the app never learns the agent said anything. It
+files your message in a queue instead. Confirm in the app's log:
+
+    docker logs openhands 2>&1 | grep -i pending_message
+
+  "Queued pending message ... (position: 2)"  = the callback is broken,
+  not the model.
+
+Then read the runtime's own log, which is where the truth is:
+
+    RT=\$(docker ps --filter ancestor=$ENV_RUNTIME_REPO:$ENV_RUNTIME_TAG --format '{{.Names}}')
+    docker logs "\$RT" 2>&1 | grep -i webhook
+
+  "Failed to post events to webhook ... All connection attempts failed"
+  means the gateway binding is missing. Check it is really there:
+
+    docker port openhands
+
+  Two lines are expected — 127.0.0.1 and $DOCKER0_GW. If the second is
+  absent, delete $INSTALL_DIR/docker-compose.override.yml and rerun this
+  script.
+
+Do NOT "fix" this by binding the port to 0.0.0.0. That publishes an
+unauthenticated agent holding the Docker socket to your whole network.
 
 
 WHAT THIS DEPLOY DID NOT PROVE

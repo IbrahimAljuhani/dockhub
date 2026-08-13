@@ -40,6 +40,10 @@ The attack isn't exotic. It's one step: *something the agent reads tells it to r
 
 On `main-net` an agent can reach every other DockHub service by container name — including **Portainer, which mounts the Docker socket**. So the chain from "a web page said so" to "root on the host" is short.
 
+> ⚠️ **For OpenHands, read that claim narrowly.** It applies to the *app* container. The shell the agent actually types into lives in a separate session runtime, and `docker inspect` on a live one shows it attached to the **default bridge**, not to `ai-net` and not to `main-net`. So the network answer you gave does not describe where its commands run.
+>
+> That cuts both ways. The runtime cannot resolve `ollama` or any other DockHub service by name — but it *is* given `host.docker.internal`, pointing at the docker0 gateway, which reaches **every port published on this host**. Network isolation for that container is therefore weaker than the category table below implies, and the honest boundary around it remains the Docker socket, not the network.
+
 | | Default | Why |
 |---|---|---|
 | `ai-net` | ✅ always | It's all the agent actually needs: the model provider |
@@ -63,7 +67,7 @@ Checked against each project's own documentation rather than assumed — and the
 
 **OpenHands is the exception, and it gets its own gate.** Its intent is security-*positive*: it isolates execution away from itself. But the effect on the host is the one that makes Portainer sensitive — anything reaching that socket can start a privileged container.
 
-DockHub does not refuse it, and refusing would be inconsistent: **core infrastructure already installs Portainer with that same socket**, and prints a warning. What differs is who holds the trigger — Portainer is driven by *you*, OpenHands by a language model. So it takes a typed acknowledgement rather than a `y/n`, and it is **never** placed on `main-net`.
+DockHub does not refuse it, and refusing would be inconsistent: **core infrastructure already installs Portainer with that same socket**, and prints a warning. What differs is who holds the trigger — Portainer is driven by *you*, OpenHands by a language model. So it takes a typed acknowledgement rather than a `y/n`, and `main-net` stays **opt-in and warned**, exactly as for the other two — the socket is the reason the gate exists, and no network choice makes it safer.
 
 > **And the trigger is not held back.** The first live session logged `Confirmation policy set to: kind='NeverConfirm'` — OpenHands' default is to run the commands it decides on **without asking you first**. Nothing in the deploy sets that; it is upstream's default and it is changeable in the UI's settings. Read together with the two facts above — no login, and the Docker socket — that is the whole threat model in one line, and it is why the port stays on `127.0.0.1`.
 

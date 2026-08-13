@@ -57,6 +57,40 @@
 # let deploy.sh write the model in — this one cannot be scripted at all.
 # deploy.sh prints the exact endpoint to paste and leaves it at that.
 #
+# ── 6. THE CALLBACK — WHY LOOPBACK ALONE IS NOT ENOUGH ──────────────────
+# The two containers talk in BOTH directions, and the return leg is the
+# one that breaks silently.
+#
+#   app  →  runtime    over the Docker socket and a published port
+#   runtime  →  app    over HTTP, to OH_WEBHOOKS_0_BASE_URL
+#
+# Everything the agent does — its reply, its tool calls, its output —
+# reaches you only over that second arrow. If it fails, the UI shows no
+# error. Your message is written to a pending_messages table with a queue
+# position and simply never answered, which reads like a dead model.
+#
+# The runtime is started on the DEFAULT bridge network, not ai-net, so it
+# cannot resolve the container name `openhands`. It has exactly one route
+# home: the docker0 gateway, via the host.docker.internal entry below.
+# That means the app's port must exist ON THE GATEWAY, not on loopback
+# alone — so deploy.sh publishes it twice:
+#
+#     127.0.0.1:$OH_PORT:3000       ← you, through the SSH tunnel
+#     <docker0 gateway>:$OH_PORT:3000  ← the session runtime, calling back
+#
+# deploy.sh asks Docker for that gateway rather than assuming 172.17.0.1,
+# because a host with a custom address pool will differ — and a wrong
+# value fails silently at the first message, not at deploy time.
+#
+# ⚠️ Be clear about what the second binding costs. The gateway is NOT
+# reachable from your LAN, so the tunnel-only rule for humans still
+# holds. It IS reachable from every other container on this host's
+# default bridge. An unauthenticated privileged agent is therefore
+# exposed to any container running beside it. That is a real widening,
+# and it is accepted here for one reason: it does not exceed the trust
+# already granted by mounting the Docker socket, and without it the
+# service does not function at all.
+#
 # This is a single-instance service, under ~/docker/openhands/.
 #
 # This file is the SOURCE template (tracked in git). deploy.sh copies it
@@ -76,6 +110,20 @@ services:
       # runtime configuration may reference it; DockHub's own guidance
       # always points at container names on ai-net instead.
       LOG_ALL_EVENTS: "true"
+      # ⚠️ Load-bearing. Do not remove without reading block 6.
+      #
+      # The session runtime posts every agent event BACK to this address.
+      # Its default is  http://host.docker.internal:3000/api/v1/webhooks,
+      # which resolves inside the runtime to the docker0 gateway — an
+      # address where DockHub publishes nothing, because the host port is
+      # bound to 127.0.0.1. The runtime then knocks on a closed door,
+      # logs "All connection attempts failed", and your message sits in
+      # the pending_messages table forever.
+      #
+      # So the port is republished on the gateway (see deploy.sh) and this
+      # points at it. ${OH_PORT} rather than 3000 because 3000 is Open
+      # WebUI's default here and would collide.
+      OH_WEBHOOKS_0_BASE_URL: "http://host.docker.internal:${OH_PORT}/api/v1/webhooks"
     volumes:
       # Settings, secrets, conversations and the agent's working copies.
       # A bind mount, not a named volume: this is real user data — the
@@ -86,10 +134,15 @@ services:
       # unless you typed the acknowledgement.
       - /var/run/docker.sock:/var/run/docker.sock
     extra_hosts:
-      # Upstream's documented run command includes this. Left in place
-      # because their runtime spawning may rely on it — but note it is NOT
-      # how you reach a DockHub model provider. Those are containers on
-      # ai-net, reached by name: http://ollama:11434
+      # NOT decoration, and not only for this container. Verified on a live
+      # deployment: OpenHands copies this entry onto every session runtime
+      # it starts, and `docker inspect` on the runtime shows
+      #     ["host.docker.internal:host-gateway"]
+      # resolving to the docker0 gateway. The runtime's callback URL is
+      # built on that name, so removing this breaks every conversation.
+      #
+      # It is still NOT how you reach a DockHub model provider. Those are
+      # containers on ai-net, reached by name: http://ollama:11434
       - "host.docker.internal:host-gateway"
     networks:
       - ai-net
