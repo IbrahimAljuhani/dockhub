@@ -18,6 +18,7 @@ That is a different job from its neighbours here, and worth saying plainly so no
 | **Port** | `3001` on `127.0.0.1` — deliberately not your LAN |
 | **Model** | Set in the UI only. No environment variable exists |
 | **Containers** | Two: the app, plus a runtime it starts per session |
+| **Runs as** | **root** — so `state/` is root-owned on the host |
 | **State** | `~/docker/openhands/state` — settings, conversations, working copies |
 
 ---
@@ -61,6 +62,16 @@ ssh -L 3001:localhost:3001 you@your-server
 Then browse `http://localhost:3001`.
 
 > This is the same treatment Hermes' dashboard gets, for a stronger reason. There it is a privacy preference; here it is the only thing standing between your LAN and a root-equivalent agent.
+
+### It also does not ask before acting
+
+The first live session logged this on startup:
+
+```
+Confirmation policy set to: kind='NeverConfirm'
+```
+
+That is upstream's **default**: the agent runs the commands it decides on without pausing for your approval. Nothing in this deployment sets it, and you can change it in the UI's settings once you are in. Stated plainly because the three facts compound — no login, the Docker socket, and no confirmation step — and together they are the entire reason the port never leaves `127.0.0.1`.
 
 ### If you put it behind NGINX Proxy Manager
 
@@ -119,14 +130,25 @@ cd ~/docker/openhands
 |---|---|
 | `ssh -L 3001:localhost:3001 you@server` | The only way in — run it from your machine |
 | `docker compose logs -f openhands` | Follow the app |
+| `docker logs <runtime> 2>&1 \| grep -oP '^[^\|]+' \| uniq` | Read the **session runtime**'s log without the duplication — see below |
 | `docker ps --filter ancestor=ghcr.io/openhands/agent-server:1.26.0-python` | Is a session runtime alive? |
 | `docker compose pull && docker compose up -d` | Update — your state is a bind mount and survives |
+
+---
+
+> ### ⚠️ The runtime container's log repeats itself
+>
+> Every line in `oh-agent-server-…` is emitted **8–16 times**, each copy with a little more of `asctime=` / `levelname=` / `name=` / `filename=` appended, and occasionally a JSON copy too. This is the **runtime image's own logging configuration**, not something this deployment sets — the `openhands` app container's log is clean, and it is the only one DockHub passes environment to.
+>
+> It is cosmetic and nothing is lost, but `docker logs` on the runtime is close to unreadable without the `grep`/`uniq` line above. When you just want to know what the agent did, the UI's event view is the better place to look.
 
 ---
 
 ## 💾 Backups
 
 `state/` holds settings, credentials you entered in the UI, conversations and the agent's working copies. **Real user data**, like the other two agents — so the standard volume backup is right, and worth taking before you let it loose on anything you care about.
+
+⚠️ **It is root-owned**, because OpenHands runs as root in the container. `ls` and any hand-edit need `sudo`, and a backup taken as your own user will read nothing. The menu's Backup option runs with the privileges it needs; a manual `tar` does not.
 
 ---
 
@@ -135,6 +157,8 @@ cd ~/docker/openhands
 The self-test checks that the web server answers. It cannot check the model, the credentials, or whether the agent can run a single command — **none of that exists until you configure it in the UI**.
 
 This service is the clearest case in the repo of the rule in the [category README](../README.md): *a green self-test does not mean a working agent*. The only real test is giving it a task and watching it act.
+
+That test has been run. On a live server the second container appeared as `oh-agent-server-…`, and its log carried what no self-test could: `POST /api/bash/start_bash_command → 200` repeatedly with the output polled back, three model profiles saved, the extensions repository cloned, 57 skills loaded, and a conversation created. **The agent works. The deploy still cannot tell you that** — which is the whole point of saying so out loud.
 
 ---
 

@@ -16,7 +16,7 @@ Agents that **do work for you**. You talk to one and it acts, using tools — it
 |---|---|---|---|
 | ✅ [**OpenClaw**](openclaw/) | A personal assistant reachable over messaging, with a web gateway of its own. The broadest control plane of the three. | `ghcr.io/openclaw/openclaw` | `18789` |
 | ✅ [**Hermes**](hermes/) | A leaner, more personal assistant with a **learning loop** — built for repeated and scheduled work that should improve over time. Reachable over Telegram, Discord, Slack, WhatsApp, Signal or email, and exposes its own OpenAI-compatible gateway. | `nousresearch/hermes-agent` | `8642` · `9119` |
-| 🚧 [**OpenHands**](openhands/) | A **software engineering** agent. It writes code, runs it, and browses — a different job from the two above. | `docker.openhands.dev/openhands/openhands` | `3001` |
+| ✅ [**OpenHands**](openhands/) | A **software engineering** agent. It writes code, runs it, and browses — a different job from the two above. Give it a coding task in a browser; it is not something you message. | `docker.openhands.dev/openhands/openhands` | `3001` |
 
 > OpenHands publishes on `3000` upstream. DockHub defaults it to **`3001`**, because `3000` is [Open WebUI](../AI/open-webui/)'s default — and Open WebUI is exactly what someone deploying an agent is likely to already be running.
 
@@ -64,6 +64,8 @@ Checked against each project's own documentation rather than assumed — and the
 **OpenHands is the exception, and it gets its own gate.** Its intent is security-*positive*: it isolates execution away from itself. But the effect on the host is the one that makes Portainer sensitive — anything reaching that socket can start a privileged container.
 
 DockHub does not refuse it, and refusing would be inconsistent: **core infrastructure already installs Portainer with that same socket**, and prints a warning. What differs is who holds the trigger — Portainer is driven by *you*, OpenHands by a language model. So it takes a typed acknowledgement rather than a `y/n`, and it is **never** placed on `main-net`.
+
+> **And the trigger is not held back.** The first live session logged `Confirmation policy set to: kind='NeverConfirm'` — OpenHands' default is to run the commands it decides on **without asking you first**. Nothing in the deploy sets that; it is upstream's default and it is changeable in the UI's settings. Read together with the two facts above — no login, and the Docker socket — that is the whole threat model in one line, and it is why the port stays on `127.0.0.1`.
 
 ---
 
@@ -130,11 +132,13 @@ Every one of these cost at least a round when it was discovered by running into 
 |---|---|
 | **Does it refuse to start unconfigured?** | OpenClaw crash-looped on `Missing config`, and **no environment variable existed** for the setting it wanted — only its own CLI could write it |
 | **Does it demand auth on a non-loopback bind?** | Both do, and both **fail closed**. That is good behaviour, but it means credentials must exist *before* first start, not after |
-| **Does its web UI need a browser secure context?** | OpenClaw's does — Web Crypto for a device identity — so plain `http://` to a server IP **cannot work**, however correct the token. An SSH tunnel is mandatory there. Hermes has no such rule |
+| **Does its web UI need a browser secure context?** | OpenClaw's does — Web Crypto for a device identity — so plain `http://` to a server IP **cannot work**, however correct the token. An SSH tunnel is mandatory there. Hermes and OpenHands have no such rule — verified live, OpenHands' UI is fully usable over plain `http://localhost:3001` through a tunnel. **Three agents, one requirement between them**: assume nothing, test it |
 | **Is its config seeded in memory or written to disk?** | OpenClaw seeds its origin allow-list *without writing it*. The dashboard worked for two and a half minutes, then broke with no restart in between |
 | **Is the image supervised?** | Hermes runs under **s6**, so `docker compose run` starts a *second* gateway beside the first. OpenClaw has no supervisor and `run` is fine. **Same command, opposite outcomes** — use `docker exec` for Hermes |
 
-And one that only shows up later: **what does the container run as?** Hermes uses **uid 10000**, so `PUID`/`PGID` are mandatory with a bind mount. OpenClaw uses `node` — uid 1000 — which happens to match a first Ubuntu account, so it works by coincidence rather than design.
+And one that only shows up later: **what does the container run as?** Hermes uses **uid 10000**, so `PUID`/`PGID` are mandatory with a bind mount. OpenClaw uses `node` — uid 1000 — which happens to match a first Ubuntu account, so it works by coincidence rather than design. **OpenHands runs as root**, so its `state/` ends up root-owned on the host: nothing breaks, but `ls` and any manual edit need `sudo`, and backups must be taken as root to read it.
+
+> All three answers were different, and none was documented where a deploy script could read it. OpenHands' surfaced by accident — `wait_for_container_ready()` echoes the newest container log line every third round so a long pull doesn't look like a hang, and one of those lines was `Running OpenHands as root`. A progress indicator answered a design question. That is an argument for keeping it noisy.
 
 ---
 
