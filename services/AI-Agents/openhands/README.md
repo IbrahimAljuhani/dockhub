@@ -63,6 +63,23 @@ Then browse `http://localhost:3001`.
 
 > This is the same treatment Hermes' dashboard gets, for a stronger reason. There it is a privacy preference; here it is the only thing standing between your LAN and a root-equivalent agent.
 
+### That binding covers the app — not the session runtime
+
+Worth stating precisely, because the loopback claim is easy to over-read. `docker ps` during a live session shows the runtime container publishing **on `0.0.0.0`**, on random high ports that change every session:
+
+```
+0.0.0.0:54805->8000/tcp   0.0.0.0:45457->8001/tcp   …
+```
+
+So the runtime *is* reachable from your LAN, and no firewall rule can pin ports that are chosen at random. **It defends itself with a token**, though — verified from the server's own LAN address:
+
+| Endpoint | Result |
+|---|---|
+| `GET /alive` | `200` — an unauthenticated liveness probe, reveals only that a container is there |
+| `POST /api/bash/start_bash_command` | **`401`** — the endpoint that actually runs commands requires authentication |
+
+Which leaves an inversion worth remembering: **the machine-to-machine API authenticates; the human-facing UI does not.** OpenHands guards the channel between its two containers and leaves the front door on `3001` open — which is exactly why that door stays on `127.0.0.1`.
+
 ### It also does not ask before acting
 
 The first live session logged this on startup:
@@ -108,11 +125,23 @@ docker ps --filter ancestor=ghcr.io/openhands/agent-server:1.26.0-python
 
 No environment variable configures it. This is the sharpest contrast with [Hermes](../hermes/), whose model lives in a config file that `deploy.sh` writes, so its agent works the moment the script ends. Here nothing can be scripted; `deploy.sh` prints the endpoint and stops.
 
-On first load, choose the OpenAI-compatible / custom provider option and paste the **container name**:
+Open **Settings → LLM → Advanced**. Three fields, and all three must be right — a wrong one fails at the first message, not at save time:
 
+| Field | Value |
+|---|---|
+| **Custom Model** | `openai/<model>` — e.g. `openai/qwen3.5:9b` |
+| **Base URL** | `http://ollama:11434/v1` |
+| **API Key** | anything, e.g. `ollama` — **must not be empty** |
+
+**There is no dropdown of your models.** `Custom Model` is free text and OpenHands never asks your provider what it serves; the list on the **Basic** tab is OpenHands' own *cloud* catalogue, so your local models will never appear there. Get the exact names yourself:
+
+```bash
+docker exec -it ollama ollama list
 ```
-http://ollama:11434/v1
-```
+
+> ⚠️ The `openai/` prefix does **not** name OpenAI the company. It tells LiteLLM — the client library inside OpenHands — to speak the OpenAI protocol to the Base URL below it. Leave the Basic tab's `openhands/…` value in place and it **silently ignores your Base URL** and calls the cloud instead. That is the single most likely reason a correct-looking setup does nothing.
+>
+> ⚠️ The **API Key field must not be left empty**, even for a local provider. The protocol requires the field; Ollama ignores its value.
 
 > ⚠️ Not `localhost`, not the server's IP, and **not `host.docker.internal`** — even though the compose file sets that hostname. It is there because upstream's runtime machinery uses it internally; it is not the address of your model. In DockHub the provider is a container on `ai-net`, reached by name. `deploy.sh` prints the right one for whichever provider it finds.
 

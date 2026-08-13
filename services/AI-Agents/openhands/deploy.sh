@@ -323,8 +323,31 @@ Leave that open, then browse to  http://localhost:$ENV_PORT
 No environment variable configures this. Hermes could be scripted
 because its model lives in a config file; OpenHands cannot.
 
-On first load it asks for an LLM Provider and Model. Choose the
-OpenAI-compatible / custom option and paste:
+Open  Settings -> LLM -> Advanced.  THREE fields must all be right,
+and the first is the one that catches people:
+
+    Custom Model   openai/<model>     <- the openai/ prefix is required
+    Base URL       (below)
+    API Key        anything, e.g.  ollama
+
+There is NO dropdown of your models here. "Custom Model" is free text,
+and OpenHands never asks your provider what it serves. The list on the
+Basic tab is OpenHands' own cloud catalogue — your local models will
+never appear in it. Get the exact names yourself:
+
+    docker exec -it ${AI_PROVIDER_NAME:-ollama} ollama list
+
+then type, for example:   openai/qwen3.5:9b   — colons included.
+
+  >>> The openai/ prefix does not name OpenAI the company. It tells
+  >>> LiteLLM, inside OpenHands, to speak the OpenAI protocol to the
+  >>> Base URL below. A leftover  openhands/...  value from the Basic
+  >>> tab silently ignores your Base URL and calls the cloud instead.
+
+  >>> API Key must NOT be left empty, even for a local provider. The
+  >>> protocol requires the field; your provider ignores its value.
+
+Base URL — paste exactly:
 
 $( if [[ -n "$AI_PROVIDER_NAME" ]]; then
 echo "    $AI_PROVIDER_BASE_URL/v1"
@@ -341,9 +364,6 @@ fi )
   >>> host.docker.internal — inside this container those mean the wrong
   >>> machine. The compose file sets host.docker.internal because
   >>> upstream's runtime uses it internally; it is not your model address.
-
-Any API key value will do for a local provider; the protocol requires
-the field but the server ignores it.
 
 
 3. THE FIRST SESSION STARTS A SECOND CONTAINER
@@ -383,8 +403,13 @@ echo "        ssh -L $ENV_PORT:localhost:$ENV_PORT $(whoami)@$SERVER_IP"
 echo "      then open  http://localhost:$ENV_PORT"
 echo
 echo "   2. Set the model in the UI — no environment variable can do it."
+echo "      Settings → LLM → Advanced. All THREE fields, or it fails:"
 if [[ -n "$AI_PROVIDER_NAME" ]]; then
-    echo "      Paste exactly:  $AI_PROVIDER_BASE_URL/v1"
+    echo "        Custom Model   openai/<model>   ← the openai/ prefix is required"
+    echo "        Base URL       $AI_PROVIDER_BASE_URL/v1"
+    echo "        API Key        anything, e.g.  ollama   ← must not be empty"
+    echo "      No dropdown lists your models. Names:"
+    echo "        docker exec -it $AI_PROVIDER_NAME ollama list"
 else
     echo "      ⚠️  No provider running. Deploy services/AI/ollama/ first."
 fi
