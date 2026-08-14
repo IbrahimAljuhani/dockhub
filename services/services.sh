@@ -257,8 +257,34 @@ remove_instance() {
     read -rp "Also permanently delete this instance's data (database, uploaded files, secrets)? (y/N): " wipe || wipe="n"
     if [[ "${wipe,,}" == "y" ]]; then
         (cd "$instance_dir" && $cc down -v) || true
-        rm -rf "$instance_dir"
-        print_info "Removed $instance_dir completely (data wiped)."
+        rm -rf "$instance_dir" 2>/dev/null || true
+        # ── Verify, do not assume ───────────────────────────────────────
+        # Containers routinely write into their bind mounts as root, and
+        # this script runs unprivileged (see the privilege drop before the
+        # handoff). Those files survive rm, which then exits non-zero —
+        # and the old code printed "data wiped" regardless.
+        #
+        # Announcing a wipe that did not happen is the worst outcome here:
+        # the user believes secrets are gone while .env and application
+        # state are still on disk. So the claim is now checked.
+        if [[ -d "$instance_dir" ]]; then
+            print_warn "Some files under $instance_dir are owned by root"
+            print_warn "(written by the container) and cannot be deleted as $(id -un)."
+            local esc
+            if command -v sudo >/dev/null 2>&1; then
+                read -rp "Finish the wipe with sudo? (y/N): " esc || esc="n"
+                if [[ "${esc,,}" == "y" ]]; then
+                    sudo rm -rf "$instance_dir" || true
+                fi
+            fi
+        fi
+        if [[ -d "$instance_dir" ]]; then
+            print_warn "NOT fully wiped — $instance_dir still exists."
+            print_warn "Secrets and state may remain. Finish it with:"
+            print_warn "    sudo rm -rf $instance_dir"
+        else
+            print_info "Removed $instance_dir completely (data wiped)."
+        fi
     else
         (cd "$instance_dir" && $cc down) || true
         rm -f "$instance_dir/docker-compose.yml" "$instance_dir/docker-compose.override.yml"

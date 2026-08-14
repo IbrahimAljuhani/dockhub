@@ -365,16 +365,51 @@ SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 detect_ai_provider
 
+# ── The model URL the SESSION RUNTIME can actually reach ────────────────
+# Every other service in this catalogue reaches a provider by container
+# name over ai-net. OpenHands cannot, and this is the one place it must
+# not be treated like the others.
+#
+# The agent — and therefore the LLM call — runs inside the session runtime,
+# which Docker starts on the DEFAULT bridge. The name `ollama` does not
+# resolve there. Proven live:
+#     docker exec <runtime> getent hosts ollama   → nothing
+#     docker exec <runtime> wget host.docker.internal:11434/api/tags → models
+#
+# So the runtime needs the provider's PUBLISHED HOST PORT, via the same
+# host.docker.internal route its callback already uses. That port is
+# optional in services/AI/*/deploy.sh, so it may simply not exist — in
+# which case saying nothing would leave the user with a Base URL that
+# cannot work and no error explaining why.
+OH_MODEL_URL=""
+if [[ -n "$AI_PROVIDER_NAME" ]]; then
+    # Container port from the provider's own ai-net URL (…:11434 → 11434).
+    PROV_PORT="${AI_PROVIDER_BASE_URL##*:}"; PROV_PORT="${PROV_PORT%%/*}"
+    if [[ "$PROV_PORT" =~ ^[0-9]+$ ]]; then
+        PROV_PUB=$(docker port "$AI_PROVIDER_NAME" "$PROV_PORT/tcp" 2>/dev/null | head -1 || true)
+        PROV_BIND="${PROV_PUB%:*}"
+        PROV_HPORT="${PROV_PUB##*:}"
+        # Only a wildcard or gateway binding is reachable from the runtime.
+        # A 127.0.0.1 binding is NOT — the runtime's loopback is its own.
+        if [[ "$PROV_HPORT" =~ ^[0-9]+$ ]] && \
+           [[ "$PROV_BIND" == "0.0.0.0" || "$PROV_BIND" == "[::]" || "$PROV_BIND" == "$DOCKER0_GW" ]]; then
+            OH_MODEL_URL="http://host.docker.internal:$PROV_HPORT/v1"
+        fi
+    fi
+fi
+
 echo
 echo "──────────────────────────────────────────────"
 echo "🌐 Web UI:        127.0.0.1:$ENV_PORT on the server — tunnel to reach it"
 echo "🕸️  Networks:      $( [[ "$ENV_MAIN_NET" == "1" ]] && echo "ai-net + main-net" || echo "ai-net only" )"
 echo "🔌 Docker socket: MOUNTED ⚠️  (required by this service)"
-echo "↩️  Callback:      $DOCKER0_GW:$ENV_PORT — session runtimes answer here"
+echo "↩️  Callback:      $DOCKER0_GW:3000 — fixed; session runtimes dial only this"
 echo "🔓 Login:         none — OpenHands has no authentication of its own"
 echo "📦 Session image: $ENV_RUNTIME_REPO:$ENV_RUNTIME_TAG"
-if [[ -n "$AI_PROVIDER_NAME" ]]; then
-    echo "🧠 Provider:      $AI_PROVIDER_NAME  ($AI_PROVIDER_BASE_URL)"
+if [[ -n "$AI_PROVIDER_NAME" ]] && [[ -n "$OH_MODEL_URL" ]]; then
+    echo "🧠 Provider:      $AI_PROVIDER_NAME — use $OH_MODEL_URL"
+elif [[ -n "$AI_PROVIDER_NAME" ]]; then
+    echo "🧠 Provider:      $AI_PROVIDER_NAME — ⚠️ NOT reachable from sessions"
 else
     echo "🧠 Provider:      none running — deploy one from services/AI/ first"
 fi
@@ -441,21 +476,38 @@ then type, for example:   openai/qwen3.5:9b   — colons included.
 
 Base URL — paste exactly:
 
-$( if [[ -n "$AI_PROVIDER_NAME" ]]; then
-echo "    $AI_PROVIDER_BASE_URL/v1"
+$( if [[ -n "$OH_MODEL_URL" ]]; then
+echo "    $OH_MODEL_URL"
 echo
-echo "  (found running on ai-net: $AI_PROVIDER_NAME)"
+echo "  (provider found: $AI_PROVIDER_NAME, published on the host)"
+elif [[ -n "$AI_PROVIDER_NAME" ]]; then
+echo "    ⚠️  $AI_PROVIDER_NAME is running, but publishes NO host port that"
+echo "        a session can reach — so no Base URL here can work yet."
+echo
+echo "        Rerun its deploy and accept the host-port question:"
+echo "            services/AI/$AI_PROVIDER_NAME/"
+echo "        then reread this file."
 else
-echo "    http://ollama:11434/v1"
-echo
-echo "  No provider is running yet — deploy one first:"
-echo "      services/AI/ollama/"
+echo "    No provider is running yet — deploy one first:"
+echo "        services/AI/ollama/"
 fi )
 
-  >>> Use the CONTAINER NAME. Not localhost, not the server's IP, not
-  >>> host.docker.internal — inside this container those mean the wrong
-  >>> machine. The compose file does set host.docker.internal, but for
-  >>> the session runtime's callback (section 4), not for your model.
+  >>> DO NOT use the container name here. This is the one place where
+  >>> OpenHands differs from every other DockHub service, and an earlier
+  >>> version of this file got it backwards.
+  >>>
+  >>> http://ollama:11434/v1 resolves from the OpenHands container — but
+  >>> that is not where the model is called. The agent runs inside the
+  >>> SESSION RUNTIME, which Docker starts on the default bridge, where
+  >>> no DockHub container name resolves at all. Verified live:
+  >>>
+  >>>     getent hosts ollama                      -> nothing
+  >>>     wget host.docker.internal:11434/api/tags -> your model list
+  >>>
+  >>> So the runtime reaches your provider the same way it reaches
+  >>> OpenHands itself: through host.docker.internal and a published
+  >>> host port. A container name here fails silently — the message is
+  >>> accepted, no reply ever arrives, and nothing in the UI says why.
 
 
 3. THE FIRST SESSION STARTS A SECOND CONTAINER
@@ -547,12 +599,18 @@ echo "      then open  http://localhost:$ENV_PORT"
 echo
 echo "   2. Set the model in the UI — no environment variable can do it."
 echo "      Settings → LLM → Advanced. All THREE fields, or it fails:"
-if [[ -n "$AI_PROVIDER_NAME" ]]; then
+if [[ -n "$OH_MODEL_URL" ]]; then
     echo "        Custom Model   openai/<model>   ← the openai/ prefix is required"
-    echo "        Base URL       $AI_PROVIDER_BASE_URL/v1"
+    echo "        Base URL       $OH_MODEL_URL"
     echo "        API Key        anything, e.g.  ollama   ← must not be empty"
+    echo "      NOT http://$AI_PROVIDER_NAME:... — that name does not resolve"
+    echo "      inside the session container where the model is actually called."
     echo "      No dropdown lists your models. Names:"
     echo "        docker exec -it $AI_PROVIDER_NAME ollama list"
+elif [[ -n "$AI_PROVIDER_NAME" ]]; then
+    echo "      ⚠️  $AI_PROVIDER_NAME is running but publishes no host port, so"
+    echo "         sessions cannot reach it. Rerun services/AI/$AI_PROVIDER_NAME/"
+    echo "         and accept the host-port question, then redeploy this."
 else
     echo "      ⚠️  No provider running. Deploy services/AI/ollama/ first."
 fi

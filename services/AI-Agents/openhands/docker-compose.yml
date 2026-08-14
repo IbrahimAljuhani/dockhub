@@ -158,8 +158,13 @@ services:
       # resolving to the docker0 gateway. The runtime's callback URL is
       # built on that name, so removing this breaks every conversation.
       #
-      # It is still NOT how you reach a DockHub model provider. Those are
-      # containers on ai-net, reached by name: http://ollama:11434
+      # And it IS how the session reaches your model provider too — which
+      # is the opposite of what an earlier version of this comment claimed.
+      # The agent's LLM call is made from the runtime, not from here, so
+      # `http://ollama:11434` cannot work: no DockHub container name
+      # resolves on the default bridge. The runtime needs the provider's
+      # published host port via this same name. deploy.sh works that URL
+      # out and prints it; see its "Base URL" section.
       - "host.docker.internal:host-gateway"
     networks:
       - ai-net
