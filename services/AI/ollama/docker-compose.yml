@@ -58,6 +58,23 @@ services:
       # Ollama constantly and dislike the reload pause on the first request
       # after a gap.
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-5m}
+      # How much the model can hold at once. Unset here means Ollama chooses
+      # by VRAM (4k / 32k / 256k) — and on a modest card it chooses 4k.
+      #
+      # ⚠️ 4096 breaks agents without telling anyone. The window is consumed
+      # by the system prompt and tool schemas before the user types: measured
+      # live, OpenHands sent 2051 tokens for an empty conversation. Anything
+      # earlier then falls out of the window, and the model answers as though
+      # you never said it — no error, no warning, in the UI or the logs.
+      #
+      # Worse, the number every consumer reads is the wrong one: models
+      # advertise their TRAINED capacity (gemma4:e4b: 131072) and that is
+      # what /api/tags reports, while the server may be running 4096.
+      #
+      # deploy.sh asks for this and writes it to .env. Blank = Ollama decides.
+      # Raising it costs GPU memory; if the model starts spilling to CPU or
+      # failing to load, lower it.
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-}
     volumes:
       # A HOST DIRECTORY, not a named volume — see resolve_ai_models_dir() in
       # lib/common.sh. Models are the largest thing DockHub downloads, and a

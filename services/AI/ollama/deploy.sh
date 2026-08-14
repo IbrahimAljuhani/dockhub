@@ -96,6 +96,34 @@ else
     print_info "Other DockHub services reach it as http://ollama:11434 without a port."
     prompt_host_port "11434"
 
+    # ── Context length ──────────────────────────────────────────────────
+    # Ollama picks this itself — 4k, 32k or 256k "based on VRAM" — and on a
+    # modest card it picks 4k. That is fine for chat and quietly useless for
+    # agents, which spend most of the window before you type anything:
+    # system prompt, tool schemas, skills. Measured on a live box, OpenHands
+    # sent 2051 tokens on a bare "hello" with nothing loaded.
+    #
+    # The trap is that nothing reports it. The model advertises its trained
+    # capacity (gemma4:e4b says 131072) and every consumer believes that
+    # number, including DockHub's own HERMES_MIN_CONTEXT gate — while the
+    # server allocates 4096 and silently truncates.
+    #
+    # So it is asked here, once, with its price stated.
+    echo
+    print_info "Context length — how much the model can hold at once."
+    print_warn "Ollama's automatic choice is VRAM-based and is often 4096."
+    print_warn "That is too small for agents: OpenHands alone sends ~2000 tokens"
+    print_warn "of prompt before your first word, and Hermes asks for 64000."
+    print_warn "Raising it costs GPU memory in proportion. Too high and the"
+    print_warn "model spills to CPU or fails to load — lower it if that happens."
+    print_info "Blank = let Ollama decide (its default behaviour)."
+    read -rp "Context length in tokens [32768, blank for automatic]: " OLLAMA_CTX || OLLAMA_CTX=""
+    OLLAMA_CTX="${OLLAMA_CTX:-32768}"
+    if [[ ! "$OLLAMA_CTX" =~ ^[0-9]+$ ]]; then
+        print_warn "Not a number — leaving it to Ollama."
+        OLLAMA_CTX=""
+    fi
+
     # Recorded per service, so changing the global default later never moves
     # a running deployment out from under itself.
     cat > "$INSTALL_DIR/.env" <<EOF
@@ -104,6 +132,7 @@ OLLAMA_KEEP_ALIVE=5m
 AI_ACCELERATION=$AI_ACCELERATION
 AI_MODELS_PATH=$ENV_MODELS_PATH
 EOF
+    [[ -n "$OLLAMA_CTX" ]] && echo "OLLAMA_CONTEXT_LENGTH=$OLLAMA_CTX" >> "$INSTALL_DIR/.env"
     [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT" >> "$INSTALL_DIR/.env"
     [[ -n "$HOST_PORT" ]] && echo "HOST_PORT=$HOST_PORT" >> "$INSTALL_DIR/.env"
     chmod 600 "$INSTALL_DIR/.env"
