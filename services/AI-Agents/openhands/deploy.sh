@@ -205,6 +205,23 @@ OVERRIDE_BODY=$(
     # 127.0.0.1 explicitly. Without the prefix Docker binds 0.0.0.0 and
     # publishes an unauthenticated privileged agent to the whole LAN.
     echo "      - \"127.0.0.1:$ENV_PORT:3000\""
+    # ── And the same port on the docker0 gateway ────────────────────────
+    # Not decoration, and not a widening done casually. The session runtime
+    # posts every agent event back to OH_WEBHOOKS_0_BASE_URL, which resolves
+    # inside that container to this gateway address. With only the loopback
+    # binding above, the runtime reaches a closed port, logs
+    #   "Failed to post events to webhook ... All connection attempts failed"
+    # and your message is filed in pending_messages and never answered. The
+    # UI shows no error at all — it simply never replies.
+    #
+    # The cost, stated plainly: 172.17.0.1 is NOT reachable from your LAN,
+    # so the loopback guarantee for humans holds. It IS reachable from every
+    # container on the default bridge. That is a real widening, and it is
+    # bounded by the socket this service already required — anything on this
+    # host that could reach the gateway could already reach the daemon.
+    GW_IP=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)
+    [[ -z "$GW_IP" ]] && GW_IP="172.17.0.1"
+    echo "      - \"$GW_IP:$ENV_PORT:3000\""
     # Second binding, on the docker0 gateway — NOT a convenience.
     #
     # Session runtimes are started on the default bridge network, where
