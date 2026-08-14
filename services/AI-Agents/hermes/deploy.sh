@@ -157,20 +157,6 @@ context_length_of() {
     return 0
 }
 
-# The number that actually governs: the smaller of what the model can do
-# and what the server will give it. Echoes nothing when neither is known.
-effective_context_of() {
-    local model="$1" adv
-    adv=$(context_length_of "$model")
-    if [[ -n "${SERVER_CTX:-}" && -n "$adv" ]]; then
-        (( SERVER_CTX < adv )) && { echo "$SERVER_CTX"; return 0; }
-        echo "$adv"; return 0
-    fi
-    [[ -n "${SERVER_CTX:-}" ]] && { echo "$SERVER_CTX"; return 0; }
-    [[ -n "$adv" ]] && echo "$adv"
-    return 0
-}
-
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
 else
@@ -286,28 +272,34 @@ else
         print_warn "and refuses to run below it. Many good small models are under that —"
         print_warn "qwen2.5-coder:7b reports 32,768, for example, and is rejected."
 
-        # ── The ceiling nobody sees ─────────────────────────────────────
-        # A model's advertised window is an upper bound the server may not
-        # honour. Stating this before the menu keeps the ticks below honest.
-        echo
-        if [[ -n "$SERVER_CTX" ]]; then
-            if (( SERVER_CTX < HERMES_MIN_CONTEXT )); then
-                print_warn "⚠️ $AI_PROVIDER_NAME is set to allocate ${SERVER_CTX} tokens per model"
-                print_warn "   (OLLAMA_CONTEXT_LENGTH). NO model can exceed that here, whatever"
-                print_warn "   it advertises — so every option below is capped at ${SERVER_CTX}."
-                print_warn "   Raise it in ~/docker/$AI_PROVIDER_NAME/.env, redeploy that service,"
-                print_warn "   and rerun this. Watch its 'ollama ps' PROCESSOR column: too high"
-                print_warn "   and the model spills to CPU, which costs more than it buys."
-            else
-                print_info "$AI_PROVIDER_NAME allocates ${SERVER_CTX} tokens per model — above the minimum."
-            fi
-        else
-            print_warn "⚠️ $AI_PROVIDER_NAME has no OLLAMA_CONTEXT_LENGTH set, so it picks by"
-            print_warn "   VRAM on its own — commonly 4096, far below what any agent needs,"
-            print_warn "   and the models below will still advertise six-figure windows."
-            print_warn "   Check what it really serves:"
-            print_warn "     docker exec $AI_PROVIDER_NAME ollama ps     (CONTEXT column)"
-            print_warn "   Set it in ~/docker/$AI_PROVIDER_NAME/.env to be sure."
+        # ── Two numbers, two different consequences ─────────────────────
+        # Do not collapse these. Hermes' own startup check reads the model's
+        # ADVERTISED window — that is the number in its refusal message, and
+        # the ❌ marks below predict it. What the server ALLOCATES is a
+        # separate matter: it never causes a refusal, it quietly shortens
+        # working memory.
+        #
+        # Confirmed live: a model advertising 131072 was accepted and ran
+        # normally while Ollama served it 4096. So allocation is reported
+        # here as a quality warning, never as a veto — an earlier revision
+        # vetoed on it and blocked deployments that work.
+        if [[ -n "$SERVER_CTX" ]] && (( SERVER_CTX < HERMES_MIN_CONTEXT )); then
+            echo
+            print_info "Note — separate from the check above, and not a blocker:"
+            print_info "  $AI_PROVIDER_NAME currently serves ${SERVER_CTX} tokens per model"
+            print_info "  (OLLAMA_CONTEXT_LENGTH), whatever a model advertises. Hermes will"
+            print_info "  still start and work; long conversations just lose their oldest"
+            print_info "  parts silently, with no error anywhere."
+            print_info "  To widen it: raise OLLAMA_CONTEXT_LENGTH in ~/docker/$AI_PROVIDER_NAME/.env,"
+            print_info "  redeploy that service, and check 'ollama ps' — if PROCESSOR shows"
+            print_info "  any CPU, the card cannot hold it and you should come back down."
+        elif [[ -z "$SERVER_CTX" ]]; then
+            echo
+            print_info "Note — $AI_PROVIDER_NAME has no OLLAMA_CONTEXT_LENGTH set, so it sizes"
+            print_info "  the window from VRAM on its own. On a small card that can be 4096"
+            print_info "  even for a model advertising six figures. Not a blocker; it only"
+            print_info "  shortens memory. See what it really serves once a model is loaded:"
+            print_info "    docker exec $AI_PROVIDER_NAME ollama ps      (CONTEXT column)"
         fi
 
         if (( ${#PROVIDER_MODELS[@]} == 1 )); then
@@ -323,21 +315,20 @@ else
                 print_warn "Pick a CHAT model. This list also has speech and image ones."
             i=1
             for m in "${PROVIDER_MODELS[@]}"; do
+                # The tick tracks the ADVERTISED window, because that is what
+                # Hermes itself checks and refuses on. The served figure is
+                # shown beside it when smaller — informative, not decisive.
                 madv=$(context_length_of "$m")
-                mctx=$(effective_context_of "$m")
-                # Show both when they differ — a model advertising 131072
-                # and served 4096 must not read as a win.
+                mlabel=""
                 if [[ -n "$madv" && -n "$SERVER_CTX" ]] && (( SERVER_CTX < madv )); then
                     mlabel="${madv} ctx, served at ${SERVER_CTX}"
-                elif [[ -n "$mctx" ]]; then
-                    mlabel="${mctx} ctx"
-                else
-                    mlabel=""
+                elif [[ -n "$madv" ]]; then
+                    mlabel="${madv} ctx"
                 fi
-                if [[ -z "$mctx" ]]; then
+                if [[ -z "$madv" ]]; then
                     echo "   $i) $m   — context unknown ⚠️  not checked"
-                elif (( mctx < HERMES_MIN_CONTEXT )); then
-                    echo "   $i) $m   — ${mlabel}  ❌ too small for Hermes"
+                elif (( madv < HERMES_MIN_CONTEXT )); then
+                    echo "   $i) $m   — ${mlabel}  ❌ Hermes will refuse this"
                 else
                     echo "   $i) $m   — ${mlabel}  ✅"
                 fi
@@ -365,65 +356,65 @@ else
         # that bit us: one model, taken without comment, rejected later.
         HERMES_CONTEXT_OVERRIDE=""
         if [[ -n "$HERMES_MODEL_VALUE" ]]; then
-            CHOSEN_CTX=$(effective_context_of "$HERMES_MODEL_VALUE")
             CHOSEN_ADV=$(context_length_of "$HERMES_MODEL_VALUE")
-            # Which of the two limits actually bites decides the advice —
-            # they need opposite fixes, and giving the wrong one is how a
-            # user ends up telling Hermes it has memory it does not have.
-            CAPPED_BY_SERVER=0
-            [[ -n "$SERVER_CTX" && -n "$CHOSEN_ADV" ]] && (( SERVER_CTX < CHOSEN_ADV )) && CAPPED_BY_SERVER=1
-            if [[ -n "$CHOSEN_CTX" ]] && (( CHOSEN_CTX < HERMES_MIN_CONTEXT )); then
+            # A quality note, not a gate: the server serving less than the
+            # model advertises shortens memory silently but never stops
+            # Hermes starting. Said once, plainly, and then left alone.
+            if [[ -n "$SERVER_CTX" && -n "$CHOSEN_ADV" ]] && (( SERVER_CTX < CHOSEN_ADV )); then
                 echo
-                if (( CAPPED_BY_SERVER == 1 )); then
-                    print_warn "$HERMES_MODEL_VALUE advertises ${CHOSEN_ADV} tokens, but"
-                    print_warn "$AI_PROVIDER_NAME will only serve ${SERVER_CTX} — below Hermes'"
-                    print_warn "minimum of ${HERMES_MIN_CONTEXT}. The model is not the problem here."
-                else
-                    print_warn "$HERMES_MODEL_VALUE reports ${CHOSEN_CTX} tokens — below Hermes'"
-                    print_warn "minimum of ${HERMES_MIN_CONTEXT}. Deployed as-is it will start, then answer"
-                    print_warn "every message with 'agent init failed'."
-                fi
+                print_info "$HERMES_MODEL_VALUE advertises ${CHOSEN_ADV}; $AI_PROVIDER_NAME serves ${SERVER_CTX}."
+                print_info "Hermes accepts it — it checks the advertised figure — but its"
+                print_info "working memory is the served one. Long threads truncate quietly."
+            fi
+            # The gate proper. Hermes reads the ADVERTISED window and refuses
+            # below its minimum, with exactly this arithmetic. Matching it is
+            # the whole point: predict the refusal before the deploy, not
+            # after the first message.
+            if [[ -n "$CHOSEN_ADV" ]] && (( CHOSEN_ADV < HERMES_MIN_CONTEXT )); then
+                echo
+                print_warn "$HERMES_MODEL_VALUE reports ${CHOSEN_ADV} tokens — below Hermes'"
+                print_warn "minimum of ${HERMES_MIN_CONTEXT}. Deployed as-is it will start, then answer"
+                print_warn "every message with 'agent init failed'."
                 echo >&2
                 print_info "Ways forward:"
-                if (( CAPPED_BY_SERVER == 1 )); then
-                    print_info "  1) Raise the SERVER's allocation — this is the real fix:"
-                    print_info "       ~/docker/$AI_PROVIDER_NAME/.env  ->  OLLAMA_CONTEXT_LENGTH=${HERMES_MIN_CONTEXT}"
-                    print_info "       then redeploy $AI_PROVIDER_NAME and rerun this."
-                    print_info "     Check 'ollama ps' afterwards: if PROCESSOR shows any CPU,"
-                    print_info "     the card cannot hold it and you must come back down —"
-                    print_info "     measured on an RTX 2060, gemma4:e4b managed 32768, not 65536."
-                    print_info "  2) A smaller model leaves room for a larger window."
-                    print_info "  ⚠️ Do NOT override context_length below in this case. It would"
-                    print_info "     promise Hermes memory the server will never hand over."
-                else
-                    print_info "  1) Pull a bigger-context model and rerun. llama3.1:8b reports"
-                    print_info "     131,072 and is a similar size:"
-                    print_info "       docker exec -it ollama ollama pull llama3.1:8b"
-                    print_info "  2) Override it — but ONLY if you know the server is"
-                    print_info "     under-reporting and the model's true window is 64K+."
-                    print_info "     Hermes' own error message suggests this."
-                fi
+                print_info "  1) Pull a bigger-context model and rerun. llama3.1:8b reports"
+                print_info "     131,072 and is a similar size:"
+                print_info "       docker exec -it ollama ollama pull llama3.1:8b"
+                print_info "  2) Override it — but ONLY if you know the server is"
+                print_info "     under-reporting and the model's true window is 64K+."
+                print_info "     Hermes' own error message suggests this."
                 echo >&2
-                # The override exists for one case only: a model whose true
-                # window is larger than what it advertises. When the SERVER
-                # is the ceiling, no number written here changes what gets
-                # allocated — it only makes Hermes plan for memory it will
-                # never receive. So the question is not asked at all then,
-                # rather than asked with a warning attached to it.
-                if (( CAPPED_BY_SERVER == 1 )); then
-                    print_info "No override offered here — the limit is the server's, and"
-                    print_info "config.yaml cannot raise it. Fix it at $AI_PROVIDER_NAME and rerun."
-                else
-                    read -rp "Set model.context_length anyway? Enter a number, or blank to continue unchanged: " HERMES_CONTEXT_OVERRIDE
-                    if [[ -n "$HERMES_CONTEXT_OVERRIDE" ]]; then
-                        if [[ ! "$HERMES_CONTEXT_OVERRIDE" =~ ^[0-9]+$ ]] \
-                           || (( HERMES_CONTEXT_OVERRIDE < HERMES_MIN_CONTEXT )); then
-                            print_warn "Not a number, or still below ${HERMES_MIN_CONTEXT} — ignoring it."
-                            HERMES_CONTEXT_OVERRIDE=""
-                        else
-                            print_info "config.yaml will declare context_length: $HERMES_CONTEXT_OVERRIDE"
-                        fi
+                read -rp "Set model.context_length anyway? Enter a number, or blank to continue unchanged: " HERMES_CONTEXT_OVERRIDE
+                if [[ -n "$HERMES_CONTEXT_OVERRIDE" ]]; then
+                    if [[ ! "$HERMES_CONTEXT_OVERRIDE" =~ ^[0-9]+$ ]] \
+                       || (( HERMES_CONTEXT_OVERRIDE < HERMES_MIN_CONTEXT )); then
+                        print_warn "Not a number, or still below ${HERMES_MIN_CONTEXT} — ignoring it."
+                        HERMES_CONTEXT_OVERRIDE=""
+                    else
+                        print_info "config.yaml will declare context_length: $HERMES_CONTEXT_OVERRIDE"
                     fi
+                fi
+
+                # ── The decision point, which must not be skipped ────────
+                # Reached only when the model's ADVERTISED window is below
+                # Hermes' minimum — the case Hermes itself rejects — and no
+                # override was accepted. Without this the script printed its
+                # warnings and deployed anyway; observed live, ending with
+                # "Self-test passed" over a config that fails every message.
+                # A self-test that passes on a known-broken setup is worse
+                # than none, so the default here is to stop.
+                if [[ -z "$HERMES_CONTEXT_OVERRIDE" ]]; then
+                    echo >&2
+                    print_warn "As things stand, Hermes will start, answer this script's"
+                    print_warn "self-test, and then fail every real message."
+                    read -rp "Deploy anyway? (y/N): " ctx_go || ctx_go="n"
+                    if [[ "${ctx_go,,}" != "y" ]]; then
+                        echo
+                        print_info "Stopped before writing anything — no .env, no containers."
+                        print_info "Pick a model advertising ${HERMES_MIN_CONTEXT}+ and rerun."
+                        exit 0
+                    fi
+                    print_warn "Continuing at your request. Expect 'agent init failed'."
                 fi
             fi
         fi
