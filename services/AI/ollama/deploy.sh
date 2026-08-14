@@ -101,7 +101,8 @@ else
     # modest card it picks 4k. That is fine for chat and quietly useless for
     # agents, which spend most of the window before you type anything:
     # system prompt, tool schemas, skills. Measured on a live box, OpenHands
-    # sent 2051 tokens on a bare "hello" with nothing loaded.
+    # with gemma4:e4b opened at 17742 tokens — over four times the entire
+    # 4096 window, on an empty conversation.
     #
     # The trap is that nothing reports it. The model advertises its trained
     # capacity (gemma4:e4b says 131072) and every consumer believes that
@@ -112,8 +113,8 @@ else
     echo
     print_info "Context length — how much the model can hold at once."
     print_warn "Ollama's automatic choice is VRAM-based and is often 4096."
-    print_warn "That is too small for agents: OpenHands alone sends ~2000 tokens"
-    print_warn "of prompt before your first word, and Hermes asks for 64000."
+    print_warn "That is too small for agents: OpenHands opens at ~17700 tokens"
+    print_warn "before your first word, and Hermes asks for 64000."
     print_warn "Raising it costs GPU memory in proportion. Too high and the"
     print_warn "model spills to CPU or fails to load — lower it if that happens."
     print_info "Blank = let Ollama decide (its default behaviour)."

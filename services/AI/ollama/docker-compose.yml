@@ -61,19 +61,36 @@ services:
       # How much the model can hold at once. Unset here means Ollama chooses
       # by VRAM (4k / 32k / 256k) — and on a modest card it chooses 4k.
       #
-      # ⚠️ 4096 breaks agents without telling anyone. The window is consumed
-      # by the system prompt and tool schemas before the user types: measured
-      # live, OpenHands sent 2051 tokens for an empty conversation. Anything
-      # earlier then falls out of the window, and the model answers as though
-      # you never said it — no error, no warning, in the UI or the logs.
+      # ⚠️ 4096 breaks agents without telling anyone. Measured live on a
+      # two-turn conversation with OpenHands and gemma4:e4b:
+      #
+      #     n_ctx_slot = 32768 -> task.n_tokens = 17742, then 17787, 17811
+      #
+      # 17742 tokens is the agent's BASELINE — system prompt, tool schemas,
+      # skills — before you type a word. It needs more than four times the
+      # whole 4096 window just to say hello. (The same setup at 4096 logged
+      # 2051 tokens; that was not a smaller prompt, it was this one cut to
+      # fit, and the conversation history is what got cut.) The model then
+      # answers as though you never spoke — no error in the UI or the logs.
       #
       # Worse, the number every consumer reads is the wrong one: models
       # advertise their TRAINED capacity (gemma4:e4b: 131072) and that is
       # what /api/tags reports, while the server may be running 4096.
       #
       # deploy.sh asks for this and writes it to .env. Blank = Ollama decides.
-      # Raising it costs GPU memory; if the model starts spilling to CPU or
-      # failing to load, lower it.
+      #
+      # Raising it costs GPU memory, and the cost is steeper than people
+      # expect. Measured on an RTX 2060 with gemma4:e4b — same model, same
+      # card, only this value changed:
+      #
+      #     32768  ->   3.3 GB   100% GPU
+      #     65536  ->  10.0 GB   70%/30% CPU/GPU
+      #
+      # Doubling the window added 6.7 GB of KV cache, overflowed the card,
+      # and pushed most of the model onto the CPU. That trade is always bad:
+      # you gain context you cannot afford to process. `docker exec ollama
+      # ollama ps` shows both numbers — if PROCESSOR mentions CPU at all,
+      # come back down.
       OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-}
     volumes:
       # A HOST DIRECTORY, not a named volume — see resolve_ai_models_dir() in

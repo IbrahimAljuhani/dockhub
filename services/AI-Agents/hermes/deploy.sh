@@ -81,6 +81,42 @@ list_provider_models() {
 # where it can be and honest ("unknown") where it cannot.
 HERMES_MIN_CONTEXT=64000
 
+# ── What the SERVER allocates, which is not what the MODEL advertises ───
+# These are two different numbers, and confusing them made this gate lie.
+#
+# A model reports its TRAINED capacity — gemma4:e4b says 131072 — and that
+# is what /api/tags returns. Ollama then serves something else entirely:
+# OLLAMA_CONTEXT_LENGTH if set, otherwise an automatic choice "based on
+# VRAM" that is 4096 on a modest card.
+#
+# Measured on a live server: gemma4:e4b advertising 131072, served at 4096,
+# while OpenHands' opening prompt alone was 17742 tokens — four times the
+# whole window before the user typed anything. This gate passed that model
+# with a green tick, because it read the advertised number.
+#
+# Echoes the configured allocation, or nothing when it is automatic (in
+# which case it is unknowable from here and must be reported as such).
+ollama_server_context() {
+    local name="$1"
+    [[ -n "$name" ]] || return 0
+    docker inspect "$name" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+        | sed -n 's/^OLLAMA_CONTEXT_LENGTH=//p' | head -1 || true
+}
+
+# /api/tags does not carry context_length for every model. Observed live:
+# of four models, two listed it and two did not, with no visible pattern —
+# so the picker printed a bare name for those two and the gate silently
+# skipped them. /api/show does carry it, under an architecture-prefixed
+# key such as "gemma3n.context_length", so it is the fallback.
+ollama_show_context() {
+    local base="$1" model="$2"
+    docker run --rm --network ai-net alpine \
+        wget -qO- --timeout=5 --header='Content-Type: application/json' \
+        --post-data="{\"model\":\"$model\"}" "$base/api/show" 2>/dev/null \
+        | grep -oE '"[a-zA-Z0-9_.]*context_length"[[:space:]]*:[[:space:]]*[0-9]+' \
+        | grep -oE '[0-9]+$' | head -1 || true
+}
+
 ollama_context_lengths() {
     local base="$1"
     # RS='"name":"' starts every record at a model, so a context_length
@@ -100,15 +136,38 @@ ollama_context_lengths() {
           }' || true
 }
 
-# Echoes the context length for one model, or nothing if unknown.
+# Echoes what one model ADVERTISES, or nothing if it cannot be determined.
+# Falls back to /api/show for the models /api/tags leaves blank.
 context_length_of() {
-    local model="$1" line name cl
+    local model="$1" name cl
     while IFS=$'\t' read -r name cl; do
         [[ "$name" == "$model" ]] || continue
-        [[ "$cl" == "?" ]] && return 0
-        echo "$cl"
-        return 0
+        if [[ -n "$cl" && "$cl" != "?" ]]; then
+            echo "$cl"
+            return 0
+        fi
+        break
     done <<< "${MODEL_CONTEXTS:-}"
+    # Blank in the tag listing — ask the model itself rather than printing
+    # nothing, which is what made two of four models unlabelled and
+    # therefore ungated.
+    if [[ "${AI_PROVIDER_NAME:-}" == "ollama" && -n "${AI_PROVIDER_BASE_URL:-}" ]]; then
+        ollama_show_context "$AI_PROVIDER_BASE_URL" "$model"
+    fi
+    return 0
+}
+
+# The number that actually governs: the smaller of what the model can do
+# and what the server will give it. Echoes nothing when neither is known.
+effective_context_of() {
+    local model="$1" adv
+    adv=$(context_length_of "$model")
+    if [[ -n "${SERVER_CTX:-}" && -n "$adv" ]]; then
+        (( SERVER_CTX < adv )) && { echo "$SERVER_CTX"; return 0; }
+        echo "$adv"; return 0
+    fi
+    [[ -n "${SERVER_CTX:-}" ]] && { echo "$SERVER_CTX"; return 0; }
+    [[ -n "$adv" ]] && echo "$adv"
     return 0
 }
 
@@ -218,10 +277,38 @@ else
             MODEL_CONTEXTS=$(ollama_context_lengths "$AI_PROVIDER_BASE_URL")
         fi
 
+        # What the server will hand out, before any model is considered.
+        SERVER_CTX=""
+        [[ "$AI_PROVIDER_NAME" == "ollama" ]] && SERVER_CTX=$(ollama_server_context "$AI_PROVIDER_NAME")
+
         echo
         print_warn "Hermes requires a context window of at least ${HERMES_MIN_CONTEXT} tokens"
         print_warn "and refuses to run below it. Many good small models are under that —"
         print_warn "qwen2.5-coder:7b reports 32,768, for example, and is rejected."
+
+        # ── The ceiling nobody sees ─────────────────────────────────────
+        # A model's advertised window is an upper bound the server may not
+        # honour. Stating this before the menu keeps the ticks below honest.
+        echo
+        if [[ -n "$SERVER_CTX" ]]; then
+            if (( SERVER_CTX < HERMES_MIN_CONTEXT )); then
+                print_warn "⚠️ $AI_PROVIDER_NAME is set to allocate ${SERVER_CTX} tokens per model"
+                print_warn "   (OLLAMA_CONTEXT_LENGTH). NO model can exceed that here, whatever"
+                print_warn "   it advertises — so every option below is capped at ${SERVER_CTX}."
+                print_warn "   Raise it in ~/docker/$AI_PROVIDER_NAME/.env, redeploy that service,"
+                print_warn "   and rerun this. Watch its 'ollama ps' PROCESSOR column: too high"
+                print_warn "   and the model spills to CPU, which costs more than it buys."
+            else
+                print_info "$AI_PROVIDER_NAME allocates ${SERVER_CTX} tokens per model — above the minimum."
+            fi
+        else
+            print_warn "⚠️ $AI_PROVIDER_NAME has no OLLAMA_CONTEXT_LENGTH set, so it picks by"
+            print_warn "   VRAM on its own — commonly 4096, far below what any agent needs,"
+            print_warn "   and the models below will still advertise six-figure windows."
+            print_warn "   Check what it really serves:"
+            print_warn "     docker exec $AI_PROVIDER_NAME ollama ps     (CONTEXT column)"
+            print_warn "   Set it in ~/docker/$AI_PROVIDER_NAME/.env to be sure."
+        fi
 
         if (( ${#PROVIDER_MODELS[@]} == 1 )); then
             HERMES_MODEL_VALUE="${PROVIDER_MODELS[0]}"
@@ -236,13 +323,23 @@ else
                 print_warn "Pick a CHAT model. This list also has speech and image ones."
             i=1
             for m in "${PROVIDER_MODELS[@]}"; do
-                mctx=$(context_length_of "$m")
-                if [[ -z "$mctx" ]]; then
-                    echo "   $i) $m"
-                elif (( mctx < HERMES_MIN_CONTEXT )); then
-                    echo "   $i) $m   — ${mctx} ctx  ❌ too small for Hermes"
+                madv=$(context_length_of "$m")
+                mctx=$(effective_context_of "$m")
+                # Show both when they differ — a model advertising 131072
+                # and served 4096 must not read as a win.
+                if [[ -n "$madv" && -n "$SERVER_CTX" ]] && (( SERVER_CTX < madv )); then
+                    mlabel="${madv} ctx, served at ${SERVER_CTX}"
+                elif [[ -n "$mctx" ]]; then
+                    mlabel="${mctx} ctx"
                 else
-                    echo "   $i) $m   — ${mctx} ctx  ✅"
+                    mlabel=""
+                fi
+                if [[ -z "$mctx" ]]; then
+                    echo "   $i) $m   — context unknown ⚠️  not checked"
+                elif (( mctx < HERMES_MIN_CONTEXT )); then
+                    echo "   $i) $m   — ${mlabel}  ❌ too small for Hermes"
+                else
+                    echo "   $i) $m   — ${mlabel}  ✅"
                 fi
                 i=$((i + 1))
             done
@@ -268,29 +365,64 @@ else
         # that bit us: one model, taken without comment, rejected later.
         HERMES_CONTEXT_OVERRIDE=""
         if [[ -n "$HERMES_MODEL_VALUE" ]]; then
-            CHOSEN_CTX=$(context_length_of "$HERMES_MODEL_VALUE")
+            CHOSEN_CTX=$(effective_context_of "$HERMES_MODEL_VALUE")
+            CHOSEN_ADV=$(context_length_of "$HERMES_MODEL_VALUE")
+            # Which of the two limits actually bites decides the advice —
+            # they need opposite fixes, and giving the wrong one is how a
+            # user ends up telling Hermes it has memory it does not have.
+            CAPPED_BY_SERVER=0
+            [[ -n "$SERVER_CTX" && -n "$CHOSEN_ADV" ]] && (( SERVER_CTX < CHOSEN_ADV )) && CAPPED_BY_SERVER=1
             if [[ -n "$CHOSEN_CTX" ]] && (( CHOSEN_CTX < HERMES_MIN_CONTEXT )); then
                 echo
-                print_warn "$HERMES_MODEL_VALUE reports ${CHOSEN_CTX} tokens — below Hermes'"
-                print_warn "minimum of ${HERMES_MIN_CONTEXT}. Deployed as-is it will start, then answer"
-                print_warn "every message with 'agent init failed'."
+                if (( CAPPED_BY_SERVER == 1 )); then
+                    print_warn "$HERMES_MODEL_VALUE advertises ${CHOSEN_ADV} tokens, but"
+                    print_warn "$AI_PROVIDER_NAME will only serve ${SERVER_CTX} — below Hermes'"
+                    print_warn "minimum of ${HERMES_MIN_CONTEXT}. The model is not the problem here."
+                else
+                    print_warn "$HERMES_MODEL_VALUE reports ${CHOSEN_CTX} tokens — below Hermes'"
+                    print_warn "minimum of ${HERMES_MIN_CONTEXT}. Deployed as-is it will start, then answer"
+                    print_warn "every message with 'agent init failed'."
+                fi
                 echo >&2
-                print_info "Two ways forward:"
-                print_info "  1) Pull a bigger-context model and rerun. llama3.1:8b reports"
-                print_info "     131,072 and is a similar size:"
-                print_info "       docker exec -it ollama ollama pull llama3.1:8b"
-                print_info "  2) Override it — but ONLY if you know the server is"
-                print_info "     under-reporting and the model's true window is 64K+."
-                print_info "     Hermes' own error message suggests this."
+                print_info "Ways forward:"
+                if (( CAPPED_BY_SERVER == 1 )); then
+                    print_info "  1) Raise the SERVER's allocation — this is the real fix:"
+                    print_info "       ~/docker/$AI_PROVIDER_NAME/.env  ->  OLLAMA_CONTEXT_LENGTH=${HERMES_MIN_CONTEXT}"
+                    print_info "       then redeploy $AI_PROVIDER_NAME and rerun this."
+                    print_info "     Check 'ollama ps' afterwards: if PROCESSOR shows any CPU,"
+                    print_info "     the card cannot hold it and you must come back down —"
+                    print_info "     measured on an RTX 2060, gemma4:e4b managed 32768, not 65536."
+                    print_info "  2) A smaller model leaves room for a larger window."
+                    print_info "  ⚠️ Do NOT override context_length below in this case. It would"
+                    print_info "     promise Hermes memory the server will never hand over."
+                else
+                    print_info "  1) Pull a bigger-context model and rerun. llama3.1:8b reports"
+                    print_info "     131,072 and is a similar size:"
+                    print_info "       docker exec -it ollama ollama pull llama3.1:8b"
+                    print_info "  2) Override it — but ONLY if you know the server is"
+                    print_info "     under-reporting and the model's true window is 64K+."
+                    print_info "     Hermes' own error message suggests this."
+                fi
                 echo >&2
-                read -rp "Set model.context_length anyway? Enter a number, or blank to continue unchanged: " HERMES_CONTEXT_OVERRIDE
-                if [[ -n "$HERMES_CONTEXT_OVERRIDE" ]]; then
-                    if [[ ! "$HERMES_CONTEXT_OVERRIDE" =~ ^[0-9]+$ ]] \
-                       || (( HERMES_CONTEXT_OVERRIDE < HERMES_MIN_CONTEXT )); then
-                        print_warn "Not a number, or still below ${HERMES_MIN_CONTEXT} — ignoring it."
-                        HERMES_CONTEXT_OVERRIDE=""
-                    else
-                        print_info "config.yaml will declare context_length: $HERMES_CONTEXT_OVERRIDE"
+                # The override exists for one case only: a model whose true
+                # window is larger than what it advertises. When the SERVER
+                # is the ceiling, no number written here changes what gets
+                # allocated — it only makes Hermes plan for memory it will
+                # never receive. So the question is not asked at all then,
+                # rather than asked with a warning attached to it.
+                if (( CAPPED_BY_SERVER == 1 )); then
+                    print_info "No override offered here — the limit is the server's, and"
+                    print_info "config.yaml cannot raise it. Fix it at $AI_PROVIDER_NAME and rerun."
+                else
+                    read -rp "Set model.context_length anyway? Enter a number, or blank to continue unchanged: " HERMES_CONTEXT_OVERRIDE
+                    if [[ -n "$HERMES_CONTEXT_OVERRIDE" ]]; then
+                        if [[ ! "$HERMES_CONTEXT_OVERRIDE" =~ ^[0-9]+$ ]] \
+                           || (( HERMES_CONTEXT_OVERRIDE < HERMES_MIN_CONTEXT )); then
+                            print_warn "Not a number, or still below ${HERMES_MIN_CONTEXT} — ignoring it."
+                            HERMES_CONTEXT_OVERRIDE=""
+                        else
+                            print_info "config.yaml will declare context_length: $HERMES_CONTEXT_OVERRIDE"
+                        fi
                     fi
                 fi
             fi
@@ -932,6 +1064,24 @@ deploy.sh checks this while you choose, but a model swapped in afterwards
 is not checked. Pull one with a bigger window:
 
     docker exec -it ollama ollama pull llama3.1:8b     # reports 131,072
+
+  >>> "Reports" is the word to be suspicious of. A model advertises the
+  >>> window it was TRAINED with; the server decides what it actually
+  >>> ALLOCATES, and the two are routinely far apart. Measured live here:
+  >>> gemma4:e4b advertising 131,072 while Ollama served 4,096, because
+  >>> OLLAMA_CONTEXT_LENGTH was unset and Ollama sizes it from VRAM.
+  >>>
+  >>> An earlier deploy.sh read only the advertised number and passed that
+  >>> model with a ✅. It now reads both and judges the smaller. Confirm
+  >>> what is really being served — this is the authoritative check, and
+  >>> it only works while a model is loaded:
+  >>>
+  >>>     docker exec ollama ollama ps        # the CONTEXT column
+  >>>
+  >>> If it is too small, the fix is on the PROVIDER, not here:
+  >>>     ~/docker/ollama/.env  ->  OLLAMA_CONTEXT_LENGTH=65536
+  >>> then redeploy Ollama. Raising it costs VRAM; if 'ollama ps' then
+  >>> shows any CPU in PROCESSOR, the card cannot hold it — come back down.
 
 then set it in config.yaml as below. If instead your server under-reports
 a window the model genuinely has, override it:
