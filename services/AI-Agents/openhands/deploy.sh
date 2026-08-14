@@ -199,41 +199,77 @@ if [[ ! "$DOCKER0_GW" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     print_warn "If conversations never get a reply, this is the first thing to check."
 fi
 
+# ── Is host port 3000 free ON THE GATEWAY? ──────────────────────────────
+# The callback binding below is pinned to 3000 and cannot move (see the
+# long note beside it). That makes a collision fatal rather than annoying,
+# so it is caught here — before deploy declares success and the failure
+# surfaces later as an agent that never answers.
+#
+# Only two kinds of binding actually clash with $DOCKER0_GW:3000 — a
+# wildcard listener (0.0.0.0 / [::], which is what a published container
+# port looks like by default) and one already on the gateway itself. A
+# service bound to 127.0.0.1:3000 does NOT conflict and is left alone.
+GW_ESC=${DOCKER0_GW//./\\.}
+PORT_3000_OWNER=""
+if command -v ss >/dev/null 2>&1; then
+    PORT_3000_OWNER=$(ss -ltnH 2>/dev/null | awk '{print $4}' \
+        | grep -Ex "(0\.0\.0\.0|\*|\[::\]|${GW_ESC}):3000" | head -1 || true)
+fi
+if [[ -n "$PORT_3000_OWNER" ]]; then
+    echo
+    print_warn "Something is already listening on $PORT_3000_OWNER."
+    # Name it if Docker owns it — far more useful than a bare port number.
+    CLASH=$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+        | grep -E ':3000->' | awk '{print $1}' | tr '\n' ' ' || true)
+    [[ -n "$CLASH" ]] && print_warn "Docker container(s) publishing 3000: $CLASH"
+    echo
+    print_warn "OpenHands cannot yield this one. Its session runtimes dial"
+    print_warn "host.docker.internal:3000 and that number is fixed by the app."
+    print_warn "Your loopback port ($ENV_PORT) is unaffected — only the callback."
+    echo
+    print_warn "Move the OTHER service instead. In DockHub, Open WebUI is the"
+    print_warn "usual occupant: rerun its deploy and give it a different port."
+    print_error "Refusing to deploy into a collision that would break every conversation."
+fi
+
 OVERRIDE_BODY=$(
     [[ -n "$ENV_MEM_LIMIT" ]] && echo "    mem_limit: $ENV_MEM_LIMIT"
     echo "    ports:"
     # 127.0.0.1 explicitly. Without the prefix Docker binds 0.0.0.0 and
     # publishes an unauthenticated privileged agent to the whole LAN.
     echo "      - \"127.0.0.1:$ENV_PORT:3000\""
-    # ── And the same port on the docker0 gateway ────────────────────────
-    # Not decoration, and not a widening done casually. The session runtime
-    # posts every agent event back to OH_WEBHOOKS_0_BASE_URL, which resolves
-    # inside that container to this gateway address. With only the loopback
-    # binding above, the runtime reaches a closed port, logs
-    #   "Failed to post events to webhook ... All connection attempts failed"
-    # and your message is filed in pending_messages and never answered. The
-    # UI shows no error at all — it simply never replies.
+    # ── The callback binding, on the gateway, at PORT 3000 EXACTLY ──────
+    # Not a convenience, and the port number is not free to choose.
     #
-    # The cost, stated plainly: 172.17.0.1 is NOT reachable from your LAN,
-    # so the loopback guarantee for humans holds. It IS reachable from every
-    # container on the default bridge. That is a real widening, and it is
-    # bounded by the socket this service already required — anything on this
-    # host that could reach the gateway could already reach the daemon.
-    GW_IP=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)
-    [[ -z "$GW_IP" ]] && GW_IP="172.17.0.1"
-    echo "      - \"$GW_IP:$ENV_PORT:3000\""
-    # Second binding, on the docker0 gateway — NOT a convenience.
+    # Session runtimes start on the default bridge network, where the name
+    # `openhands` does not resolve. Their one route back to the app is
+    # host.docker.internal — this gateway. With the loopback binding alone
+    # the callback finds nothing listening, every agent event is dropped,
+    # and messages pile up in pending_messages with no visible error. The
+    # UI just never replies, which reads exactly like a dead model.
     #
-    # Session runtimes are started on the default bridge network, where
-    # the name `openhands` does not resolve. Their only route back to the
-    # app is host.docker.internal, which is this gateway. With loopback
-    # alone the callback finds nothing listening, every agent event is
-    # dropped, and messages queue in pending_messages with no visible
-    # error. See block 6 of docker-compose.yml.
+    # ⚠️ WHY 3000 AND NOT "$ENV_PORT" — found the hard way on a live server.
+    # The app listens on 3000 inside its container and tells each runtime
+    # to call it back on "host.docker.internal:3000", assuming the host
+    # publishes the same number. DockHub does not: it publishes 3001 by
+    # default to stay clear of Open WebUI. So a gateway binding on
+    # $ENV_PORT is a door the runtime never knocks on.
     #
-    # Still not the LAN: the gateway is reachable from containers on this
-    # host, not from your network. The tunnel rule for humans is intact.
-    echo "      - \"$DOCKER0_GW:$ENV_PORT:3000\""
+    # Proven on the box: from inside a runtime, port 3000 answered nothing
+    # while 3001 returned the full OpenHands page — with the app's own
+    # OH_WEBHOOKS_0_BASE_URL correctly reading 3001. The app simply does
+    # not pass that variable down to the sessions it starts.
+    #
+    # Hence two bindings with DIFFERENT host ports onto the same container
+    # port. The human side stays wherever you chose it; the callback side
+    # is pinned to the only number the runtime will ever dial.
+    #
+    # The cost, stated plainly: this gateway is NOT reachable from your
+    # LAN, so the loopback-only rule for humans holds. It IS reachable
+    # from every container on the default bridge. A real widening, bounded
+    # by the socket this service already required — anything that could
+    # reach the gateway could already reach the daemon.
+    echo "      - \"$DOCKER0_GW:3000:3000\""
     if [[ "$ENV_MAIN_NET" == "1" ]]; then
         echo "    networks:"
         echo "      - ai-net"
@@ -458,13 +494,27 @@ Then read the runtime's own log, which is where the truth is:
     docker logs "\$RT" 2>&1 | grep -i webhook
 
   "Failed to post events to webhook ... All connection attempts failed"
-  means the gateway binding is missing. Check it is really there:
+  means the gateway binding is missing or on the wrong port. Check it:
 
     docker port openhands
 
-  Two lines are expected — 127.0.0.1 and $DOCKER0_GW. If the second is
-  absent, delete $INSTALL_DIR/docker-compose.override.yml and rerun this
-  script.
+  Exactly these two lines are expected — note the DIFFERENT host ports:
+
+    3000/tcp -> 127.0.0.1:$ENV_PORT
+    3000/tcp -> $DOCKER0_GW:3000
+
+  The second MUST read 3000, whatever you chose for the first. Runtimes
+  dial host.docker.internal:3000 and that number comes from the app, not
+  from your .env — a gateway binding on $ENV_PORT is a door nobody knocks
+  on. If the second line is missing or shows any other port, delete
+  $INSTALL_DIR/docker-compose.override.yml and rerun this script.
+
+  To see it from where it matters, ask a live runtime directly:
+
+    RT=\$(docker ps --filter name=oh-agent-server --format '{{.Names}}' | head -1)
+    docker exec "\$RT" wget -qO- --timeout=3 http://host.docker.internal:3000/ | head -c 80
+
+  HTML back = the callback path is open. Nothing back = it is not.
 
 Do NOT "fix" this by binding the port to 0.0.0.0. That publishes an
 unauthenticated agent holding the Docker socket to your whole network.

@@ -73,14 +73,31 @@
 # cannot resolve the container name `openhands`. It has exactly one route
 # home: the docker0 gateway, via the host.docker.internal entry below.
 # That means the app's port must exist ON THE GATEWAY, not on loopback
-# alone — so deploy.sh publishes it twice:
+# alone — so deploy.sh publishes it twice, with DIFFERENT host ports:
 #
-#     127.0.0.1:$OH_PORT:3000       ← you, through the SSH tunnel
-#     <docker0 gateway>:$OH_PORT:3000  ← the session runtime, calling back
+#     127.0.0.1:$OH_PORT:3000          ← you, through the SSH tunnel
+#     <docker0 gateway>:3000:3000      ← the session runtime, calling back
 #
-# deploy.sh asks Docker for that gateway rather than assuming 172.17.0.1,
-# because a host with a custom address pool will differ — and a wrong
-# value fails silently at the first message, not at deploy time.
+# ⚠️ The 3000 on that second line is not a typo and is not adjustable.
+# The app listens on 3000 inside its container, and it tells every runtime
+# to call back on "host.docker.internal:3000" — assuming the host publishes
+# the same number it uses internally. DockHub does not: block 3 above moves
+# the human-facing port to 3001 to stay clear of Open WebUI.
+#
+# Verified on a live server, from inside a session runtime:
+#     wget host.docker.internal:3000 → nothing listening
+#     wget host.docker.internal:3001 → the full OpenHands page
+# with the app's own OH_WEBHOOKS_0_BASE_URL correctly set to 3001. So the
+# app does not hand that setting down to the sessions it spawns; pinning
+# the gateway binding to 3000 is the only thing that actually works.
+#
+# Because 3000 is fixed, a collision there is fatal rather than annoying —
+# deploy.sh checks for one up front and refuses, instead of letting it
+# surface later as an agent that never replies.
+#
+# deploy.sh asks Docker for the gateway address rather than assuming
+# 172.17.0.1, because a host with a custom address pool will differ — and
+# a wrong value fails silently at the first message, not at deploy time.
 #
 # ⚠️ Be clear about what the second binding costs. The gateway is NOT
 # reachable from your LAN, so the tunnel-only rule for humans still
@@ -110,19 +127,19 @@ services:
       # runtime configuration may reference it; DockHub's own guidance
       # always points at container names on ai-net instead.
       LOG_ALL_EVENTS: "true"
-      # ⚠️ Load-bearing. Do not remove without reading block 6.
+      # Belt and braces — NOT the fix. Read block 6 before touching it.
       #
-      # The session runtime posts every agent event BACK to this address.
-      # Its default is  http://host.docker.internal:3000/api/v1/webhooks,
-      # which resolves inside the runtime to the docker0 gateway — an
-      # address where DockHub publishes nothing, because the host port is
-      # bound to 127.0.0.1. The runtime then knocks on a closed door,
-      # logs "All connection attempts failed", and your message sits in
-      # the pending_messages table forever.
+      # An earlier revision of this file called this line "load-bearing".
+      # That was wrong, and a live test disproved it: the app carried this
+      # variable correctly (`docker exec openhands env` showed :3001) while
+      # its session runtime went on dialling :3000 regardless. The app does
+      # not propagate this setting to the runtimes it starts.
       #
-      # So the port is republished on the gateway (see deploy.sh) and this
-      # points at it. ${OH_PORT} rather than 3000 because 3000 is Open
-      # WebUI's default here and would collide.
+      # What actually carries the callback is the gateway binding pinned to
+      # port 3000 in deploy.sh. This variable is kept only because it is
+      # upstream's documented knob for the app's own webhook config, and a
+      # correct value costs nothing. Do not expect changing it to move the
+      # port a session dials — it will not.
       OH_WEBHOOKS_0_BASE_URL: "http://host.docker.internal:${OH_PORT}/api/v1/webhooks"
     volumes:
       # Settings, secrets, conversations and the agent's working copies.
