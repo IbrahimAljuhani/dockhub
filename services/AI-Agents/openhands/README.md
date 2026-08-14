@@ -53,11 +53,13 @@ The other two agents here **refuse to start** unless you give them credentials �
 
 Upstream says the same in its own words: bind `127.0.0.1`, reach it through a reverse proxy with TLS, and expose it only behind an API key plus a firewall or VPN. The third-party "hardened" build of OpenHands adds HTTP basic auth **in nginx, in front** — precisely because OpenHands has none.
 
-So `deploy.sh` publishes the port to **`127.0.0.1` on the server**, never the LAN:
+So `deploy.sh` publishes the port to **`127.0.0.1` on the server**, never the LAN. Reaching it needs a **SOCKS proxy, not a port tunnel** — `ssh -L` loads the page but leaves the UI stuck on *Disconnected*, because each session's runtime publishes random ports the browser must also reach (see the next section):
 
 ```bash
-ssh -L 3001:localhost:3001 you@your-server
+ssh -D 1080 you@your-server
 ```
+
+Then point the browser at it — Firefox: *Network Settings → Manual proxy → **SOCKS Host** `127.0.0.1`, Port `1080`, SOCKS v5*, and in `about:config` set `network.proxy.allow_hijacking_localhost = true` (Firefox refuses to proxy `localhost` without it). Chrome: `--proxy-server="socks5://127.0.0.1:1080"`.
 
 Then browse `http://localhost:3001`.
 
@@ -185,7 +187,7 @@ cd ~/docker/openhands
 
 | Command | Purpose |
 |---|---|
-| `ssh -L 3001:localhost:3001 you@server` | The only way in — run it from your machine |
+| `ssh -D 1080 you@server` | The way in — run it from your machine, then set the browser's SOCKS proxy. `-L` is not enough |
 | `docker compose logs -f openhands` | Follow the app |
 | `docker logs <runtime> 2>&1 \| grep -oP '^[^\|]+' \| uniq` | Read the **session runtime**'s log without the duplication — see below |
 | `docker ps --filter ancestor=ghcr.io/openhands/agent-server:1.26.0-python` | Is a session runtime alive? |

@@ -431,18 +431,66 @@ OpenHands — what to do next
 Generated $(date '+%F %T') by deploy.sh
 
 
-1. REACH IT — SSH TUNNEL, NOT THE SERVER'S IP
+1. REACH IT — A SOCKS PROXY, NOT A PORT TUNNEL
 ------------------------------------------------------------------
-The port is bound to 127.0.0.1 ON THE SERVER. Browsing to the server's
-LAN address will not reach it, and that is deliberate:
+The port is bound to 127.0.0.1 ON THE SERVER, because OpenHands has NO
+login: anyone who reaches it gets an agent holding the Docker socket.
+Upstream advises the same loopback binding.
 
-  OpenHands has NO login. Anyone who reaches the port gets an agent
-  that holds the Docker socket. On a LAN binding that is everyone on
-  your network; upstream's own advice is the same loopback binding.
+A plain  ssh -L $ENV_PORT:...  is NOT enough here, and this was learned
+the hard way. It loads the page, then the UI sits on "Disconnected"
+and every panel reads "Network Error".
 
-    ssh -L $ENV_PORT:localhost:$ENV_PORT $(whoami)@$SERVER_IP
+The reason: each conversation's runtime container publishes its OWN
+ports, with RANDOM host numbers that change every session:
 
-Leave that open, then browse to  http://localhost:$ENV_PORT
+    8000/tcp -> 0.0.0.0:36137     <- the session API the browser needs
+    8001/tcp -> 0.0.0.0:57443     <- VS Code
+    8011, 8012 -> ...
+
+Your browser talks to those directly. You cannot forward numbers you
+cannot know in advance, so forward nothing and proxy everything:
+
+    ssh -D 1080 $(whoami)@$SERVER_IP
+
+Leave it open, then point the browser at that SOCKS proxy:
+
+  Firefox: Settings -> Network Settings -> Manual proxy configuration
+           SOCKS Host  127.0.0.1     Port  1080     SOCKS v5
+           tick "Proxy DNS when using SOCKS v5"
+           (SOCKS Host — NOT the HTTP Proxy field above it)
+
+  Then, in about:config, set:
+           network.proxy.allow_hijacking_localhost = true
+
+  That last one is required. Firefox refuses to proxy localhost by
+  default — its own dialog says so — and without it the browser looks
+  on YOUR machine instead of the server's.
+
+  Chrome: start it with
+           --proxy-server="socks5://127.0.0.1:1080"
+
+Then browse to  http://localhost:$ENV_PORT
+
+Every address the page asks for is now opened from the server's side,
+including those random runtime ports.
+
+  >>> SECURITY, STATED PRECISELY: those runtime ports are published on
+  >>> 0.0.0.0 — your whole LAN — and DockHub cannot prevent it. We bind
+  >>> the app to 127.0.0.1, but the runtimes are created by OpenHands
+  >>> through the Docker socket, not by this compose file, so their
+  >>> binding is not ours to choose.
+  >>>
+  >>> It is not wide open, and the measured result matters more than
+  >>> the alarm: tested from the server's own LAN address, /alive
+  >>> answers 200 while POST /api/bash/start_bash_command returns 401.
+  >>> The machine-to-machine API authenticates. So the exposure is
+  >>> "a reachable, token-guarded API" — not a free shell.
+  >>>
+  >>> The unauthenticated door is the UI on $ENV_PORT, and that is the
+  >>> one on loopback. Keep the host firewalled anyway: random ports
+  >>> cannot be pinned by a rule, and an agent is a large attack
+  >>> surface to leave on a shared network.
 
 
 2. GIVE IT A MODEL — IN THE UI, THERE IS NO OTHER WAY
@@ -593,9 +641,13 @@ chmod 644 "$NEXT_STEPS"
 echo
 echo "📌 TWO STEPS:"
 echo
-echo "   1. Tunnel — the port is loopback-bound because there is no login:"
-echo "        ssh -L $ENV_PORT:localhost:$ENV_PORT $(whoami)@$SERVER_IP"
+echo "   1. SOCKS proxy — a plain -L tunnel is NOT enough for this service:"
+echo "        ssh -D 1080 $(whoami)@$SERVER_IP"
+echo "      Firefox: Network Settings → SOCKS Host 127.0.0.1, Port 1080, v5"
+echo "      about:config → network.proxy.allow_hijacking_localhost = true"
 echo "      then open  http://localhost:$ENV_PORT"
+echo "      (each session publishes random ports the browser must reach;"
+echo "       -L cannot forward numbers you don't know yet. See NEXT-STEPS.)"
 echo
 echo "   2. Set the model in the UI — no environment variable can do it."
 echo "      Settings → LLM → Advanced. All THREE fields, or it fails:"

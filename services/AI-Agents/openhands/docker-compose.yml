@@ -36,7 +36,11 @@
 #
 # Hence the host port here is published to 127.0.0.1 ONLY, never the LAN.
 # The documented route in is an SSH tunnel:
-#     ssh -L 3001:localhost:3001 you@server
+#     ssh -D 1080 you@server        + a browser SOCKS5 proxy
+#
+# A port tunnel (-L) is NOT sufficient: each session's runtime publishes
+# its own randomly-numbered ports that the browser must also reach, so
+# there is nothing fixed to forward. deploy.sh prints the full recipe.
 # Same treatment as Hermes' dashboard, for a stronger reason.
 #
 # ── 3. PORT 3001, NOT 3000 ──────────────────────────────────────────────
