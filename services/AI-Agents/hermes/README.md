@@ -230,8 +230,8 @@ cd ~/docker/hermes
 
 | Command | Purpose |
 |---|---|
-| `docker exec -it hermes hermes channels add` | **Add a messaging channel** — the main way you talk to it |
-| `docker exec -it hermes hermes whatsapp` | Per-platform shortcuts also exist: `telegram`, `discord`, `slack` … |
+| `docker exec -it hermes hermes whatsapp` | **Add a messaging channel** — the main way you talk to it. Also `whatsapp-cloud`, `slack` |
+| `docker exec -it hermes hermes --help` | The authoritative subcommand list for *your* build — there is no generic `channels` command |
 | `docker exec -it hermes hermes status` | Model, provider, which channels are configured, gateway PID |
 | `docker exec -it hermes hermes setup` | Upstream's interactive wizard, if you want it |
 | `docker compose logs -f hermes` | Follow the agent |
@@ -270,8 +270,14 @@ curl -H "Authorization: Bearer <key>" http://localhost:8642/v1/models
 ## 📱 Adding a channel — one decision depends on hardware you may not have
 
 ```bash
-docker exec -it hermes hermes channels add     # or: hermes whatsapp
+docker exec -it hermes hermes whatsapp
 ```
+
+> There is no generic “add a channel” command. Each platform is its own
+> subcommand — `whatsapp`, `whatsapp-cloud`, `slack`. An earlier version of
+> this page said `hermes channels add`; that was invented, and the CLI
+> answers `invalid choice: 'channels'`. Run `hermes --help` inside the
+> container to see what your build actually ships.
 
 WhatsApp's wizard opens with a choice that decides whether anything will ever work, and the answer depends on how many phone numbers you own:
 

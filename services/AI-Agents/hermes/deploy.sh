@@ -949,27 +949,41 @@ worked.
 
 1. TALK TO IT
 ------------------------------------------------------------------
-Hermes' natural interface is OUTBOUND messaging, not a web page. Add a
-channel — Telegram is the quickest, via a bot token from @BotFather:
+Hermes' natural interface is OUTBOUND messaging, not a web page. There is
+NO generic "add a channel" command — each platform is its own subcommand:
 
-    docker exec -it hermes hermes channels add
+    docker exec -it hermes hermes whatsapp
+    docker exec -it hermes hermes whatsapp-cloud
+    docker exec -it hermes hermes slack
 
-Discord, Slack, WhatsApp, Signal and email are all supported the same way,
-and each has its own shortcut — 'hermes whatsapp', 'hermes telegram'.
+>>> An earlier version of this file told you to run
+>>>     hermes channels add
+>>> That command does not exist. The CLI rejects it outright:
+>>>     hermes: error: argument command: invalid choice: 'channels'
+>>>
+>>> The three above are taken from the binary's own subcommand list, not
+>>> from memory. For anything else — and to see what this build actually
+>>> ships — ask it rather than guessing:
+>>>     docker exec -it hermes hermes --help
 
->>> USE 'docker exec', NOT 'docker compose run'.
+>>> PREFER 'docker exec' OVER 'docker compose run'.
 >>>
 >>> This image is supervised by s6: its entrypoint starts the gateway AND
->>> the dashboard whatever command you pass. So 'compose run' quietly
->>> brings up a SECOND, competing Hermes beside the one already running,
->>> then floods your interactive prompt with its startup banner —
+>>> the dashboard whatever command you pass. So 'compose run' brings up a
+>>> SECOND, competing Hermes beside the one already running, and floods
+>>> your interactive prompt with its startup banner — exactly this, seen
+>>> on a live setup:
 >>>
 >>>     Choose [1/2]: → Using web dist from HERMES_WEB_DIST: ...
 >>>     ⚕ Hermes Gateway Starting...
 >>>
->>> and leaves an "exited UNCLEANLY" note in the lifecycle ledger when the
->>> extra one is killed. 'docker exec' runs inside the container that is
->>> already up, which is what these commands actually want.
+>>> then leaves an "exited UNCLEANLY" note in the lifecycle ledger when
+>>> the extra one is killed.
+>>>
+>>> It does still WORK — WhatsApp pairing was completed this way on a
+>>> live server, noise and all. So this is a preference, not a rule:
+>>> 'docker exec' runs inside the container that is already up, which is
+>>> what these wizards actually want, and it keeps the output readable.
 
 When a wizard finishes it may tell you to "start the gateway: hermes
 gateway". DON'T — it is already running as the container's main process,
@@ -1160,10 +1174,11 @@ chmod 644 "$NEXT_STEPS"
 echo
 echo "📌 NEXT — the model is already configured, so this is about reaching it:"
 echo
-echo "   Add a messaging channel (Telegram is quickest):"
-echo "     docker exec -it hermes hermes channels add"
-echo "   ⚠️  'docker exec', never 'compose run' — this image is s6-supervised,"
-echo "       so 'run' starts a SECOND gateway and buries the prompt."
+echo "   Add a messaging channel — one subcommand per platform, no generic 'add':"
+echo "     docker exec -it hermes hermes whatsapp     (also: whatsapp-cloud, slack)"
+echo "     docker exec -it hermes hermes --help       ← the full list, from the binary"
+echo "   ⚠️  Prefer 'docker exec' over 'compose run': this image is s6-supervised,"
+echo "       so 'run' starts a SECOND gateway and buries the prompt in its banner."
 if [[ "$ENV_DASHBOARD" == "1" ]]; then
     echo
     echo "   Dashboard — bound to the server's localhost, so tunnel in:"
