@@ -14,29 +14,102 @@ This is one of three categories that split what people loosely call "AI", along 
 
 ## 📋 What's here
 
-**Providers** — they run models and serve them over an API:
+**Providers** — servers that run models and serve them over an API. Each one is complete on its own:
 
-| | Notes |
-|---|---|
-| 🚧 [**Ollama**](ollama/) | The easiest. Pull a model by name and it's ready. The default choice, and every consumer supports it natively. |
-| 🚧 [**llama.cpp**](llama-cpp/) | The engine underneath much of this space, served directly. Leanest and most tunable; you name a HuggingFace repo and a quantization rather than a friendly model name. |
-| 🚧 [**LocalAI**](localai/) | Broadest: 35+ backends covering not just text but **speech-to-text, text-to-speech and image generation** in one server. That breadth is its real value. |
+| | Notes | Reached as |
+|---|---|---|
+| ✅ [**Ollama**](ollama/) | The easiest. Pull a model by name and it's ready. The default choice, and every consumer supports it natively. | `http://ollama:11434` |
+| ✅ [**llama.cpp**](llama-cpp/) | The engine underneath much of this space, served directly. Leanest and most tunable; you name a HuggingFace repo and a quantization rather than a friendly model name. | `http://llama-cpp:8080` |
+| ✅ [**LocalAI**](localai/) | Broadest: 35+ backends covering not just text but **speech-to-text, text-to-speech and image generation** in one server. That breadth is its real value. | `http://localai:8080` |
 
 **Interface:**
 
 | | Notes |
 |---|---|
-| 🚧 [**Open WebUI**](open-webui/) | A polished chat interface. Talks to any provider above — **or** straight to OpenAI/Anthropic with an API key. |
+| ✅ [**Open WebUI**](open-webui/) | A polished chat interface — the one service here that **produces nothing by itself**. It needs a model source: any provider above, or a cloud API key. |
 
 ---
 
-## 📌 Things worth knowing
+## 🔗 How the pieces fit
 
-**Every provider here speaks the OpenAI-compatible `/v1` API**, so any interface or agent in DockHub can talk to any of them. But they are **compatible, not equivalent** — `llama-server` serves **one** model at a time, while Ollama holds several and switches between them. Point a chat UI at llama.cpp and you'll see a single model, which can look broken if you expected a list.
+This is the one thing worth understanding before deploying anything:
 
-**Run one provider, not several.** They all load models into the same GPU memory, and the model files themselves are many gigabytes each.
+```
+        ┌── Ollama ────┐
+        │  llama.cpp   │  ← a provider RUNS the model.  Complete on its own.
+        │  LocalAI     │     Nothing else is required for it to work.
+        └──────┬───────┘
+               │  ai-net
+        ┌──────┴───────────────────────┐
+        │                              │
+   Open WebUI                    Agents (../AI-Agents/)
+   an interface —                 they act; the provider
+   needs a source                 only answers them
+```
 
-**A local provider is optional.** Every interface and agent in DockHub also accepts a cloud API key — so you can use this category, skip it entirely, or mix both.
+**A provider is useful alone.** Deploy Ollama and you have a working model API immediately — DockHub's own agents talk to it, and so can your scripts.
+
+**Open WebUI is not.** It is a face, not an engine. On first deploy it looks for a running provider on `ai-net`, and if it finds none it asks whether you want to point it at a cloud endpoint instead or add a connection later in the web interface. Either way, **an interface with no model source has an empty dropdown** and nothing to say.
+
+> It is **not** tied to Ollama. `deploy.sh` wires whichever provider it finds: Ollama through its native API (`OLLAMA_BASE_URL`), llama.cpp and LocalAI through their OpenAI-compatible `/v1` path (`OPENAI_API_BASE_URL`, plus a placeholder key the protocol demands and local servers ignore). Swap providers later and rerunning `deploy.sh` offers to re-point it for you.
+
+---
+
+## 🤔 Which provider
+
+| Choose | When |
+|---|---|
+| **Ollama** | You want it to work in one command. `ollama pull llama3.2:3b` and you're done. Holds several models and switches between them on demand. |
+| **llama.cpp** | You want control — exact quantization, exact flags, minimum overhead. Serves **one model at a time**: point a chat UI at it and you will see a single entry, which looks broken if you expected a list. |
+| **LocalAI** | You want more than text. Speech-to-text, text-to-speech and image generation from the same server, with per-hardware backends. |
+
+**They all speak the OpenAI-compatible `/v1` API**, so any interface or agent in DockHub can talk to any of them — with one exception documented below.
+
+---
+
+## ⚠️ The context window is set by the SERVER, not the model
+
+The most expensive lesson in this category, and it is invisible until something behaves oddly.
+
+A model advertises the window it was **trained** with. The server decides what it **allocates**. Ollama picks automatically "based on VRAM" and on a modest card that is **4096**, whatever the model claims:
+
+| | |
+|---|---|
+| `gemma4:e4b` advertises | **131,072** |
+| Ollama served it | **4,096** |
+| OpenHands' opening prompt alone | **17,742** |
+
+Nothing reports this. There is no error, no warning, no log line — the model simply forgets, because everything older fell out of a window four times too small to hold the agent's own prompt.
+
+For **chat**, 4096 is survivable. For **agents**, it is not: the system prompt and tool schemas consume the entire window before you type a word.
+
+```bash
+docker exec ollama ollama ps        # the CONTEXT column is the truth
+```
+
+[Ollama](ollama/)'s `deploy.sh` now asks for this and writes `OLLAMA_CONTEXT_LENGTH`. **Raising it costs GPU memory in proportion**, and the cost is steeper than most people expect. Measured on an RTX 2060 with the same model, changing only this value:
+
+| Context | Size | Processor |
+|---|---|---|
+| 32,768 | 3.3 GB | **100% GPU** |
+| 65,536 | 10.0 GB | 70%/30% CPU/GPU ❌ |
+
+Doubling the window added 6.7 GB of KV cache and pushed most of the model onto the CPU. That trade is always bad — you gain context you cannot afford to process. If `ollama ps` shows any CPU in `PROCESSOR`, come back down.
+
+---
+
+## 🔒 One provider at a time — and it is enforced
+
+All three load models into the same GPU memory, and the model files are many gigabytes each. So `deploy.sh` does not merely advise:
+
+```
+[!] Another model provider is already running: ollama
+    Stop ollama and continue? (Y/n):
+```
+
+Decline and **nothing is deployed** — the script stops rather than leave you with two servers fighting over one card. Accept and it stops the other for you.
+
+This is different from the [agents](../AI-Agents/) category, where only one runs at a time for a *human* reason (they are alternatives, not companions) rather than a hardware one.
 
 ---
 
@@ -67,6 +140,62 @@ AI_ACCELERATION=cpu
 Each provider then adjusts whatever it needs to. llama.cpp and LocalAI also swap their image — `server` has no CUDA compiled in at all, so for them the tag *is* the hardware decision, and `deploy.sh` keeps it in step so you never have to edit two things.
 
 > ⚠️ Switching LocalAI between GPU and CPU means a different set of backends. They're built per hardware target, so the ones already downloaded don't carry over — expect it to fetch again. `deploy.sh` warns before it happens.
+
+---
+
+## 🔓 None of these have a login
+
+Worth stating plainly, because it decides how you expose them.
+
+A provider's API has **no authentication of any kind**. Anyone who can reach the port can use your models, read the prompts sent to them, and burn your GPU. That is upstream's design in all three, not an oversight.
+
+| | Default |
+|---|---|
+| Inside Docker | Reached by container name on `ai-net`. **No port published, nothing exposed.** |
+| Host port | **Offered, never assumed** — and `deploy.sh` names the missing authentication in the prompt |
+
+Consumers inside DockHub never need the host port. Publish it only when something outside Docker must reach the API, and treat that as putting an open endpoint on your LAN — because it is.
+
+Open WebUI is different: it **does** have accounts, and **the first account registered becomes admin**. Create yours immediately after deploying, before anyone else finds the page.
+
+---
+
+## 📁 Where the weights live
+
+Models are the largest thing DockHub downloads — tens of gigabytes is normal. They go to a **host directory** shared by every AI service, asked once and remembered:
+
+```
+~/docker/ai-models/<provider>/
+```
+
+A bind mount rather than a named volume, deliberately: named volumes bury the files in `/var/lib/docker/volumes` where you can neither see the space nor move it to a bigger disk. Here you can do both.
+
+This also decides the backup policy, which is the **opposite** of the agents':
+
+| | What it holds | Backup |
+|---|---|---|
+| **Providers** (here) | Downloaded weights | Config only — weights are skipped |
+| [Agents](../AI-Agents/) | Memories, skills, conversations | Everything |
+
+A provider *downloads*. Anything it holds can be fetched again. Backing up 40 GB of re-downloadable weights every night is not caution, it is waste.
+
+---
+
+## 🔌 How consumers reach a provider
+
+Every DockHub consumer finds a running provider automatically — `deploy.sh` detects it on `ai-net` and writes the right URL in. Two things are worth knowing anyway.
+
+**The address is the container name**, not `localhost` and not the server's IP:
+
+```
+http://ollama:11434        http://llama-cpp:8080        http://localai:8080
+```
+
+Upstream documentation frequently says `http://host.docker.internal:11434`, which assumes the provider runs on the host. In DockHub it is a container on `ai-net`.
+
+> ⚠️ **OpenHands is the exception, and it is the opposite.** Its agent runs inside a *session container* on the default bridge, where no DockHub name resolves at all — so it needs `http://host.docker.internal:<published port>/v1` and therefore needs the host port published. Verified live; see [AI-Agents](../AI-Agents/). This is the one case where the rule above is inverted.
+
+**A local provider is optional.** Every interface and agent in DockHub also accepts a cloud API key, so you can use this category, skip it entirely, or mix both.
 
 ---
 
