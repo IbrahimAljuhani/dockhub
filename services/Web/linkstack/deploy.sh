@@ -65,8 +65,12 @@ if [[ -n "$HOST_PORT" ]]; then
     SERVER_NAME_VALUE="$SERVER_IP_FOR_NAME"
     print_info "Using '$SERVER_NAME_VALUE' as the server name. Once you switch to NPM, edit SERVER_NAME in .env to your real domain."
 else
-    read -rp "Enter the public domain you'll point NGINX Proxy Manager at (e.g. links.example.com): " LINKSTACK_DOMAIN
-    [[ -n "$LINKSTACK_DOMAIN" ]] || print_error "A domain is required."
+    # Format-checked too, not just non-empty: an invisible character tagging
+    # along from a paste silently corrupts every URL built from this.
+    # prompt_domain re-asks instead of aborting the whole deploy — see
+    # lib/common.sh.
+    prompt_domain "Enter the public domain you'll point NGINX Proxy Manager at (e.g. links.example.com): " "domain"
+    LINKSTACK_DOMAIN="$PROMPTED_DOMAIN"
     SERVER_NAME_VALUE="$LINKSTACK_DOMAIN"
 fi
 

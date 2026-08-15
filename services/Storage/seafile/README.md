@@ -135,7 +135,7 @@ Note the hostname carries **no scheme**, and **does** carry the port when it isn
 | Access path | `SEAFILE_SERVER_HOSTNAME` | `SEAFILE_SERVER_PROTOCOL` |
 |---|---|---|
 | Behind NPM | `files.example.com` | `https` |
-| Direct host port | `10.0.0.27:8087` | `http` |
+| Direct host port | `192.168.1.50:8087` (your server's IP) | `http` |
 
 Moving from a host port to NPM means editing **both**, then rerunning `deploy.sh`.
 

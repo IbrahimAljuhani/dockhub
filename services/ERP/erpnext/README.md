@@ -40,12 +40,12 @@ It still matters for one thing: `host_name`, which Frappe uses to build absolute
 
 ### Just trying it out, with no domain?
 
-Answer the domain question with your **server's LAN IP** (e.g. `10.0.0.27`) and say yes to the host port. Frappe accepts an IP as a site name — upstream's own docs use `127.0.0.1` for local debugging — and `deploy.sh` adjusts accordingly: `host_name` becomes `http://10.0.0.27:8085` instead of an `https://` URL the site doesn't serve, and it skips the NPM instructions rather than printing a route that wouldn't work.
+Answer the domain question with your **server's LAN IP** — `192.168.1.50` throughout this section is a placeholder, substitute your own — and say yes to the host port. Frappe accepts an IP as a site name — upstream's own docs use `127.0.0.1` for local debugging — and `deploy.sh` adjusts accordingly: `host_name` becomes `http://192.168.1.50:8085` instead of an `https://` URL the site doesn't serve, and it skips the NPM instructions rather than printing a route that wouldn't work.
 
 **Adding a domain later works without renaming anything.** Because the site name is pinned rather than matched against `Host` (see above), you can put NPM in front of an IP-named site whenever you like and it will serve normally. The one thing to update is the link-building config:
 
 ```bash
-docker exec erpnext-backend bench --site 10.0.0.27 set-config host_name https://erp.example.com
+docker exec erpnext-backend bench --site 192.168.1.50 set-config host_name https://erp.example.com
 ```
 
 > 💡 Still, if you already know the domain you'll use, enter it now — it saves that step and keeps the site name meaningful. Nothing about site creation requires the domain to resolve yet, so you can enter it before DNS points anywhere.

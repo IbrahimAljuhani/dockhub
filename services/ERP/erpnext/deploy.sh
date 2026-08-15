@@ -64,7 +64,7 @@ else
     echo "serve it on: any domain reaches the site either way, but this is what"
     echo "the links in password-reset and notification emails are built from."
     echo "A LAN IP is fine too, if you just want to try it without a domain."
-    prompt_domain "Domain or IP for this ERPNext site (e.g. erp.example.com or 10.0.0.27): " "site domain"
+    prompt_domain "Domain or IP for this ERPNext site (e.g. erp.example.com, or this server's LAN IP): " "site domain"
     SITE_NAME_VALUE="$PROMPTED_DOMAIN"
 
     DB_PASSWORD=$(generate_secret 24)
@@ -146,7 +146,7 @@ fi
 #
 # An IP site name means a LAN deployment reached on the host port, so it gets
 # http:// and the port; a domain gets https:// and none. Handing an IP
-# deployment "https://10.0.0.27" would bake a scheme it doesn't serve and a
+# deployment "https://192.168.1.50" would bake a scheme it doesn't serve and a
 # port it isn't on into every generated link.
 if [[ "$ENV_SITE_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     if [[ -n "$ENV_HOST_PORT" ]]; then

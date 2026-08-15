@@ -12,9 +12,9 @@ backup_wordpress() {
     local dump_file="$install_dir/db.sql"
 
     local db_user db_password db_name
-    db_user=$(grep '^WORDPRESS_DB_USER=' "$install_dir/.env" | cut -d= -f2)
-    db_password=$(grep '^WORDPRESS_DB_PASSWORD=' "$install_dir/.env" | cut -d= -f2)
-    db_name=$(grep '^WORDPRESS_DB_NAME=' "$install_dir/.env" | cut -d= -f2)
+    db_user=$(grep -a '^WORDPRESS_DB_USER=' "$install_dir/.env" | cut -d= -f2)
+    db_password=$(grep -a '^WORDPRESS_DB_PASSWORD=' "$install_dir/.env" | cut -d= -f2)
+    db_name=$(grep -a '^WORDPRESS_DB_NAME=' "$install_dir/.env" | cut -d= -f2)
 
     if docker exec wordpress-db mysqldump -u"$db_user" -p"$db_password" "$db_name" > "$dump_file" 2>/dev/null; then
         print_info "Database dumped to $dump_file"
@@ -36,9 +36,9 @@ restore_wordpress() {
 
     if [[ -f "$install_dir/db.sql" ]]; then
         local db_user db_password db_name
-        db_user=$(grep '^WORDPRESS_DB_USER=' "$install_dir/.env" | cut -d= -f2)
-        db_password=$(grep '^WORDPRESS_DB_PASSWORD=' "$install_dir/.env" | cut -d= -f2)
-        db_name=$(grep '^WORDPRESS_DB_NAME=' "$install_dir/.env" | cut -d= -f2)
+        db_user=$(grep -a '^WORDPRESS_DB_USER=' "$install_dir/.env" | cut -d= -f2)
+        db_password=$(grep -a '^WORDPRESS_DB_PASSWORD=' "$install_dir/.env" | cut -d= -f2)
+        db_name=$(grep -a '^WORDPRESS_DB_NAME=' "$install_dir/.env" | cut -d= -f2)
         # db container needs to be up (but the app itself doesn't) for this —
         # services.sh's restore_menu already ran `compose down` before
         # calling this, so bring just the db service back up first.
