@@ -37,7 +37,7 @@ Open the Proxy Host in NPM (**Hosts → Proxy Hosts → edit**) and check the **
 
 | Field | Common mistake |
 |---|---|
-| **Forward Hostname / IP** | Typing the server's own IP (e.g. `10.0.0.27`) instead of the container name (e.g. `jellyfin-app`). NPM and the container are on the same Docker network (`main-net`) — always use the container name, never an IP, and never the server's own address (that would loop back through NPM itself). |
+| **Forward Hostname / IP** | Typing the server's own IP (e.g. `192.168.1.50`) instead of the container name (e.g. `jellyfin-app`). NPM and the container are on the same Docker network (`main-net`) — always use the container name, never an IP, and never the server's own address (that would loop back through NPM itself). |
 | **Forward Port** | Watch for **non-Latin digits** if your OS input language isn't English (e.g. Arabic-indic `٤٤٣` instead of `443`) — some fields don't validate this and silently store the wrong value. Retype using a Latin-digit keyboard layout if a port field looks visually odd. |
 | **Scheme** | Most services here are plain `http`, and NPM defaults to `http` — so the exceptions are the ones that bite. **LinkStack** terminates its own self-signed HTTPS internally and needs `https` to port `443`; **OpenVPN Access Server** does the same on port `943`. Leaving either on `http` produces a `502 Bad Gateway` (see the next section). |
 
@@ -96,7 +96,7 @@ If you're using Cloudflare Tunnel instead of a normal DNS A/AAAA record (common 
 
 ## Direct host port doesn't work from another device
 
-You deployed with an optional host port (e.g. `http://10.0.0.27:6464`), it works via `curl` from the server itself, but not from your phone/laptop on the same network.
+You deployed with an optional host port (e.g. `http://192.168.1.50:6464` — every address in this file is a placeholder, use your own), it works via `curl` from the server itself, but not from your phone/laptop on the same network.
 
 1. **Check `ufw`/firewall on the server**: `sudo ufw status verbose`. If active, make sure the port is allowed.
 2. **Try a different port number.** Some routers and ISPs silently block or deprioritize specific ports by default as a security measure — port `6666` in particular has a bad reputation from historical IRC-botnet malware and gets blocked by some consumer routers/ISPs even on a private LAN. If a port mysteriously doesn't work despite everything else being correct, retry with an unrelated port (e.g. `6464` instead of `6666`) before assuming a deeper networking problem.
