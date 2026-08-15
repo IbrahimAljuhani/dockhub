@@ -1,0 +1,38 @@
+name: Shell script checks
+
+on:
+  push:
+    paths:
+      - "**/*.sh"
+      - "**/*.template"
+      - ".github/workflows/shellcheck.yml"
+  pull_request:
+    paths:
+      - "**/*.sh"
+      - "**/*.template"
+      - ".github/workflows/shellcheck.yml"
+
+jobs:
+  syntax-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash -n syntax check (every .sh and deploy.sh.template)
+        run: |
+          status=0
+          while IFS= read -r -d '' f; do
+            if ! bash -n "$f"; then
+              echo "::error file=$f::bash -n failed"
+              status=1
+            fi
+          done < <(find . -type f \( -name "*.sh" -o -name "deploy.sh.template" -o -name "backup.sh.template" \) -print0)
+          exit "$status"
+
+      - name: ShellCheck (warnings only — does not fail the build)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y shellcheck
+          while IFS= read -r -d '' f; do
+            shellcheck -S warning "$f" || true
+          done < <(find . -type f -name "*.sh" -print0)
