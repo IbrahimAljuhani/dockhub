@@ -50,3 +50,7 @@ If you specifically want to write agents in Python rather than build them visual
 ## 📜 License
 
 Each project is licensed by its own authors — see their repositories. These deployment wrappers follow the same [MIT license](../../LICENSE) as the rest of DockHub.
+
+---
+
+← Back to [all services](../README.md)

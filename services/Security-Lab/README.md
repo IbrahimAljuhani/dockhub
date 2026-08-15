@@ -97,7 +97,7 @@ Bound to your server's **LAN address**, not `0.0.0.0` and not a public domain:
 
 ```yaml
 ports:
-  - "10.0.0.27:3000:3000"
+  - "<this-server's-lan-ip>:3000:3000"
 ```
 
 That's a deliberate choice. You'll be pointing tools like Burp Suite and sqlmap at these from a laptop, and forcing everything through an SSH tunnel makes proxy tooling painful enough that people stop using the lab. The trade is that anything on your LAN can reach them — which is what the stop-when-done habit above covers.
@@ -133,3 +133,7 @@ It isn't theatre. `services.sh` lists Security-Lab in the same menu as Nextcloud
 ## 📜 License
 
 Each project is licensed by its own authors — see their repositories. These deployment wrappers follow the same [MIT license](../../LICENSE) as the rest of DockHub.
+
+---
+
+← Back to [all services](../README.md)

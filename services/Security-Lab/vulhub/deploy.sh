@@ -193,7 +193,10 @@ ENV_DIR="$REPO_DIR/$SELECTED"
 echo
 echo "══════════════════════════════════════════════"
 if [[ -f "$ENV_DIR/README.md" ]]; then
-    head -n 8 "$ENV_DIR/README.md"
+    # Skip the Chinese-version link line every Vulhub README carries as its
+    # second line — it's noise here — and take enough lines that the
+    # "References:" heading arrives with its links rather than dangling.
+    grep -v '中文版本' "$ENV_DIR/README.md" | head -n 12
 else
     echo "$SELECTED"
 fi
