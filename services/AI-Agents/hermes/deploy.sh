@@ -1010,6 +1010,31 @@ Then message the bot. Replies are prefixed '⚕ Hermes Agent'.
 >>> then  cd $INSTALL_DIR && $COMPOSE_CMD up -d
 >>> (@userinfobot on Telegram will tell you your id.)
 
+>>> THE SAME TRAP, WEARING A FRIENDLIER FACE — WhatsApp answers instead
+>>> of staying silent, which makes it look like a different problem:
+>>>
+>>>     Hi~ I don't recognize you yet!
+>>>     Here's your pairing code: 6DFWUQ87
+>>>     Ask the bot owner to run:
+>>>       hermes pairing approve whatsapp 6DFWUQ87
+>>>
+>>> That is the allowlist again. The wizard's "Your phone number" answer
+>>> becomes the allowlist entry, and it must match the sender EXACTLY,
+>>> in full international form with no + and no spaces:
+>>>
+>>>     966556647677     ✅  country code + 9 digits
+>>>     96656647677      ❌  one digit short — seen live, and the only
+>>>                          symptom was this pairing prompt
+>>>
+>>> Nothing warns you. The wizard happily prints "Allowed users set" for
+>>> a number that will never message you. Two ways out:
+>>>
+>>>   Approve the code it just gave you (works whatever the typo was):
+>>>     docker exec -it hermes hermes pairing approve whatsapp <CODE>
+>>>
+>>>   Or rerun the wizard and enter the number correctly:
+>>>     docker exec -it hermes hermes whatsapp
+
 The quickest check needs no channel and no allowlist at all — ask the
 agent something straight from the container:
 

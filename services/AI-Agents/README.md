@@ -1,6 +1,6 @@
 # 🤖 AI-Agents
 
-Agents that **do work for you**. You talk to one and it acts, using tools — it isn't a chat box, and you don't design anything.
+Agents that **do work for you**. You give one a task and it acts, using tools — it is not a chat box, and you are not designing a workflow.
 
 | Category | Question it answers |
 |---|---|
@@ -15,156 +15,266 @@ Agents that **do work for you**. You talk to one and it acts, using tools — it
 | | What it's for | Image | Port |
 |---|---|---|---|
 | ✅ [**OpenClaw**](openclaw/) | A personal assistant reachable over messaging, with a web gateway of its own. The broadest control plane of the three. | `ghcr.io/openclaw/openclaw` | `18789` |
-| ✅ [**Hermes**](hermes/) | A leaner, more personal assistant with a **learning loop** — built for repeated and scheduled work that should improve over time. Reachable over Telegram, Discord, Slack, WhatsApp, Signal or email, and exposes its own OpenAI-compatible gateway. | `nousresearch/hermes-agent` | `8642` · `9119` |
-| ✅ [**OpenHands**](openhands/) | A **software engineering** agent. It writes code, runs it, and browses — a different job from the two above. Give it a coding task in a browser; it is not something you message. | `docker.openhands.dev/openhands/openhands` | `3001` |
+| ✅ [**Hermes**](hermes/) | A leaner, more personal assistant with a **learning loop** — built for repeated and scheduled work that should improve over time. Reachable over WhatsApp, Slack and other channels, and exposes its own OpenAI-compatible gateway. | `nousresearch/hermes-agent` | `8642` · `9119` |
+| ✅ [**OpenHands**](openhands/) | A **software engineering** agent. It writes code, runs it, and browses — a different job from the two above. You give it a coding task in a browser; it is not something you message. | `docker.openhands.dev/openhands/openhands` | `3001` |
 
 > OpenHands publishes on `3000` upstream. DockHub defaults it to **`3001`**, because `3000` is [Open WebUI](../AI/open-webui/)'s default — and Open WebUI is exactly what someone deploying an agent is likely to already be running.
 
 ---
 
-## 🧠 The principle behind every design choice here
+## 🧠 What makes an agent different from everything else in DockHub
 
-An agent takes instructions from text you don't control — a web page it reads, a repository it clones, a message someone sends it — and it has **tools**. That combination exists nowhere else in DockHub.
+Every other service here does what *you* tell it. An agent does what **text tells it** — a web page it reads, a repository it clones, an issue someone filed, a message from a stranger. And unlike a chat model, it has **tools**: a shell, a network, sometimes a container runtime.
 
-The rule, carried over from [Security-Lab](../Security-Lab/) and adapted:
+That combination is the whole story, and it is worth stating without drama:
+
+> **The attack is one step: something the agent reads tells it to run a command.**
+
+No exploit, no vulnerability, no CVE. The agent is working exactly as designed. This is called *prompt injection*, and there is no known complete defence against it at the model level — which is precisely why the answer here is not "trust the model" but **"limit what the tools can reach."**
+
+The rule this category is built on:
 
 > **The agent needs tools. It does not need your host.**
 
-The attack isn't exotic. It's one step: *something the agent reads tells it to run a command.* Everything below follows from taking that seriously.
-
 ---
 
-## 🕸️ Why agents sit on `ai-net` by default
+## 🛡️ How DockHub contains them
 
-[Open WebUI](../AI/open-webui/) is on `main-net` and that's fine — it displays a conversation and executes nothing. An agent executes. **The ability to run commands is what changes the network posture**, and that's the line this category draws.
+Containment here is **layered and verifiable**. Every claim below is something you can check yourself with one command — that matters more than any adjective, so the commands are printed beside the claims.
 
-On `main-net` an agent can reach every other DockHub service by container name — including **Portainer, which mounts the Docker socket**. So the chain from "a web page said so" to "root on the host" is short.
+### Layer 1 — Network: the agent sees the model, and nothing else
 
-> ⚠️ **For OpenHands, read that claim narrowly.** It applies to the *app* container. The shell the agent actually types into lives in a separate session runtime, and `docker inspect` on a live one shows it attached to the **default bridge**, not to `ai-net` and not to `main-net`. So the network answer you gave does not describe where its commands run.
->
-> That cuts both ways. The runtime cannot resolve `ollama` or any other DockHub service by name — but it *is* given `host.docker.internal`, pointing at the docker0 gateway, which reaches **every port published on this host**. Network isolation for that container is therefore weaker than the category table below implies, and the honest boundary around it remains the Docker socket, not the network.
-
-| | Default | Why |
+| | Default | Effect |
 |---|---|---|
-| `ai-net` | ✅ always | It's all the agent actually needs: the model provider |
-| `main-net` | ❌ opt-in, warned | Only if you want NGINX Proxy Manager to serve a public domain |
+| `ai-net` | ✅ always | Reaches the model provider. That is all it needs to work. |
+| `main-net` | ❌ opt-in, warned | Would let it reach **every other DockHub service by name**, including Portainer and its Docker socket |
 
-**The honest trade-off:** without `main-net`, NPM cannot proxy the agent, so there is **no public domain** — only a host port on your LAN. `deploy.sh` offers `main-net` explicitly and names Portainer in the warning, the same way the providers' host-port prompt names the missing authentication.
+An agent on `ai-net` alone cannot resolve `nextcloud`, `portainer`, or your database. `deploy.sh` names Portainer explicitly in the warning before you opt in.
 
-Worth knowing: OpenClaw and Hermes reach *you* **outbound** over Telegram or Slack. In normal use they need no inbound proxy at all.
+```bash
+docker inspect hermes --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}'
+```
 
----
+### Layer 2 — Binding: no unauthenticated surface on your LAN
 
-## 🔌 The Docker socket
+Where an agent's web interface has **no login of its own**, DockHub binds it to `127.0.0.1` on the server rather than `0.0.0.0`. It is reached over SSH, not over the network.
 
-Checked against each project's own documentation rather than assumed — and the answer is not the same for all three:
+| Interface | Bind | Why |
+|---|---|---|
+| OpenHands UI | `127.0.0.1:3001` | **It has no authentication at all** |
+| Hermes dashboard | `127.0.0.1:9119` | Credentials are generated, but it is an inspection surface |
+| Hermes API | host port, optional | Protected by a generated bearer key |
+
+```bash
+docker port openhands        # expect 127.0.0.1, never 0.0.0.0
+```
+
+### Layer 3 — The Docker socket: off unless the design requires it
+
+Checked against each project's own documentation, and the answer is **not the same for all three**:
 
 | | `/var/run/docker.sock` | DockHub's default |
 |---|---|---|
-| **OpenClaw** | **Optional** — only for its sandbox mode. Upstream is explicit that the gateway itself doesn't need it. | Off. Offered explicitly. |
-| **Hermes** | **Optional** — the image ships `docker-cli` so agent tools *can* drive the host daemon. | Off. Offered explicitly. |
-| **OpenHands** | **Required by architecture** — it starts a fresh runtime container per session to sandbox the code it runs. | On, behind a written acknowledgement. |
+| **OpenClaw** | Optional — only for its sandbox mode | **Off.** Offered explicitly. |
+| **Hermes** | Optional — the image ships `docker-cli` | **Off.** Offered explicitly. |
+| **OpenHands** | **Required by architecture** — it starts a fresh container per session | On, behind a **typed** acknowledgement |
 
-**OpenHands is the exception, and it gets its own gate.** Its intent is security-*positive*: it isolates execution away from itself. But the effect on the host is the one that makes Portainer sensitive — anything reaching that socket can start a privileged container.
+Two of the three run with no socket at all unless you ask for it. For the third it is not optional, so the gate is not a `y/n` — you type `i-accept` after reading what it costs, and the answer is recorded in `.env` so a rerun cannot inherit consent you never gave.
 
-DockHub does not refuse it, and refusing would be inconsistent: **core infrastructure already installs Portainer with that same socket**, and prints a warning. What differs is who holds the trigger — Portainer is driven by *you*, OpenHands by a language model. So it takes a typed acknowledgement rather than a `y/n`, and `main-net` stays **opt-in and warned**, exactly as for the other two — the socket is the reason the gate exists, and no network choice makes it safer.
+### Layer 4 — The sandbox: where the agent's commands actually run
 
-> **And the trigger is not held back.** The first live session logged `Confirmation policy set to: kind='NeverConfirm'` — OpenHands' default is to run the commands it decides on **without asking you first**. Nothing in the deploy sets that; it is upstream's default and it is changeable in the UI's settings. Read together with the two facts above — no login, and the Docker socket — that is the whole threat model in one line, and it is why the port stays on `127.0.0.1`.
+This is the strongest layer, and the one most people do not know exists.
+
+**Hermes** can run every tool call in a **separate hardened container** instead of its own (`terminal.backend=docker`, which DockHub sets for you when you accept the socket):
+
+- **all** Linux capabilities dropped, then only `DAC_OVERRIDE`, `CHOWN`, `FOWNER` added back
+- `no-new-privileges` — a setuid binary cannot escalate
+- a **256-process** limit — fork bombs die instead of taking the host down
+- `nosuid` tmpfs for `/tmp` and `/var/tmp`
+- no volumes mounted by default
+
+**OpenHands** goes further by architecture: **every session gets its own fresh container**, and the code the agent writes never executes in the app container at all. Isolation is the entire reason it wants the Docker socket. That is a security-*positive* design, and it is why DockHub grants it rather than refusing.
+
+```bash
+docker exec -it hermes hermes config get terminal
+```
+
+### Layer 5 — Who may talk to it
+
+Messaging agents **deny unknown senders by default**. A stranger who finds your bot's number gets nothing; you add yourself to an allowlist explicitly. This is upstream behaviour, and DockHub documents it rather than switching it off — because the failure mode (silence) looks exactly like a broken deploy, and people "fix" it by disabling the protection.
+
+### Layer 6 — Identity and blast radius
+
+- Give the agent **its own** API keys and bot tokens, never your primary ones. An agent holding your main key can spend it.
+- Containers run as a non-root user where the image allows it (Hermes: `PUID`/`PGID`, uid 1000 by default here).
+- `.env` and generated secrets files are `chmod 600`; agent data directories are the agent's own.
 
 ---
 
-## 🔒 One agent at a time
+## 🚧 What this does **not** cover
 
-Like the [providers](../AI/), only one runs at once — but **for a different reason**, and the scripts say so differently.
+A threat model that only lists its strengths is marketing. These are the real edges, stated plainly — and knowing them is what makes the layers above worth trusting.
 
-| | Why only one |
-|---|---|
-| Providers | A hard technical limit: they load models into the same GPU memory |
-| **Agents** | They're **alternatives, not companions** — you pick one assistant. Several means several memories acting on the same workspace, all queueing against the one provider |
+**1. The Docker socket is root-equivalent.** When you enable it, anything that reaches it can start a privileged container. The sandbox layer narrows what the agent's *commands* can do; it does not change what the socket *is*. DockHub does not refuse it — [core infrastructure already installs Portainer with the same socket](../../README.md) — but the difference is who holds the trigger: Portainer is driven by you, an agent by a language model reading untrusted text.
 
-Agents never load a model, so there is no VRAM contention to cite. `deploy.sh` offers to stop whichever other agent is running.
+**2. OpenHands has no authentication of its own.** Not a weak login — none. Anyone who reaches its port gets a fully privileged agent. This is why the port is loopback-only and why it must never be published to `0.0.0.0`, whatever a tutorial suggests.
+
+**3. OpenHands does not ask before acting.** Observed on a live first session:
+
+```
+Confirmation policy set to: kind='NeverConfirm'
+```
+
+Upstream's default is to run the commands it decides on **without confirming**. Nothing in DockHub sets that; it is changeable in the UI's settings, and worth changing.
+
+**4. OpenHands session containers publish ports on `0.0.0.0`.** Measured on a live run:
+
+```
+8000/tcp -> 0.0.0.0:36137        8011/tcp -> 0.0.0.0:57493
+8001/tcp -> 0.0.0.0:57443        8012/tcp -> 0.0.0.0:34577
+```
+
+Those are created by the app through the Docker socket — **not by DockHub's compose file** — so our careful `127.0.0.1` binding on the app does not extend to them. The session's workspace and API are reachable from your LAN on random high ports for as long as the session lives. Keep the host behind a firewall; this one is not ours to close.
+
+**5. Prompt injection is unsolved.** Every layer above assumes the model *will* eventually be talked into something. That is the design premise, not a pessimistic aside.
+
+---
+
+## 🔌 Reaching each agent
+
+| Agent | How you reach it | Why |
+|---|---|---|
+| **OpenClaw** | SSH tunnel, then `http://localhost:18789` | Its UI needs a browser **secure context** (Web Crypto for a device identity) — plain `http://` to a server IP cannot work, however correct your token |
+| **Hermes** | Messaging (WhatsApp, Slack…). Dashboard via SSH tunnel | Outbound by design; in normal use you never open a page |
+| **OpenHands** | **SSH SOCKS proxy** — see below | A plain port-forward is not enough, and this surprises everyone |
+
+### OpenHands: use a SOCKS proxy, not `ssh -L`
+
+The obvious approach fails in a way that looks like a broken agent:
+
+```bash
+ssh -L 3001:localhost:3001 you@server     # ⚠️ loads the page, then "Disconnected"
+```
+
+The page appears, and the UI reports **Disconnected** with `Network Error` in its side panel. Nothing is broken. Your browser also needs to reach the **session container**, which publishes its ports on **random numbers that change every conversation** (`36137`, `57443`, …). You cannot forward a port you cannot predict.
+
+A dynamic proxy solves it, because every address the page asks for is opened from the server's side:
+
+```bash
+ssh -D 1080 you@server
+```
+
+Then point the browser at SOCKS5 `127.0.0.1:1080`:
+
+- **Firefox** — Settings → Network Settings → Manual proxy → **SOCKS Host** `127.0.0.1`, Port `1080`, SOCKS v5, and tick **Proxy DNS when using SOCKS v5**.
+  Then in `about:config` set **`network.proxy.allow_hijacking_localhost = true`**.
+  ⚠️ Without it nothing will work: that same dialog states *"Connections to localhost, 127.0.0.1/8, and ::1 are never proxied"* — so the one address you need is the one Firefox refuses to send. Put the value in **SOCKS Host**, not the HTTP Proxy field above it.
+- **Chrome** — launch with `--proxy-server="socks5://127.0.0.1:1080"`
+
+Now open **`http://127.0.0.1:3001`**. Conversations work end to end.
+
+> This is also why OpenHands is marked ✅ here rather than 🚧: it works completely, but reaching it is genuinely different from every other service in DockHub, and that difference is documentation — not a defect.
 
 ---
 
 ## 🧩 Giving an agent its model
 
-Every agent here needs one — a provider from [AI](../AI/) on this server, or a cloud API key. Neither is assumed.
+Every agent needs one — a provider from [AI](../AI/) on this server, or a cloud API key. Neither is assumed.
 
-**And they disagree completely on how** — which decided how far each `deploy.sh` could go:
+**They disagree completely on how**, which decided how far each `deploy.sh` could go:
 
 | | Where the model is configured | Scriptable? |
 |---|---|---|
 | **Hermes** | `data/config.yaml`, a plain file | ✅ **Yes** — `deploy.sh` writes it, and the agent works when the script ends |
-| OpenClaw | An onboarding wizard, no environment variable | ❌ No — five manual steps follow the deploy |
+| OpenClaw | An onboarding wizard, no environment variable | ❌ No — manual steps follow the deploy |
 | OpenHands | **The web UI only** | ❌ No |
 
-This was the single biggest difference between building the first agent and the second. OpenClaw took ten rounds and five discovered gates; Hermes worked on the first live deploy, and a config file rather than a wizard is most of why.
+Where it can be scripted, DockHub does it: Hermes' `deploy.sh` asks the running provider what it serves — from a container **on `ai-net`**, the only vantage point whose answer means anything — and writes the choice in. Where it cannot, DockHub **does not fake it**: it prints the exact endpoint to paste and leaves the wizard alone.
 
-Where it *can* be scripted, DockHub does it: Hermes' `deploy.sh` asks the running provider what models it serves — one query to `/v1/models`, made from a container **on `ai-net`**, because that is the only vantage point whose answer means anything — and writes the choice in.
+### ⚠️ The provider address is not the same for all three
 
-Where it cannot, DockHub **does not fake it**. `deploy.sh` prints the exact endpoint to paste and leaves the wizard alone, the same choice made for the NGINX Proxy Manager steps in [ERPNext](../ERP/erpnext/).
+| Agent | Base URL | Why |
+|---|---|---|
+| OpenClaw, Hermes | `http://ollama:11434/v1` | The agent runs **in its own container**, on `ai-net`, where the name resolves |
+| **OpenHands** | `http://host.docker.internal:11434/v1` | The agent runs in the **session container**, on the default bridge, where **no DockHub name resolves at all** |
 
-> ⚠️ **Upstream docs will tell you `http://host.docker.internal:11434` for Ollama. That is wrong here.** It assumes Ollama runs on the host. In DockHub it's a container on `ai-net`, so the address is **`http://ollama:11434`** — and `deploy.sh` prints the right one for you.
+Verified from inside a live session runtime:
+
+```
+getent hosts ollama                       →  (nothing)
+wget host.docker.internal:11434/api/tags  →  your model list
+```
+
+> An earlier version of this page said the opposite — *"use the container name, never `host.docker.internal`"* — which was correct for the app container and wrong for the one that actually calls the model. `deploy.sh` now derives the right URL from the provider's published port and prints it.
+
+### ⚠️ The context window your provider *advertises* is not what it *serves*
+
+A model reports the window it was trained with; the server decides what it allocates. Measured live: `gemma4:e4b` advertising **131,072** while Ollama served **4,096** — because `OLLAMA_CONTEXT_LENGTH` was unset and Ollama sizes it from available VRAM.
+
+That matters more for agents than for chat, because an agent spends most of its window before you type:
+
+> **OpenHands' opening prompt measured 17,742 tokens** — system prompt, tool schemas, skills — on an empty conversation. Four times the entire 4,096 default.
+
+The symptom is memory loss with no error anywhere. See [Ollama](../AI/ollama/) for the setting and its VRAM cost.
 
 ---
 
 ## ⚠️ A green self-test does not mean a working agent
 
-Both agents here shipped a self-test that passed while the agent could not answer a single message. This is not a flaw in either script — it is a property of the category, and worth naming before you build a third.
+Every agent here shipped a self-test that passed while the agent could not answer a single message. This is a property of the category, not a flaw in the scripts.
 
 | What a deploy self-test can prove | What it cannot |
 |---|---|
 | The container is running | The model is eligible |
-| The web/API surface answers | Credentials for the model provider resolve |
+| The web/API surface answers | The model provider is reachable **from where the agent runs** |
 | The auth token works | The messaging channel is wired to a reachable person |
 | The config file parsed | The agent will actually reply |
 
-Two lived examples:
+Three lived examples, all of which looked identical from outside — silence:
 
-- **Hermes** passed every check, then returned `agent init failed` to every message — the model's context window was 32,768 against a required 64,000. The gateway was healthy the whole time; the *agent* was not.
-- **Hermes again**, with WhatsApp: paired successfully, bridge connected, gateway running — and messages produced **no log line at all**, because the wizard's mode had been set for a two-number setup on a one-number phone. "Deny unknown senders" is the documented default, so silence was the correct behaviour and looked exactly like a fault.
+- **Hermes** passed every check, then answered `agent init failed` to everything: the model's advertised context was 32,768 against a required 64,000.
+- **OpenHands** created conversations and queued every message forever. Its session container was posting results back to a port nothing was listening on. No error surfaced in the UI.
+- **Hermes on WhatsApp** paired successfully and then replied *"I don't recognize you yet"* — the allowlist had been set from a phone number typed one digit short. The wizard confirmed `Allowed users set` for a number that could never message it.
 
-The habit that follows: **a deploy is not finished until a message has gone in and a reply has come out.** For an agent, that round trip is the only real test, and it is the one no `deploy.sh` can run for you.
+The habit that follows: **a deploy is not finished until a message has gone in and a reply has come out.** For an agent, that round trip is the only real test, and no `deploy.sh` can run it for you.
 
 ---
 
-## 🧭 Five questions to ask an agent image before writing a line
+## 🧭 Questions to ask an agent image before writing a line
 
-Every one of these cost at least a round when it was discovered by running into it instead. They share a root: **these programs assume a human sitting at a terminal on `localhost`**, and a container with a scripted deploy is neither.
+Every one of these cost at least a round when it was discovered by running into it. They share a root: **these programs assume a human at a terminal on `localhost`**, and a container with a scripted deploy is neither.
 
 | Ask | Because, in practice |
 |---|---|
-| **Does it refuse to start unconfigured?** | OpenClaw crash-looped on `Missing config`, and **no environment variable existed** for the setting it wanted — only its own CLI could write it |
-| **Does it demand auth on a non-loopback bind?** | Both do, and both **fail closed**. That is good behaviour, but it means credentials must exist *before* first start, not after |
-| **Does its web UI need a browser secure context?** | OpenClaw's does — Web Crypto for a device identity — so plain `http://` to a server IP **cannot work**, however correct the token. An SSH tunnel is mandatory there. Hermes and OpenHands have no such rule — verified live, OpenHands' UI is fully usable over plain `http://localhost:3001` through a tunnel. **Three agents, one requirement between them**: assume nothing, test it |
+| **Does it refuse to start unconfigured?** | OpenClaw crash-looped on `Missing config`, and **no environment variable existed** for the setting — only its own CLI could write it |
+| **Does it demand auth on a non-loopback bind?** | Both messaging agents do, and both **fail closed** — so credentials must exist *before* first start |
+| **Does its UI need a browser secure context?** | OpenClaw's does. Hermes' and OpenHands' do not. **Three agents, one requirement between them**: assume nothing |
+| **Where does its work actually run?** | OpenHands' answer is "a different container, on a different network, that you did not create" — which changed its model URL, its callback, and how you browse to it |
 | **Is its config seeded in memory or written to disk?** | OpenClaw seeds its origin allow-list *without writing it*. The dashboard worked for two and a half minutes, then broke with no restart in between |
-| **Is the image supervised?** | Hermes runs under **s6**, so `docker compose run` starts a *second* gateway beside the first. OpenClaw has no supervisor and `run` is fine. **Same command, opposite outcomes** — use `docker exec` for Hermes |
-
-And one that only shows up later: **what does the container run as?** Hermes uses **uid 10000**, so `PUID`/`PGID` are mandatory with a bind mount. OpenClaw uses `node` — uid 1000 — which happens to match a first Ubuntu account, so it works by coincidence rather than design. **OpenHands runs as root**, so its `state/` ends up root-owned on the host: nothing breaks, but `ls` and any manual edit need `sudo`, and backups must be taken as root to read it.
-
-> All three answers were different, and none was documented where a deploy script could read it. OpenHands' surfaced by accident — `wait_for_container_ready()` echoes the newest container log line every third round so a long pull doesn't look like a hang, and one of those lines was `Running OpenHands as root`. A progress indicator answered a design question. That is an argument for keeping it noisy.
+| **Is the image supervised?** | Hermes runs under **s6**, so `docker compose run` starts a *second* gateway beside the first. Prefer `docker exec` |
+| **What does it run as?** | Hermes: uid 10000 upstream, so `PUID`/`PGID` are mandatory with a bind mount. OpenClaw: `node`, uid 1000. **OpenHands: root**, so its `state/` is root-owned and needs `sudo` to remove |
 
 ---
 
 ## 💾 Backups: the opposite of the providers
 
-Worth stating plainly, because the two categories look similar and are treated in exactly opposite ways.
-
-| | What its volume holds | Backup |
+| | What its data holds | Backup |
 |---|---|---|
-| [Providers](../AI/) | Downloaded model weights | Config only — the weights are skipped |
-| **Agents** | Memories, learned skills, conversations, workspace files | **Everything** — the standard volume backup |
+| [Providers](../AI/) | Downloaded model weights | Config only — weights are skipped |
+| **Agents** | Memories, learned skills, conversations, workspace files | **Everything** |
 
-A provider *downloads*. An agent *produces*. What an agent accumulates is yours and exists nowhere else, so none of these ship a `backup.sh` — the generic backup is already right for them.
+A provider *downloads*. An agent *produces*. What an agent accumulates is yours and exists nowhere else.
 
 ---
 
 ## ✅ The habit
 
-1. Give the agent the **narrowest** access that lets it do your job — start without the Docker socket and without `main-net`.
-2. Treat anything it reads as untrusted input, because it is.
-3. Give it its own credentials, never your primary ones. An agent with your main API key can spend it.
-4. Back it up: unlike a provider, what it holds cannot be re-downloaded.
+1. Give the agent the **narrowest** access that does your job — start without the Docker socket and without `main-net`.
+2. Turn the sandbox on. It is one prompt, and it is the layer that matters most.
+3. Treat everything it reads as untrusted input, because it is.
+4. Give it **its own** credentials, never your primary ones.
+5. Change OpenHands' confirmation policy if you value being asked.
+6. Back it up — unlike a provider, what it holds cannot be re-downloaded.
 
 ---
 

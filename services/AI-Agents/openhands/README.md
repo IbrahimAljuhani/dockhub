@@ -173,7 +173,16 @@ docker exec -it ollama ollama list
 >
 > ⚠️ The **API Key field must not be left empty**, even for a local provider. The protocol requires the field; Ollama ignores its value.
 
-> ⚠️ Not `localhost`, not the server's IP, and **not `host.docker.internal`** — even though the compose file sets that hostname. It is there because upstream's runtime machinery uses it internally; it is not the address of your model. In DockHub the provider is a container on `ai-net`, reached by name. `deploy.sh` prints the right one for whichever provider it finds.
+> ⚠️ **Use `host.docker.internal` here — not the container name.** This is the one place OpenHands differs from every other DockHub service, and an earlier version of this page said the exact opposite.
+>
+> `http://ollama:11434/v1` resolves from the *app* container. But the model is not called from there: the agent runs inside the **session container**, on the default bridge, where no DockHub name resolves at all. Verified from inside a live one:
+>
+> ```
+> getent hosts ollama                       →  (nothing)
+> wget host.docker.internal:11434/api/tags  →  your model list
+> ```
+>
+> So the session reaches your provider the same way it reaches OpenHands itself — through `host.docker.internal` and a **published host port**. A container name here fails silently: the message is accepted, no reply ever arrives, and nothing in the UI says why. `deploy.sh` works the correct URL out from the provider's published port and prints it.
 
 Any API key value will do for a local provider — the protocol requires the field, the server ignores it.
 
