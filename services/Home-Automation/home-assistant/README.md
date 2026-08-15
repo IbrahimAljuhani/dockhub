@@ -74,7 +74,7 @@ Home Assistant has **no default admin account**. Visiting `http://<server-ip>:81
 1. Open `http://<server-ip>:81`
 2. Create a **Proxy Host**:
    - **Domain**: your chosen domain, e.g. `ha.example.com`
-   - **Forward Hostname/IP**: this server's own LAN IP (e.g. `10.0.0.27`) — **not** `homeassistant`
+   - **Forward Hostname/IP**: this server's own LAN IP (`192.168.1.50` is a placeholder — use yours) — **not** `homeassistant`
    - **Forward Port**: `8123`
    - Enable **Websockets Support** (Home Assistant's frontend uses them for live state updates)
 3. Enable **SSL** with Let's Encrypt from the UI.
