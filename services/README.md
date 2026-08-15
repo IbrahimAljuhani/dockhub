@@ -72,7 +72,7 @@ Only relevant if you opt into a service's **direct host port** prompt (default i
 | AdGuard Home | Setup wizard `3000` ⚠️ same as Redmine's default, admin UI `8080` ⚠️ same as OpenProject/Nextcloud (both optional, asked together). DNS itself (`53`) is **always** bound to the host, not an opt-in prompt — same reasoning as Pi-hole's DNS port. |
 | Plex | `32400` |
 | PhotoPrism | `2342` |
-| Seafile | `8087` (optional) → the container's `80`. ⚠️ `SEAFILE_SERVER_HOSTNAME` in `.env` must carry the port for a direct-port deployment (`10.0.0.27:8087`), and `SEAFILE_SERVER_PROTOCOL` must match — a mismatch surfaces as "CSRF verification failed" at login, not as a config error. |
+| Seafile | `8087` (optional) → the container's `80`. ⚠️ `SEAFILE_SERVER_HOSTNAME` in `.env` must carry the port for a direct-port deployment (`192.168.1.50:8087`), and `SEAFILE_SERVER_PROTOCOL` must match — a mismatch surfaces as "CSRF verification failed" at login, not as a config error. |
 | ownCloud (Infinite Scale) | `9200` (optional, oCIS's own port). ⚠️ Even this direct port is **https** with a self-signed cert — oCIS's web UI is an OIDC client and needs a browser secure context, so plain http can't work. See its README. |
 | Ghost | `2368` (optional, Ghost's own port). `GHOST_URL` in `.env` must match how you reach it — see its README. |
 | Vaultwarden | **none** — no host-port option. Its web vault needs a browser "secure context" (HTTPS or localhost), so a direct port can't work; NPM + SSL is the only route. |

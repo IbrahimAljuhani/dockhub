@@ -75,7 +75,7 @@ LocalAI's tags combine **hardware** and **content**:
 
 > 💡 **A modest GPU is not a reason to avoid the GPU build.** AIO detects how much VRAM the card actually has and starts with a matching profile, with models sized for it. It adapts to your hardware rather than assuming a large card.
 >
-> **Verified on a 6 GB RTX 2060:** `latest-aio-gpu-nvidia-cuda-12` deployed and reached `/readyz` in about 25 minutes. AIO picked `Q4_K_M` (4-bit) quantisations for both large models — a 4.4 GB chat model and a 4.7 GB vision model — rather than the `Q8`/`F16` builds it would use on a bigger card. That sizing is the profile mechanism working, not a coincidence.
+> **Verified on a 6 GB consumer GPU:** `latest-aio-gpu-nvidia-cuda-12` deployed and reached `/readyz` in about 25 minutes. AIO picked `Q4_K_M` (4-bit) quantisations for both large models — a 4.4 GB chat model and a 4.7 GB vision model — rather than the `Q8`/`F16` builds it would use on a bigger card. That sizing is the profile mechanism working, not a coincidence.
 >
 > The CPU build is a *fallback* for when GPU loading genuinely fails, not a requirement for smaller cards. If that happens — or if you simply want the card left free for something else — set **`AI_ACCELERATION=cpu`** in `.env` and rerun. `deploy.sh` swaps the hardware half of the tag for you and leaves the All-In-One half alone, so you don't have to work out which of the four tags you need. See the [category README](../README.md#-gpu-or-cpu--you-decide-not-the-detector).
 >

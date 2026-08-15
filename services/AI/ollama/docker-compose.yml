@@ -80,8 +80,8 @@ services:
       # deploy.sh asks for this and writes it to .env. Blank = Ollama decides.
       #
       # Raising it costs GPU memory, and the cost is steeper than people
-      # expect. Measured on an RTX 2060 with gemma4:e4b — same model, same
-      # card, only this value changed:
+      # expect. Measured on a 6 GB consumer GPU with one 8B model — same
+      # model, same card, only this value changed:
       #
       #     32768  ->   3.3 GB   100% GPU
       #     65536  ->  10.0 GB   70%/30% CPU/GPU

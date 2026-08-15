@@ -1022,8 +1022,8 @@ Then message the bot. Replies are prefixed '⚕ Hermes Agent'.
 >>> becomes the allowlist entry, and it must match the sender EXACTLY,
 >>> in full international form with no + and no spaces:
 >>>
->>>     966556647677     ✅  country code + 9 digits
->>>     96656647677      ❌  one digit short — seen live, and the only
+>>>     15551234567      ✅  country code + the full national number
+>>>     1555123456       ❌  one digit short — seen live, and the only
 >>>                          symptom was this pairing prompt
 >>>
 >>> Nothing warns you. The wizard happily prints "Allowed users set" for

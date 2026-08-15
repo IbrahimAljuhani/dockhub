@@ -87,7 +87,7 @@ For **chat**, 4096 is survivable. For **agents**, it is not: the system prompt a
 docker exec ollama ollama ps        # the CONTEXT column is the truth
 ```
 
-[Ollama](ollama/)'s `deploy.sh` now asks for this and writes `OLLAMA_CONTEXT_LENGTH`. **Raising it costs GPU memory in proportion**, and the cost is steeper than most people expect. Measured on an RTX 2060 with the same model, changing only this value:
+[Ollama](ollama/)'s `deploy.sh` now asks for this and writes `OLLAMA_CONTEXT_LENGTH`. **Raising it costs GPU memory in proportion**, and the cost is steeper than most people expect. Measured on a 6 GB consumer GPU with one 8B model, changing only this value:
 
 | Context | Size | Processor |
 |---|---|---|
