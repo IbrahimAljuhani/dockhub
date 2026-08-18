@@ -26,6 +26,53 @@ And both differ from [AI](../AI/), which is the model layer underneath: the prov
 
 ---
 
+## 🛡️ Threat model — read this before deploying any of them
+
+[AI-Agents](../AI-Agents/) has had one of these since it was created. This category needed one too, and the reason is sharper than it looks.
+
+### The one fact everything follows from
+
+**These platforms execute code you did not write, on behalf of a model reading text you did not write.**
+
+That is not a flaw — it is the product. Paperclip ships four agent harnesses *inside its own image* (`claude-code`, `codex`, `opencode`, `gemini-cli`) and runs them as **processes in the application container**. There is no sandbox in a plain Docker deployment; the sandbox providers upstream ships are for Kubernetes.
+
+So the blast radius of an agent is exactly **the container's own reach**. Not less.
+
+### What that container can touch
+
+| | Reachable from inside the app container |
+|---|---|
+| Its own state | `/paperclip` — instance config, agent definitions, and anything the agents write |
+| Its database | `paperclip-db`, with `DATABASE_URL` sitting in the environment |
+| Its API keys | every `*_API_KEY` you added, readable by any process |
+| **`main-net`, if joined** | **every proxied service on the host** |
+
+That last row is the one that matters, and it is why DockHub does not join `main-net` unless it must:
+
+- **`portainer:9000`** — Portainer mounts `/var/run/docker.sock`. Anything that reaches its API and authenticates can start a privileged container. That is root on the host.
+- **NGINX Proxy Manager's admin interface** — whose first-login credentials *this project's own README prints*: `admin@example.com` / `changeme`.
+
+An agent does not have to be malicious for this to matter. It has to be *persuaded* — by a web page it fetched, a repository it cloned, an issue it was asked to read.
+
+### What DockHub does about it
+
+| | |
+|---|---|
+| **No Docker socket** | Never mounted for these services. Paperclip does not need it, so it does not get it. |
+| **`main-net` only when the proxy needs it** | Choose a direct host port and the app never joins it — NPM is not in the path, so the network buys nothing and costs reach. `deploy.sh` decides this from the answer you already gave. |
+| **Database off the shared network** | `paperclip-db` sits on a private network only the app can see. |
+| **Capabilities dropped** | `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`. Real containment here, because there is no socket to make it decorative. |
+
+### What is left to you
+
+**Change the default passwords on NPM and Portainer.** Not because of these services — you should do it anyway — but an agent on `main-net` turns "I'll get to it" into an exposure with a documented password.
+
+**Prefer a direct host port plus a firewall or VPN**, and reach it over that, if the deployment does not need a public domain. It is the shape with the least reach.
+
+**Give agents the narrowest credentials that work.** A key scoped to one project beats an organisation-wide one, and revoking it is a single action.
+
+---
+
 ## 🧩 Why LangGraph and CrewAI are not listed
 
 They come up constantly in this space, and they are genuinely excellent — but **neither is a deployable service**, so neither gets a menu entry.

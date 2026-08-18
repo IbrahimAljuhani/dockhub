@@ -56,7 +56,16 @@ Add whichever keys you have to `~/docker/paperclip/.env` and rerun `deploy.sh`. 
 
 It also means an agent has whatever the app container has: the database credentials in its environment, and the networks the container is on. Read [the category threat model](../README.md) before pointing an agent at anything you did not write.
 
-> ⚠️ **A local model provider is not reachable yet.** If you run Ollama, llama.cpp or LocalAI from [the AI category](../../AI/), Paperclip currently **cannot** see them: it joins `main-net` but not `ai-net`, so `http://ollama:11434` does not resolve. The harnesses do support custom endpoints (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`) — the network path is the missing piece, and it is a known gap rather than a design choice.
+### Keeping the work on your own hardware
+
+Paperclip joins **`ai-net`**, so if you run Ollama, llama.cpp or LocalAI from [the AI category](../../AI/), the harnesses can reach them by container name. `deploy.sh` detects whichever provider is running and prints the exact lines to add:
+
+```
+ANTHROPIC_BASE_URL=http://ollama:11434      # Claude Code
+OPENAI_BASE_URL=http://ollama:11434         # Codex
+```
+
+It prints them rather than writing them, because which variable a given harness honours differs — a wrong guess would look like a working local setup while every request still went to the cloud.
 
 ---
 
@@ -70,7 +79,7 @@ It also means an agent has whatever the app container has: the database credenti
 
 **Telemetry is off** (`PAPERCLIP_TELEMETRY_DISABLED=1`). Delete that line from `docker-compose.yml` to restore upstream's default.
 
-**No host port by default.** NGINX Proxy Manager reaches `paperclip-app:3100` over `main-net`. The database never joins `main-net` — the proxy has no business seeing it.
+**`main-net` only when the proxy needs it.** The agents run inside this container, so its network reach is theirs. Pick a direct host port and NPM is not in the path — so the app never joins `main-net`, and the agents cannot see the other services on it, Portainer included. Pick a domain and it joins, because the proxy has to reach it; `deploy.sh` says so plainly when it does. The database never joins either way.
 
 ---
 

@@ -106,8 +106,24 @@ services:
       db:
         condition: service_healthy
     networks:
+      # ── main-net is NOT here, and that is the point ──────────────────
+      # Paperclip runs agent harnesses as processes in THIS container (see
+      # the header). So whatever an agent decides to do, it does from here,
+      # with this container's network reach.
+      #
+      # main-net carries every proxied service on the host, plus Portainer —
+      # which mounts /var/run/docker.sock and answers to `portainer:9000` —
+      # and NGINX Proxy Manager, whose default login this project's own
+      # README prints as admin@example.com / changeme. Putting a code
+      # executor on that network by default hands it a list of neighbours it
+      # never needed.
+      #
+      # And it is only needed when NPM is the way in. Choose a direct host
+      # port and NPM plays no part at all, so deploy.sh attaches main-net
+      # ONLY in proxy mode, through docker-compose.override.yml. Direct-port
+      # deployments never join it.
       - paperclip-net
-      - main-net
+      - ai-net
 
   db:
     image: postgres:17-alpine
@@ -138,5 +154,16 @@ volumes:
 
 networks:
   paperclip-net:
+  # The shared model-provider network, so the agent harnesses can reach an
+  # Ollama / llama.cpp / LocalAI deployed from the AI category by container
+  # name. They all support a custom base URL (ANTHROPIC_BASE_URL,
+  # OPENAI_BASE_URL); before this, the capability was there and the route
+  # was not.
+  ai-net:
+    external: true
+  # Declared but deliberately unattached above. docker-compose.override.yml,
+  # which deploy.sh owns, joins the app to it only when NGINX Proxy Manager
+  # is the way in. Declaring it here keeps the override valid without the
+  # override having to redeclare a top-level network.
   main-net:
     external: true
