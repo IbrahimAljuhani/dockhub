@@ -156,9 +156,15 @@ networks:
   paperclip-net:
   # The shared model-provider network, so the agent harnesses can reach an
   # Ollama / llama.cpp / LocalAI deployed from the AI category by container
-  # name. They all support a custom base URL (ANTHROPIC_BASE_URL,
-  # OPENAI_BASE_URL); before this, the capability was there and the route
-  # was not.
+  # name. The supported way to use one is the OpenCode adapter — this image
+  # ships with OPENCODE_ALLOW_ALL_MODELS=true already set, which is upstream
+  # saying custom models are expected. Its config file lands inside ./state
+  # because the image sets HOME=/paperclip.
+  #
+  # (Handing ANTHROPIC_BASE_URL to Claude Code through an adapter's generic
+  # `env` object also works, but Paperclip documents no such thing — it works
+  # because arbitrary env is passed through and the CLI happens to read it.
+  # A mechanism, not a promise. See this service's README.)
   ai-net:
     external: true
   # Declared but deliberately unattached above. docker-compose.override.yml,

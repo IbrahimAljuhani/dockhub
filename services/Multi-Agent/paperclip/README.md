@@ -39,33 +39,79 @@ You will be asked two things: whether to publish a host port for direct access, 
 
 ---
 
-## 🔌 The agents, and where they run
+## 🔌 Adapters: what "Connect a model" is really offering
 
-**Four agent harnesses ship inside the image** — you do not install them:
+The **Connect a model** screen lists nine adapter types. Read this before picking one — the list is what Paperclip *supports*, not what this image *contains*.
 
-| Harness | Installed as | Wants |
+### "Local" does not mean a local model
+
+`claude_local`, `codex_local`, `gemini_local` — the `local` means **the CLI runs as a process on this host** instead of Paperclip calling a remote service. It says nothing about where the model lives. `claude_local` still talks to Anthropic.
+
+### Only four of the nine will actually run
+
+The image installs four harnesses. The others are offered by the interface but have no CLI behind them here, and picking one fails at the first run.
+
+| Adapter | In this image? | Wants |
 |---|---|---|
-| **Claude Code** | `@anthropic-ai/claude-code` | `ANTHROPIC_API_KEY` |
-| **Codex** | `@openai/codex` | `OPENAI_API_KEY` |
-| **Gemini CLI** | `@google/gemini-cli` | `GEMINI_API_KEY` |
-| **opencode** | `opencode-ai` | configured in the UI |
+| **Claude Code** | ✅ `@anthropic-ai/claude-code` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
+| **Codex** | ✅ `@openai/codex` | `OPENAI_API_KEY` |
+| **Gemini CLI** | ✅ `@google/gemini-cli` | `GEMINI_API_KEY` |
+| **OpenCode** | ✅ `opencode-ai` | configured in a file — see below |
+| Cursor · Cursor Cloud · Grok Build · Pi | ❌ | not installed |
+| **Hermes** · **OpenClaw** | ❌ *as CLIs* | but see the gateways below |
 
 Add whichever keys you have to `~/docker/paperclip/.env` and rerun `deploy.sh`. All are optional and passed straight through by `env_file`.
+
+### Two adapters that are not harnesses at all
+
+- **`process`** — runs *any* shell command with your own `command`, `env` and `cwd`. This is the real escape hatch for wiring up a framework Paperclip has never heard of.
+- **`http`** — **not** an inference bridge. It POSTs a webhook to an agent service you host elsewhere, which then calls Paperclip's API back. Useful, but not a way to plug in a model.
+
+### The gateways — and why they matter *here*
+
+`hermes_gateway` and `openclaw_gateway` do not spawn a CLI; they talk to an **already-running agent**. DockHub deploys both [Hermes](../../AI-Agents/hermes/) and [OpenClaw](../../AI-Agents/openclaw/). So Paperclip can drive the agents you already run rather than its own built-in ones. Not wired up yet — noted because nothing else in this catalogue can do it.
 
 **Where they execute matters.** Paperclip runs these harnesses as **processes inside the app container** — not in containers of their own, and not through the Docker socket. That is why this deployment needs no socket at all.
 
 It also means an agent has whatever the app container has: the database credentials in its environment, and the networks the container is on. Read [the category threat model](../README.md) before pointing an agent at anything you did not write.
 
-### Keeping the work on your own hardware
+## 🏠 Running on your own model
 
-Paperclip joins **`ai-net`**, so if you run Ollama, llama.cpp or LocalAI from [the AI category](../../AI/), the harnesses can reach them by container name. `deploy.sh` detects whichever provider is running and prints the exact lines to add:
+Paperclip joins **`ai-net`**, so an Ollama, llama.cpp or LocalAI deployed from [the AI category](../../AI/) is reachable by container name. There are two routes, and they are not equally solid.
+
+### The supported route: OpenCode
+
+OpenCode is the multi-provider harness, and this image ships with **`OPENCODE_ALLOW_ALL_MODELS=true`** already set — upstream expects custom models here. Its config lives at `$HOME/.config/opencode/opencode.json`, and since the image sets `HOME=/paperclip`, that is:
 
 ```
-ANTHROPIC_BASE_URL=http://ollama:11434      # Claude Code
-OPENAI_BASE_URL=http://ollama:11434         # Codex
+~/docker/paperclip/state/.config/opencode/opencode.json
 ```
 
-It prints them rather than writing them, because which variable a given harness honours differs — a wrong guess would look like a working local setup while every request still went to the cloud.
+Inside the bind mount, so it survives container replacement and is captured by backups. Point it at your provider by **container name** — `localhost` is the container itself, not your Ollama:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama",
+      "options": { "baseURL": "http://ollama:11434/v1" },
+      "models": { "qwen3.5": { "name": "qwen3.5" } }
+    }
+  }
+}
+```
+
+No API key is needed for a local provider.
+
+> ⚠️ **OpenCode needs a context length of 64k or more.** Ollama's default is far below that, and the failure does not announce itself — the agent simply truncates and behaves badly. Raise it on the model you serve before blaming the setup. DockHub has been caught by Ollama's *allocated* context differing from a model's advertised maximum before; check what is actually allocated, not what the model card claims.
+
+### The unsupported route: base-URL variables
+
+Every adapter has a generic `env` object, so you *can* hand `ANTHROPIC_BASE_URL` to Claude Code or `OPENAI_BASE_URL` to Codex, and those CLIs do honour them.
+
+**But Paperclip's documentation never mentions this.** It works because the adapter passes arbitrary environment through and the CLI happens to read it — not because anyone promised it would. An earlier version of this page presented it as a supported path; that was overstated. Treat it as a mechanism that may break in an update, and prefer OpenCode.
 
 ---
 
@@ -76,6 +122,8 @@ It prints them rather than writing them, because which variable a given harness 
 **A real database, not the embedded one.** Paperclip can run as a single container with an embedded Postgres; upstream calls that the *local* mode and points production at a real Postgres. A server behind a reverse proxy is production.
 
 **`./state` is a bind mount, not a named volume.** `PAPERCLIP_HOME` holds instance config, agent teams, goals and tickets — produced by you, not re-downloadable. A bind mount inside the install directory puts it where the menu's Backup option can see it. Upstream's named volume would be missed.
+
+> 🔑 **`./state` is a credentials directory, not just data.** The image sets `HOME=/paperclip`, so every agent CLI keeps its own configuration *and logins* in there — `.claude/`, `.config/opencode/`, `.codex/`. That is a deliberate and good choice by upstream: it means your agent setup survives container replacement and is captured by backups. It also means the directory holds OAuth tokens and API keys, so `deploy.sh` sets it `0700`, and **your backup archives contain those credentials** — store them accordingly.
 
 **Telemetry is off** (`PAPERCLIP_TELEMETRY_DISABLED=1`). Delete that line from `docker-compose.yml` to restore upstream's default.
 

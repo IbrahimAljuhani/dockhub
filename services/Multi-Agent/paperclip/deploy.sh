@@ -146,12 +146,38 @@ else
     chmod 600 "$RUNTIME_DIR/.env"
     umask 022
 
-    # The bind mount's target, created before compose does. Left to Docker it
-    # would be created root-owned, and a container running as uid 1000 then
-    # cannot write its own instance config.
-    mkdir -p "$RUNTIME_DIR/state"
-
     print_info "Copied service files to $RUNTIME_DIR."
+fi
+
+# ── The state directory: ownership first, then mode ─────────────────────
+# Outside the install/reconfigure branches, so an EXISTING deployment gets
+# corrected on the next run too. The first version of this fix lived in the
+# first-install branch and left every deployment already on disk unchanged —
+# a fix that reaches nobody who already has the problem.
+#
+# Why it matters more than it looks: the image sets HOME=/paperclip. So this
+# directory is not just Paperclip's own state, it is HOME for every agent CLI
+# — /paperclip/.claude, /paperclip/.config/opencode, /paperclip/.codex — which
+# means OAuth tokens and API keys. The .env next to it is 600; this holds the
+# same class of secret and was being created 0755.
+#
+# Ownership is checked BEFORE tightening the mode, and that order is the whole
+# point. The container runs as uid 1000. If the invoking user is not uid 1000,
+# then 0700 owned by someone else locks the container out entirely — turning a
+# readable-secrets problem into a service that cannot start. And 0755 does not
+# save it either: "other" has no write bit, so a non-1000 host user has ALWAYS
+# been broken here. That has simply never been hit, because the first user on
+# a Debian/Ubuntu box is uid 1000.
+mkdir -p "$RUNTIME_DIR/state"
+_HOST_UID="$(id -u)"
+if [[ "$_HOST_UID" == "1000" ]]; then
+    chmod 700 "$RUNTIME_DIR/state"
+else
+    print_warn "You are uid $_HOST_UID, but the Paperclip image runs as uid 1000."
+    print_warn "The container cannot write to $RUNTIME_DIR/state, and Paperclip will"
+    print_warn "fail to save its configuration. Fix it with:"
+    print_warn "    sudo chown -R 1000:1000 $RUNTIME_DIR/state && sudo chmod 700 $RUNTIME_DIR/state"
+    print_warn "Leaving the mode alone for now — tightening it would only lock you out too."
 fi
 
 # ── Regenerated every run, never hand-edited ────────────────────────────
@@ -282,18 +308,35 @@ detect_ai_provider
 echo
 if [[ -n "$AI_PROVIDER_NAME" ]]; then
     print_info "A local model provider is running on 'ai-net': $AI_PROVIDER_NAME"
-    echo "  Paperclip is now on that network, so the harnesses can reach it. To"
-    echo "  keep the work on your own hardware, point one at it in $RUNTIME_DIR/.env:"
+    echo "  Paperclip is on that network, so the harnesses can reach it."
     echo
-    echo "      ANTHROPIC_BASE_URL=$AI_PROVIDER_BASE_URL     (Claude Code)"
-    echo "      OPENAI_BASE_URL=$AI_PROVIDER_BASE_URL        (Codex)"
+    echo "  The supported route is the OpenCode adapter — this image already sets"
+    echo "  OPENCODE_ALLOW_ALL_MODELS=true. Create this file (HOME is /paperclip,"
+    echo "  so it lands inside the backed-up state directory):"
     echo
-    echo "  Verify the route before trusting it:"
+    echo "      $RUNTIME_DIR/state/.config/opencode/opencode.json"
+    echo
+    echo "  pointing at the provider BY CONTAINER NAME — inside the container"
+    echo "  'localhost' is Paperclip itself, not your model server:"
+    echo
+    echo "      \"options\": { \"baseURL\": \"$AI_PROVIDER_BASE_URL/v1\" }"
+    echo
+    echo "  See this service's README for the complete file."
+    echo
+    print_warn "OpenCode needs a context length of 64k or more. Ollama's default is far"
+    print_warn "below that and does not complain — the agent just truncates and behaves"
+    print_warn "badly. Check what is actually ALLOCATED, not what the model card says."
+    echo
+    echo "  Verify the route first:"
     echo "      docker exec paperclip-app node -e \"fetch('$AI_PROVIDER_BASE_URL').then(r=>console.log(r.status))\""
 else
     echo
     echo "  No local model provider is running on 'ai-net'. Deploy one from the AI"
-    echo "  category (Ollama, llama.cpp, LocalAI) and the harnesses can use it"
-    echo "  instead of a cloud key — Paperclip is already attached to that network."
+    echo "  category (Ollama, llama.cpp, LocalAI) and the OpenCode adapter can use"
+    echo "  it instead of a cloud key — Paperclip is already on that network."
 fi
+echo
+print_warn "The 'Connect a model' screen lists nine adapters; this image contains four"
+print_warn "(Claude Code, Codex, Gemini CLI, OpenCode). Cursor, Grok Build and Pi are"
+print_warn "offered but have no CLI behind them here and will fail. See the README."
 print_tunnel_reminder_if_relevant
