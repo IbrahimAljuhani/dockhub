@@ -1,6 +1,10 @@
-# 📎 Paperclip
+<img src="../../../assets/services/paperclip.svg" alt="" width="64" align="right">
+
+# Paperclip
 
 > *"The open-source app everyone uses to manage agents at work."* — [paperclipai/paperclip](https://github.com/paperclipai/paperclip)
+
+> ℹ️ **The icon above is ours, not theirs.** Paperclip publishes no logo or brand asset (checked 2026-08-18), so this one was drawn for DockHub's catalogue. It carries no endorsement and is not the project's official mark — see [the policy](../../../assets/services/README.md). If upstream ever publishes one, this file gets deleted rather than kept beside it.
 
 Paperclip is where you **run a company of agents**: organisational hierarchy, goals, budgets, tickets and governance. It manages agents — it is not one, and it ships none. You bring the model provider.
 
@@ -68,11 +72,15 @@ The menu's Backup option runs a `pg_dump` **and** archives the install tree, bec
 
 ---
 
+## ✅ Verified
+
+Deployed on a real Ubuntu server on **2026-08-18**, first attempt, no fixes needed: 22 layers / 1633 MB pulled, `paperclip-db` reached `healthy`, `paperclip-app` started and answered on 3100.
+
 ## ⚠️ Known unknowns
 
 Stated plainly rather than discovered later:
 
-- **Agent runtimes.** Upstream publishes `agent-runtime-*` images alongside the app. Its own compose files mount no Docker socket, so this deployment grants none — but if running agents in practice turns out to need the daemon, that is a security decision to make deliberately (see [AI-Agents](../../AI-Agents/README.md), where OpenHands required exactly that and said so). Not yet exercised on a live server.
+- **Agent runtimes.** Upstream publishes `agent-runtime-*` images alongside the app. Its own compose files mount no Docker socket, so this deployment grants none — and the service starts and serves fine without one. What has **not** been exercised is running an actual agent end to end. If that turns out to need the daemon, it is a security decision to make deliberately (see [AI-Agents](../../AI-Agents/README.md), where OpenHands required exactly that and said so).
 - **Resource appetite.** `deploy.sh` suggests a 2 GB limit for the app container as a starting point, not a measured figure.
 
 ---
