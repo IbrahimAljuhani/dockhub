@@ -32,32 +32,68 @@ ensure_main_net
 
 mkdir -p "$RUNTIME_DIR"
 
-if [[ -f "$RUNTIME_DIR/docker-compose.yml" ]]; then
-    print_info "Existing deployment found at $RUNTIME_DIR — reusing its .env (source files not re-copied)."
-else
-    cp "$SOURCE_DIR/docker-compose.yml" "$RUNTIME_DIR/"
-
-    # ── The reachable address, decided before anything is written ────────
-    # PAPERCLIP_PUBLIC_URL is not cosmetic. Paperclip builds its login and
-    # session-cookie redirects from it, so a value that does not match the
-    # address you actually type produces a login page that bounces you back
-    # to itself — the failure this repo already hit on OpenProject,
-    # Nextcloud and n8n independently before it became a fixed convention.
+# ── How Paperclip is reached, asked in exactly one place ────────────────
+# Defined as a function because it is needed on TWO paths — first install and
+# reconfigure — and two copies of a question drift apart. Sets PUBLIC_URL and
+# HOST_PORT.
+#
+# PAPERCLIP_PUBLIC_URL is not cosmetic. Paperclip builds its login and
+# session-cookie redirects from it, so a value that does not match the address
+# you actually type produces a login page that bounces you back to itself —
+# the failure this repo hit on OpenProject, Nextcloud and n8n independently
+# before it became a fixed convention.
+ask_reachability() {
     prompt_host_port "$CONTAINER_PORT"
 
     if [[ -n "$HOST_PORT" ]]; then
         # Direct access: the URL must be the IP and port a browser will use,
         # not a domain that does not resolve yet.
-        SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
-        [[ -n "$SERVER_IP" ]] || SERVER_IP="localhost"
-        PUBLIC_URL="http://${SERVER_IP}:${HOST_PORT}"
+        local server_ip
+        server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        [[ -n "$server_ip" ]] || server_ip="localhost"
+        PUBLIC_URL="http://${server_ip}:${HOST_PORT}"
         print_info "Public URL set to $PUBLIC_URL (direct host port)."
     else
         prompt_domain "Public domain for Paperclip (e.g. agents.example.com): " "domain"
         PUBLIC_URL="https://$PROMPTED_DOMAIN"
         print_info "Public URL set to $PUBLIC_URL — point NGINX Proxy Manager at paperclip-app:$CONTAINER_PORT."
     fi
+}
 
+if [[ -f "$RUNTIME_DIR/docker-compose.yml" ]]; then
+    print_info "Existing deployment found at $RUNTIME_DIR — its secrets and data are kept."
+
+    # ── Reconfigure, so the first answer is not the permanent one ────────
+    # Without this, moving from a direct host port to a domain behind NGINX
+    # Proxy Manager means hand-editing .env — and getting PUBLIC_URL wrong
+    # does not produce an error, it produces a login page that loops. That is
+    # a bad thing to leave to memory and a text editor. Same lesson as the
+    # "Reconfigure" option added to install_dockhub.sh, which existed because
+    # the only route back to a question was a reset that destroyed the data.
+    echo
+    echo "  Currently reached at : $(read_env_value PUBLIC_URL "$RUNTIME_DIR/.env")"
+    _cur_port="$(read_env_value HOST_PORT "$RUNTIME_DIR/.env")"
+    echo "  Direct host port     : ${_cur_port:-none (via NGINX Proxy Manager)}"
+    echo
+    read -rp "Change how Paperclip is reached? (y/N): " _recfg || _recfg="n"
+    if [[ "${_recfg,,}" == "y" ]]; then
+        ask_reachability
+        # Secrets are deliberately NOT regenerated here. Rewriting
+        # BETTER_AUTH_SECRET would log every user out, and rewriting
+        # POSTGRES_PASSWORD would lock the app out of its own database —
+        # the .env would no longer match the password baked into the volume
+        # when Postgres first initialised.
+        set_env_value PUBLIC_URL "$PUBLIC_URL" "$RUNTIME_DIR/.env"
+        # Emptied rather than deleted: read_env_value returns "" either way,
+        # and the override generator below treats empty as "no port", so an
+        # empty line switches direct access off without needing a delete.
+        set_env_value HOST_PORT "${HOST_PORT:-}" "$RUNTIME_DIR/.env"
+        print_info "Reconfigured. Secrets and data untouched."
+    fi
+else
+    cp "$SOURCE_DIR/docker-compose.yml" "$RUNTIME_DIR/"
+
+    ask_reachability
     prompt_mem_limit "paperclip" "2g"
 
     # ── Secrets ──────────────────────────────────────────────────────────
@@ -153,9 +189,16 @@ echo "  First run: open the URL above and create the first account. Paperclip"
 echo "  runs in 'authenticated' mode — there is no anonymous access, and no"
 echo "  default password for anyone to find."
 echo
-echo "  Paperclip manages agents; it does not include one. Give it a model"
-echo "  provider by adding a key to $RUNTIME_DIR/.env and rerunning:"
-echo "      OPENAI_API_KEY=sk-..."
-echo "      ANTHROPIC_API_KEY=sk-ant-..."
-echo "  Both are passed straight through by env_file and are optional."
+echo "  Four agent harnesses are already inside the image — you do not install"
+echo "  them, you just give them a key. Add whichever you have to"
+echo "  $RUNTIME_DIR/.env and rerun this script:"
+echo
+echo "      ANTHROPIC_API_KEY=sk-ant-...   → Claude Code"
+echo "      OPENAI_API_KEY=sk-...          → Codex"
+echo "      GEMINI_API_KEY=...             → Gemini CLI"
+echo "                                     → opencode (configured in the UI)"
+echo
+echo "  All are optional and passed straight through by env_file. Paperclip"
+echo "  runs the harnesses as processes inside this container, so no extra"
+echo "  container and no Docker socket is involved."
 print_tunnel_reminder_if_relevant

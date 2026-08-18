@@ -39,16 +39,24 @@ You will be asked two things: whether to publish a host port for direct access, 
 
 ---
 
-## 🔌 Giving it a model provider
+## 🔌 The agents, and where they run
 
-Paperclip orchestrates agents; the agents need a model. Add a key to `~/docker/paperclip/.env` and rerun `deploy.sh`:
+**Four agent harnesses ship inside the image** — you do not install them:
 
-```
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-```
+| Harness | Installed as | Wants |
+|---|---|---|
+| **Claude Code** | `@anthropic-ai/claude-code` | `ANTHROPIC_API_KEY` |
+| **Codex** | `@openai/codex` | `OPENAI_API_KEY` |
+| **Gemini CLI** | `@google/gemini-cli` | `GEMINI_API_KEY` |
+| **opencode** | `opencode-ai` | configured in the UI |
 
-Both are optional and are passed straight through.
+Add whichever keys you have to `~/docker/paperclip/.env` and rerun `deploy.sh`. All are optional and passed straight through by `env_file`.
+
+**Where they execute matters.** Paperclip runs these harnesses as **processes inside the app container** — not in containers of their own, and not through the Docker socket. That is why this deployment needs no socket at all.
+
+It also means an agent has whatever the app container has: the database credentials in its environment, and the networks the container is on. Read [the category threat model](../README.md) before pointing an agent at anything you did not write.
+
+> ⚠️ **A local model provider is not reachable yet.** If you run Ollama, llama.cpp or LocalAI from [the AI category](../../AI/), Paperclip currently **cannot** see them: it joins `main-net` but not `ai-net`, so `http://ollama:11434` does not resolve. The harnesses do support custom endpoints (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`) — the network path is the missing piece, and it is a known gap rather than a design choice.
 
 ---
 
