@@ -264,195 +264,75 @@ else
     print_warn "Check with:  docker logs -f paperclip-app"
 fi
 
+# ── The summary ─────────────────────────────────────────────────────────
+# Kept short on purpose. An earlier version of this block ran to 92 print
+# statements: every finding from every review had added its own paragraph,
+# each justified alone, together a wall nobody reads. The same thing was
+# fixed once already in NetBird (30 lines to 12).
+#
+# The rule that decides what stays: THIS SCRIPT REPORTS FACTS ABOUT THIS
+# HOST — what is running, what was detected, what was verified. The README
+# explains. Anything that would read the same on every machine belongs
+# there, not here.
 echo
 print_info "$SERVICE_NAME is running."
-# Reported from the mode that was actually applied, not printed blind. The
-# earlier version announced "Proxy target for NPM: paperclip-app:3100 (on
-# main-net)" unconditionally — including on direct-port deployments, which
-# this script had just finished keeping OFF main-net two lines above. A
-# script contradicting itself on one screen is worse than one that stays
-# quiet.
-echo "  Public URL           : $(read_env_value PUBLIC_URL "$RUNTIME_DIR/.env")"
+echo
+printf '  %-14s %s\n' "Open" "$(read_env_value PUBLIC_URL "$RUNTIME_DIR/.env")   → create the first account"
+printf '  %-14s %s\n' "Data" "$RUNTIME_DIR/state"
+printf '  %-14s %s\n' "Secrets" "$RUNTIME_DIR/.env"
 if (( ENV_ON_MAIN_NET )); then
-    echo "  Proxy target for NPM : paperclip-app:$CONTAINER_PORT  (on main-net)"
-    echo "  Networks             : paperclip-net, ai-net, main-net"
+    printf '  %-14s %s\n' "Networks" "paperclip-net, ai-net, main-net"
+    printf '  %-14s %s\n' "NPM target" "paperclip-app:$CONTAINER_PORT"
 else
-    echo "  Networks             : paperclip-net, ai-net  (deliberately NOT main-net)"
+    printf '  %-14s %s\n' "Networks" "paperclip-net, ai-net   (not main-net)"
 fi
-[[ -n "$ENV_HOST_PORT" ]] && echo "  Direct host port     : $ENV_HOST_PORT"
-echo "  Data                 : $RUNTIME_DIR/state   (agent teams, goals, tickets)"
-echo "  Credentials file     : $RUNTIME_DIR/.env    (chmod 600)"
-echo
-echo "  First run: open the URL above and create the first account. Paperclip"
-echo "  runs in 'authenticated' mode — there is no anonymous access, and no"
-echo "  default password for anyone to find."
-echo
-echo "  Four agent harnesses are already inside the image — you do not install"
-echo "  them, you just give them a key. Add whichever you have to"
-echo "  $RUNTIME_DIR/.env and rerun this script:"
-echo
-echo "      ANTHROPIC_API_KEY=sk-ant-...   → Claude Code"
-echo "      OPENAI_API_KEY=sk-...          → Codex"
-echo "      GEMINI_API_KEY=...             → Gemini CLI"
-echo "                                     → opencode (configured in the UI)"
-echo
-echo "  All are optional and passed straight through by env_file. Paperclip"
-echo "  runs the harnesses as processes inside this container, so no extra"
-echo "  container and no Docker socket is involved."
 
-# ── A local provider, if one is running ─────────────────────────────────
-# Reported rather than written into .env: which variable a harness wants
-# differs per harness, and guessing wrong here would look like a working
-# configuration that silently still calls the cloud.
-detect_ai_provider
+# ── Connecting an agent: only what is actionable on THIS host ───────────
 echo
-if [[ -n "$AI_PROVIDER_NAME" ]]; then
-    print_info "A local model provider is running on 'ai-net': $AI_PROVIDER_NAME"
-    echo "  Paperclip is on that network, so the harnesses can reach it."
-    echo
-    echo "  The supported route is the OpenCode adapter — this image already sets"
-    echo "  OPENCODE_ALLOW_ALL_MODELS=true. Create this file (HOME is /paperclip,"
-    echo "  so it lands inside the backed-up state directory):"
-    echo
-    echo "      $RUNTIME_DIR/state/.config/opencode/opencode.json"
-    echo
-    echo "  pointing at the provider BY CONTAINER NAME — inside the container"
-    echo "  'localhost' is Paperclip itself, not your model server:"
-    echo
-    echo "      \"options\": { \"baseURL\": \"$AI_PROVIDER_BASE_URL/v1\" }"
-    echo
-    echo "  See this service's README for the complete file."
-    echo
-    print_warn "OpenCode needs a context length of 64k or more. Ollama's default is far"
-    print_warn "below that and does not complain — the agent just truncates and behaves"
-    print_warn "badly. Check what is actually ALLOCATED, not what the model card says."
-    echo
-    echo "  Verify the route first:"
-    echo "      docker exec paperclip-app node -e \"fetch('$AI_PROVIDER_BASE_URL').then(r=>console.log(r.status))\""
-else
-    echo
-    echo "  No local model provider is running on 'ai-net'. Deploy one from the AI"
-    echo "  category (Ollama, llama.cpp, LocalAI) and the OpenCode adapter can use"
-    echo "  it instead of a cloud key — Paperclip is already on that network."
-fi
+echo "  Connect an agent — Agent → Configuration → Adapter:"
 echo
-print_warn "Two separate gates decide which adapters you can actually use, and the"
-print_warn "dropdown shows neither clearly:"
-print_warn "  works here  — Claude Code, Codex, Gemini CLI, OpenCode, Hermes GATEWAY"
-print_warn "  no CLI here — Cursor, Cursor Cloud, Grok Build, Pi, and plain 'Hermes'"
-print_warn "                (which is NOT the same entry as 'Hermes Gateway')"
-print_warn "  coming soon — OpenClaw Gateway, Process, HTTP (greyed out, unselectable)"
-print_warn "See the README. 'Process' is fully documented upstream and still not shipped."
-
-# ── The two gateway adapters, and DockHub's own agents ──────────────────
-# hermes_gateway and openclaw_gateway do not spawn a CLI — they drive an
-# agent that is ALREADY RUNNING. DockHub deploys both, all three containers
-# sit on ai-net, so the route is container-name direct.
-#
-# The endpoints are not guesses. Paperclip's own hermes-gateway smoke test
-# (docker/hermes-gateway-smoke/entrypoint.sh) defaults API_SERVER_PORT to
-# 8642 — the exact port services/AI-Agents/hermes/docker-compose.yml sets.
-#
-# Reachability is PROVED from inside this container before anything is
-# printed, rather than asserted from "the container is running". A running
-# container on a network you are not on is not reachable, and finding that
-# out from a silent failure in a web form is the worst place to find it out.
-_probe_from_paperclip() {   # $1 = url — returns 0 if the TCP port answers
-    docker exec paperclip-app node -e "
-        const u=new URL('$1');
-        require('net').connect(u.port,u.hostname)
-          .on('connect',()=>process.exit(0)).on('error',()=>process.exit(1));
-    " >/dev/null 2>&1
-}
 
 _HERMES_URL="http://hermes:8642"
-_OPENCLAW_URL="http://openclaw:18789"
-_found_agent=0
-
+_hermes_ok=0
 if docker ps --format '{{.Names}}' | grep -qx hermes; then
-    _found_agent=1
-    echo
-    if _probe_from_paperclip "$_HERMES_URL"; then
-        print_info "Hermes is running AND reachable from Paperclip at $_HERMES_URL"
+    # Two separate checks, kept because they answer different questions: is
+    # it routable, and is the key accepted. One request proving both cannot
+    # say which failed — the lesson from Hermes' own deploy.sh.
+    if docker exec paperclip-app node -e "
+        const u=new URL('$_HERMES_URL');
+        require('net').connect(u.port,u.hostname)
+          .on('connect',()=>process.exit(0)).on('error',()=>process.exit(1));
+    " >/dev/null 2>&1; then
+        _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/data/.env")"
+        [[ -z "$_hk" ]] && _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/.env")"
+        _auth=0
+        [[ -n "$_hk" ]] && { docker exec -e HK="$_hk" paperclip-app node -e "
+            fetch('$_HERMES_URL/v1/models',{headers:{Authorization:'Bearer '+process.env.HK}})
+              .then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1));
+        " >/dev/null 2>&1 && _auth=1; }
+        _hermes_ok=1
+        echo "    Hermes Gateway      $( ((_auth)) && echo 'reachable, key verified' || echo 'reachable — KEY REJECTED, see README' )"
+        echo "      API base URL      $_HERMES_URL"
+        echo "      API key           $HOME/docker/hermes/data/.env"
+        echo "      Paperclip API URL http://paperclip-app:$CONTAINER_PORT"
+        echo "      Allow remote HTTP ON"
     else
-        print_warn "Hermes is running but Paperclip cannot reach $_HERMES_URL — check both are on ai-net."
+        print_warn "Hermes is running but unreachable from Paperclip — are both on ai-net?"
     fi
-    # Hermes GENERATES its own API_SERVER_KEY in its own secrets file, and
-    # that file wins over the compose environment. Reading the compose .env
-    # instead hands you a key that returns 401 — a mistake this project has
-    # already made once, in Hermes' own deploy.sh, and fixed there the same way.
-    _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/data/.env")"
-    _hsrc="$HOME/docker/hermes/data/.env (Hermes generated this one)"
-    if [[ -z "$_hk" ]]; then
-        _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/.env")"
-        _hsrc="$HOME/docker/hermes/.env (first boot — Hermes has not written its own yet)"
-    fi
-    # ── Second probe: does the KEY work? ─────────────────────────────────
-    # Separate from the reachability probe above, deliberately. One request
-    # that proves "running AND routable AND authenticated" cannot tell you
-    # which of the three failed — the exact lesson a live run taught this
-    # project inside Hermes' own deploy.sh. Reachability is liveness; this
-    # is credentials; they get their own verdicts.
-    #
-    # The key travels as an env var, not on the command line, so it does not
-    # sit in the host's process list while the check runs.
-    if [[ -n "$_hk" ]]; then
-        _auth_rc=0
-        docker exec -e HK="$_hk" paperclip-app node -e "
-            fetch('$_HERMES_URL/v1/models', { headers: { Authorization: 'Bearer ' + process.env.HK } })
-              .then(r => process.exit(r.status === 200 ? 0 : r.status === 401 ? 2 : 3))
-              .catch(() => process.exit(1));
-        " >/dev/null 2>&1 || _auth_rc=$?
-        case "$_auth_rc" in
-            0) print_info "That key is ACCEPTED by Hermes (GET /v1/models → 200)." ;;
-            2) print_warn "Hermes REJECTED that key (401). You are reading the wrong file —"
-               print_warn "Hermes generates its own key in data/.env and that one wins." ;;
-            1) print_warn "Could not reach $_HERMES_URL/v1/models to test the key." ;;
-            *) print_warn "Hermes answered, but not 200 or 401. Check: docker logs hermes" ;;
-        esac
-    else
-        print_warn "No API_SERVER_KEY found in either Hermes .env file — cannot test it."
-    fi
-    # Field names below are from the running UI, not from documentation —
-    # Paperclip publishes no schema for this adapter anywhere. Verified end
-    # to end on 2026-08-19: run created, events streamed, run.completed.
-    echo "    Adapter type              : Hermes Gateway"
-    echo "    API base URL              : $_HERMES_URL"
-    echo "    API key                   : from $_hsrc"
-    echo "    Paperclip API URL         : http://paperclip-app:$CONTAINER_PORT"
-    echo "    Dangerously allow rem HTTP: ON  (required — see below)"
-    echo
-    echo "  Use the CONTAINER NAME for the callback, not <server-ip>:$CONTAINER_PORT."
-    echo "  Both are on ai-net, so it keeps the round trip inside Docker and works"
-    echo "  even with no host port published at all."
-    echo
-    print_warn "Paperclip will warn that allowing plain HTTP is an 'unsafe dev escape"
-    print_warn "hatch'. Correct in general, overstated here: the traffic never leaves"
-    print_warn "ai-net. But the Hermes key does cross a shared bridge, so do not put a"
-    print_warn "container you distrust on ai-net. See this service's README."
 fi
+
+echo "    Cloud key           add to $RUNTIME_DIR/.env, then rerun:"
+echo "                        ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
+
+detect_ai_provider
+[[ -n "$AI_PROVIDER_NAME" ]] && \
+    echo "    Local model         $AI_PROVIDER_NAME is on ai-net — use the OpenCode adapter"
 
 if docker ps --format '{{.Names}}' | grep -qx openclaw; then
-    _found_agent=1
-    echo
-    if _probe_from_paperclip "$_OPENCLAW_URL"; then
-        print_info "OpenClaw is running AND reachable from Paperclip at $_OPENCLAW_URL"
-    else
-        print_warn "OpenClaw is running but Paperclip cannot reach $_OPENCLAW_URL — check both are on ai-net."
-    fi
-    print_warn "But the 'OpenClaw Gateway' adapter is marked COMING SOON in Paperclip's"
-    print_warn "adapter list and cannot be selected yet. The route above is confirmed"
-    print_warn "working, so it is ready the day the adapter ships — nothing to do now."
-    echo "    Adapter  : OpenClaw Gateway  (not selectable yet)"
-    echo "    URL      : $_OPENCLAW_URL"
-    echo "    Token in : $HOME/docker/openclaw/.env  (OPENCLAW_GATEWAY_TOKEN)"
+    echo "    OpenClaw Gateway    running, but the adapter is 'Coming soon' upstream"
 fi
 
-if (( _found_agent )); then
-    echo
-    echo "  Enter those under: Agent → Configuration → Adapter."
-    echo
-    print_info "The Hermes route is proven end to end (2026-08-19): run created,"
-    print_info "events streamed back, run.completed. OpenClaw is not yet exercised."
-fi
+echo
+echo "  Which adapters work, local models, the plain-HTTP warning:"
+echo "      services/Multi-Agent/paperclip/README.md"
 print_tunnel_reminder_if_relevant
