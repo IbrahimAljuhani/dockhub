@@ -47,42 +47,93 @@ The **Connect a model** screen lists nine adapter types. Read this before pickin
 
 `claude_local`, `codex_local`, `gemini_local` — the `local` means **the CLI runs as a process on this host** instead of Paperclip calling a remote service. It says nothing about where the model lives. `claude_local` still talks to Anthropic.
 
-### Only four of the nine will actually run
+### What is actually usable — three tiers, not one list
 
-The image installs four harnesses. The others are offered by the interface but have no CLI behind them here, and picking one fails at the first run.
+Two independent gates decide this, and the source tree tells you neither of them. **A package existing in the repo does not mean the adapter is selectable**, and a selectable adapter does not mean its CLI is in this image.
 
-| Adapter | In this image? | Wants |
+**✅ Works here**
+
+| Adapter | Why | Wants |
 |---|---|---|
-| **Claude Code** | ✅ `@anthropic-ai/claude-code` | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
-| **Codex** | ✅ `@openai/codex` | `OPENAI_API_KEY` |
-| **Gemini CLI** | ✅ `@google/gemini-cli` | `GEMINI_API_KEY` |
-| **OpenCode** | ✅ `opencode-ai` | configured in a file — see below |
-| Cursor · Cursor Cloud · Grok Build · Pi | ❌ | not installed |
-| **Hermes** · **OpenClaw** | ❌ *as CLIs* | but see the gateways below |
+| **Claude Code** | `@anthropic-ai/claude-code` is installed | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
+| **Codex** | `@openai/codex` is installed | `OPENAI_API_KEY` |
+| **Gemini CLI** | `@google/gemini-cli` is installed | `GEMINI_API_KEY` |
+| **OpenCode** | `opencode-ai` is installed | a config file — see below |
+| **Hermes Gateway** | needs no CLI; drives a running agent | URL + key — see below |
+
+**⚠️ Selectable, but no CLI in this image** — Cursor · Cursor Cloud · Grok Build · Pi · **Hermes** (the *local* one, as opposed to Hermes **Gateway**). Choosing one fails at the first run.
+
+**🚧 Marked "Coming soon" in the UI and not selectable at all** — **OpenClaw Gateway** · **Process** · **HTTP**.
+
+> That last row matters more than it looks. `docs/adapters/process.md` documents the `process` adapter in full — arbitrary `command`, `env`, `cwd` — and an earlier version of this page recommended it as the general escape hatch for wiring up any framework. **It is greyed out in the interface.** Documented is not the same as shipped; the dropdown is the authority.
 
 Add whichever keys you have to `~/docker/paperclip/.env` and rerun `deploy.sh`. All are optional and passed straight through by `env_file`.
 
-### Two adapters that are not harnesses at all
+### The gateway — driving DockHub's own Hermes
 
-- **`process`** — runs *any* shell command with your own `command`, `env` and `cwd`. This is the real escape hatch for wiring up a framework Paperclip has never heard of.
-- **`http`** — **not** an inference bridge. It POSTs a webhook to an agent service you host elsewhere, which then calls Paperclip's API back. Useful, but not a way to plug in a model.
+A gateway adapter does not spawn a CLI; it talks to an **already-running agent**. DockHub deploys [Hermes](../../AI-Agents/hermes/), and both containers sit on `ai-net`, so the route is direct by container name.
 
-### The gateways — driving DockHub's own agents
+| Adapter | Status | URL | Credential |
+|---|---|---|---|
+| **Hermes Gateway** | ✅ working, proven end to end | `http://hermes:8642` | `API_SERVER_KEY` from `~/docker/hermes/data/.env` |
+| **OpenClaw Gateway** | 🚧 **"Coming soon" — not selectable yet** | `http://openclaw:18789` | `OPENCLAW_GATEWAY_TOKEN` from `~/docker/openclaw/.env` |
 
-`hermes_gateway` and `openclaw_gateway` do not spawn a CLI; they talk to an **already-running agent**. DockHub deploys both [Hermes](../../AI-Agents/hermes/) and [OpenClaw](../../AI-Agents/openclaw/), and all three containers sit on `ai-net` — so the route is direct, by container name.
-
-`deploy.sh` detects whichever is running, **proves Paperclip can actually reach it** from inside the container, and prints what to enter:
-
-| Adapter | URL | Credential |
-|---|---|---|
-| **Hermes** | `http://hermes:8642` | `API_SERVER_KEY` — from `~/docker/hermes/data/.env` |
-| **OpenClaw** | `http://openclaw:18789` | `OPENCLAW_GATEWAY_TOKEN` — from `~/docker/openclaw/.env` |
+`deploy.sh` detects whichever agent is running and **proves Paperclip can actually reach it** from inside the container — useful for OpenClaw too, so that the day the adapter ships, the route is already known to work.
 
 **The port is not a guess.** Paperclip's own smoke test (`docker/hermes-gateway-smoke/entrypoint.sh`) defaults `API_SERVER_PORT` to `8642` — exactly what our Hermes sets. The two were built to the same number independently.
 
+> ⚠️ **Do not confuse "Hermes" with "Hermes Gateway" in the dropdown.** They are two different adapters and both are listed. Plain **Hermes** is the local CLI harness, which is *not* in this image. **Hermes Gateway** is the one that works.
+
 > 🔑 **Read Hermes' key from `data/.env`, not from its compose `.env`.** Hermes *generates its own* key in its own secrets file, and that file wins. The compose one returns 401. This project already made that mistake once inside Hermes' own deploy.sh; `deploy.sh` here reads the right file and tells you which one it used.
 
-> ⚠️ **Endpoints and credentials are verified; the protocol handshake is not.** Whether these versions of Hermes and OpenClaw speak what Paperclip's gateway adapters expect has not been exercised end to end. Paperclip documents no configuration schema for these two adapters at all — the fields come from the form in the UI.
+**Two separate checks, on purpose.** `deploy.sh` first proves the port answers from inside `paperclip-app`, then — separately — proves the key is *accepted* (`GET /v1/models` → 200). A single request that proves "running and routable and authenticated" cannot tell you which of the three failed; this project learned that inside Hermes' own deploy script.
+
+### Connecting it, step by step
+
+Agent → **Configuration** → **Adapter** → adapter type **Hermes Gateway**. Paperclip publishes no schema for this adapter anywhere, so these field names come from the running UI:
+
+| Field | Value |
+|---|---|
+| **API base URL** | `http://hermes:8642` |
+| **API key** | from `~/docker/hermes/data/.env` |
+| **Paperclip API URL** | `http://paperclip-app:3100` — see below |
+| Session key strategy | `Issue scoped` is a sensible default |
+| Timeout seconds | `0` (no limit) |
+| Event reconnect ms | `2000` |
+| **Dangerously allow remote HTTP** | must be **on** — see below |
+
+Then press **Test**, and run one trivial task before trusting it with anything real.
+
+**Verified end to end on 2026-08-19:** `POST /v1/runs` to `http://hermes:8642/v1/runs`, run created, streamed `message.delta` events back, `run.completed`. The handshake works.
+
+### The callback field — use the container name
+
+**Paperclip API URL** is how Hermes calls *back*. The obvious value is your server's IP and published port, and it works — but it makes the integration depend on a host port being published, and sends container-to-container traffic out through the host's network stack and back.
+
+Both containers are on `ai-net`, so prefer:
+
+```
+http://paperclip-app:3100
+```
+
+That keeps the round trip inside the Docker network and works even when no host port is published at all. Confirm the route before switching:
+
+```bash
+docker exec hermes node -e "fetch('http://paperclip-app:3100').then(r=>console.log(r.status)).catch(e=>console.log('FAIL',e.message))"
+```
+
+### The HTTP escape hatch — what the warning actually means
+
+Paperclip refuses plain HTTP to a non-loopback gateway unless you enable **Dangerously allow remote HTTP**, and warns:
+
+> *Unsafe dev escape hatch enabled for non-loopback HTTP Hermes traffic. Use HTTPS before using this gateway for real credentials.*
+
+That warning is correct in general and **overstated for this topology** — but not empty. The honest reading:
+
+- The traffic is `paperclip-app → hermes:8642` across `ai-net`, a private Docker bridge. It never touches your LAN or the internet, so there is no network path for an outside listener.
+- What it *is* exposed to: **another container on `ai-net`**. A container holding `NET_RAW` can attempt to intercept traffic on a shared bridge, and the Hermes API key travels in that request. Paperclip's own container drops `NET_RAW` — the other members of `ai-net` are not all so restricted.
+
+So: acceptable on a host where you control everything on `ai-net`, which is the normal DockHub case. **Not** acceptable if you ever put a container you do not trust on that network. There is no HTTPS option here without putting a TLS terminator in front of Hermes, which DockHub does not currently do.
 
 **Where they execute matters.** Paperclip runs these harnesses as **processes inside the app container** — not in containers of their own, and not through the Docker socket. That is why this deployment needs no socket at all.
 

@@ -336,9 +336,13 @@ else
     echo "  it instead of a cloud key — Paperclip is already on that network."
 fi
 echo
-print_warn "The 'Connect a model' screen lists nine adapters; this image contains four"
-print_warn "(Claude Code, Codex, Gemini CLI, OpenCode). Cursor, Grok Build and Pi are"
-print_warn "offered but have no CLI behind them here and will fail. See the README."
+print_warn "Two separate gates decide which adapters you can actually use, and the"
+print_warn "dropdown shows neither clearly:"
+print_warn "  works here  — Claude Code, Codex, Gemini CLI, OpenCode, Hermes GATEWAY"
+print_warn "  no CLI here — Cursor, Cursor Cloud, Grok Build, Pi, and plain 'Hermes'"
+print_warn "                (which is NOT the same entry as 'Hermes Gateway')"
+print_warn "  coming soon — OpenClaw Gateway, Process, HTTP (greyed out, unselectable)"
+print_warn "See the README. 'Process' is fully documented upstream and still not shipped."
 
 # ── The two gateway adapters, and DockHub's own agents ──────────────────
 # hermes_gateway and openclaw_gateway do not spawn a CLI — they drive an
@@ -383,9 +387,49 @@ if docker ps --format '{{.Names}}' | grep -qx hermes; then
         _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/.env")"
         _hsrc="$HOME/docker/hermes/.env (first boot — Hermes has not written its own yet)"
     fi
-    echo "    Adapter  : Hermes"
-    echo "    URL      : $_HERMES_URL"
-    echo "    Key from : $_hsrc"
+    # ── Second probe: does the KEY work? ─────────────────────────────────
+    # Separate from the reachability probe above, deliberately. One request
+    # that proves "running AND routable AND authenticated" cannot tell you
+    # which of the three failed — the exact lesson a live run taught this
+    # project inside Hermes' own deploy.sh. Reachability is liveness; this
+    # is credentials; they get their own verdicts.
+    #
+    # The key travels as an env var, not on the command line, so it does not
+    # sit in the host's process list while the check runs.
+    if [[ -n "$_hk" ]]; then
+        _auth_rc=0
+        docker exec -e HK="$_hk" paperclip-app node -e "
+            fetch('$_HERMES_URL/v1/models', { headers: { Authorization: 'Bearer ' + process.env.HK } })
+              .then(r => process.exit(r.status === 200 ? 0 : r.status === 401 ? 2 : 3))
+              .catch(() => process.exit(1));
+        " >/dev/null 2>&1 || _auth_rc=$?
+        case "$_auth_rc" in
+            0) print_info "That key is ACCEPTED by Hermes (GET /v1/models → 200)." ;;
+            2) print_warn "Hermes REJECTED that key (401). You are reading the wrong file —"
+               print_warn "Hermes generates its own key in data/.env and that one wins." ;;
+            1) print_warn "Could not reach $_HERMES_URL/v1/models to test the key." ;;
+            *) print_warn "Hermes answered, but not 200 or 401. Check: docker logs hermes" ;;
+        esac
+    else
+        print_warn "No API_SERVER_KEY found in either Hermes .env file — cannot test it."
+    fi
+    # Field names below are from the running UI, not from documentation —
+    # Paperclip publishes no schema for this adapter anywhere. Verified end
+    # to end on 2026-08-19: run created, events streamed, run.completed.
+    echo "    Adapter type              : Hermes Gateway"
+    echo "    API base URL              : $_HERMES_URL"
+    echo "    API key                   : from $_hsrc"
+    echo "    Paperclip API URL         : http://paperclip-app:$CONTAINER_PORT"
+    echo "    Dangerously allow rem HTTP: ON  (required — see below)"
+    echo
+    echo "  Use the CONTAINER NAME for the callback, not <server-ip>:$CONTAINER_PORT."
+    echo "  Both are on ai-net, so it keeps the round trip inside Docker and works"
+    echo "  even with no host port published at all."
+    echo
+    print_warn "Paperclip will warn that allowing plain HTTP is an 'unsafe dev escape"
+    print_warn "hatch'. Correct in general, overstated here: the traffic never leaves"
+    print_warn "ai-net. But the Hermes key does cross a shared bridge, so do not put a"
+    print_warn "container you distrust on ai-net. See this service's README."
 fi
 
 if docker ps --format '{{.Names}}' | grep -qx openclaw; then
@@ -396,16 +440,19 @@ if docker ps --format '{{.Names}}' | grep -qx openclaw; then
     else
         print_warn "OpenClaw is running but Paperclip cannot reach $_OPENCLAW_URL — check both are on ai-net."
     fi
-    echo "    Adapter  : OpenClaw"
+    print_warn "But the 'OpenClaw Gateway' adapter is marked COMING SOON in Paperclip's"
+    print_warn "adapter list and cannot be selected yet. The route above is confirmed"
+    print_warn "working, so it is ready the day the adapter ships — nothing to do now."
+    echo "    Adapter  : OpenClaw Gateway  (not selectable yet)"
     echo "    URL      : $_OPENCLAW_URL"
     echo "    Token in : $HOME/docker/openclaw/.env  (OPENCLAW_GATEWAY_TOKEN)"
 fi
 
 if (( _found_agent )); then
     echo
-    echo "  Enter those in the adapter's form on the 'Connect a model' screen."
-    print_warn "Not yet exercised end to end. The addresses and credentials above are"
-    print_warn "verified; whether these Hermes/OpenClaw versions speak the protocol"
-    print_warn "Paperclip's gateway adapters expect has NOT been proven. Report back."
+    echo "  Enter those under: Agent → Configuration → Adapter."
+    echo
+    print_info "The Hermes route is proven end to end (2026-08-19): run created,"
+    print_info "events streamed back, run.completed. OpenClaw is not yet exercised."
 fi
 print_tunnel_reminder_if_relevant

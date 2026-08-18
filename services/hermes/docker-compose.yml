@@ -1,0 +1,183 @@
+# Hermes Agent — the second AGENT in DockHub.
+#
+# Nous Research's self-improving agent: persistent memory, skills it writes
+# for itself, cron jobs, and messaging channels (Telegram, Discord, Slack,
+# WhatsApp, Signal, email). Like OpenClaw it works FOR you; unlike OpenClaw
+# its natural interface is outbound messaging rather than a dashboard.
+#
+# Read services/AI-Agents/README.md first — the threat model for this whole
+# category lives there, and the questions deploy.sh asks come from it.
+#
+# ── WHY THIS FILE LOOKS DIFFERENT FROM openclaw's ───────────────────────
+# OpenClaw needed five separate discoveries before it would run, because it
+# assumes a human at a terminal on localhost. Hermes documents the same
+# constraints UP FRONT, so they are met here by construction rather than by
+# a script reacting to crash logs. Each block below says which.
+#
+# ── 1. THE CONTAINER USER IS uid 10000 ──────────────────────────────────
+# Upstream: "runs supervised processes as the non-root `hermes` user (UID
+# 10000 by default)". The data directory is a BIND MOUNT owned by you, so
+# without intervention the agent cannot write to its own state at all.
+#
+# This is not a hypothetical. OpenClaw got away with bind mounts only
+# because its image runs as `node` (uid 1000) and a first Ubuntu login
+# account is also 1000 — a coincidence. Here the numbers cannot coincide.
+#
+# PUID/PGID are upstream's supported answer and deploy.sh fills them from
+# `id -u` / `id -g`. Note upstream also suggests `chmod -R 755 ~/.hermes`;
+# this repo deliberately does NOT, because that directory holds .env with
+# your model and messaging API keys. Matching the uid solves it without
+# widening permissions.
+#
+# ── 2. AUTH IS MANDATORY, AND IT FAILS CLOSED ───────────────────────────
+# Two independent gates, both documented by upstream:
+#
+#   API server  — API_SERVER_KEY is required whenever the API server is
+#                 enabled. Upstream is explicit that there is no exception
+#                 for loopback.
+#   Dashboard   — the auth gate engages whenever the bind host is not
+#                 loopback, which inside a container it never is. Upstream:
+#                 "a misconfigured gated dashboard never starts", and
+#                 HERMES_DASHBOARD_INSECURE=1 is a deprecated no-op.
+#
+# Good design, and the opposite of the providers in services/AI/, which
+# have no authentication at all. deploy.sh generates both credentials and
+# writes them to a 600 secrets file.
+#
+# ── 3. NO SECURE-CONTEXT REQUIREMENT ────────────────────────────────────
+# Worth stating because the previous agent in this category taught us to
+# expect it: OpenClaw's control UI derives a device identity with Web
+# Crypto, so browsers refuse it over plain http from another machine and an
+# SSH tunnel is mandatory. Hermes has no such requirement — plain HTTP on
+# the LAN works, and the constraint is authentication instead. A tunnel is
+# still the more private option, but here it is a choice, not a workaround.
+#
+# ── 4. THE MODEL IS A FILE, NOT A WIZARD ────────────────────────────────
+# config.yaml under /opt/data holds provider / model / base_url / api_key,
+# so deploy.sh writes it directly and the interactive `setup` wizard is not
+# on the critical path. That is the whole difference from OpenClaw, where
+# onboarding could not be scripted and five manual steps followed a deploy.
+#
+# Upstream's docs get the container address RIGHT, unlike OpenClaw's: they
+# say to use the container name for an inference server on the same Docker
+# network. deploy.sh takes it from detect_ai_provider() either way.
+#
+# ── 5. THE SOCKET IS HALF A DECISION ────────────────────────────────────
+# Mounting /var/run/docker.sock is optional and off by default. What is NOT
+# obvious is that saying yes leaves a second choice unmade, and its default
+# is the weak one:
+#
+#   agent runs a command
+#     └─ inside THIS container          (terminal.backend: local — default)
+#          └─ which now holds the socket
+#               └─ docker run --privileged -v /:/host …
+#                    └─ root on the host
+#
+# Hermes says so itself on every start, recommending terminal.backend:
+# docker, which runs each tool call in a hardened throwaway container —
+# all capabilities dropped bar DAC_OVERRIDE/CHOWN/FOWNER, no-new-privileges,
+# a 256-process cap, nosuid tmpfs for /tmp and /var/tmp.
+#
+# That setting lives in config.yaml, not here, so deploy.sh asks a follow-up
+# question and writes it with `hermes config set`. HERMES_SANDBOX in .env is
+# only DockHub's record of your answer — the container never reads it, which
+# is why you will not find it in the environment block below.
+#
+# Nothing else needs setting. That was an open question here for a while —
+# upstream shows `terminal.docker_image` in an example without naming a
+# default — and a live deployment answered it:
+#
+#   docker_image:         nikolaik/python-nodejs:python3.11-nodejs20
+#   docker_volumes:       []        <- so the sandbox gets NO Docker socket
+#   container_memory:     5120      <- 5 GB, on a host also running a model
+#   container_persistent: true      <- one reused container, not one per call
+#
+# The empty volume list is the load-bearing line: it is what makes moving
+# the agent's shell into a sandbox mean anything, and it is now verified
+# rather than reasoned. Inspect any deployment with:
+#   docker exec -it hermes hermes config get terminal
+#
+# ── PORTS ───────────────────────────────────────────────────────────────
+#   8642  OpenAI-compatible API server  (API_SERVER_*)
+#   9119  web dashboard                 (HERMES_DASHBOARD=1)
+# Neither collides with anything else in the catalogue.
+#
+# This is a single-instance service, under ~/docker/hermes/.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it
+# (and the generated .env) to ~/docker/hermes/ and runs it from there.
+
+services:
+  hermes:
+    image: nousresearch/hermes-agent:${HERMES_TAG:-latest}
+    container_name: hermes
+    restart: unless-stopped
+    # ── Hardening, measured on a real container rather than copied ───────
+    # From the OpenSandbox trial (2026-08-17). Its config drops nine
+    # capabilities; decoding the CapEff it actually produced showed six of
+    # them were never in Docker's default grant. These three are the whole
+    # real difference — 11 capabilities instead of Docker's 14.
+    #   MKNOD        create device nodes
+    #   NET_RAW      raw sockets: ARP and DNS spoofing against ai-net
+    #   AUDIT_WRITE  write to the kernel audit log
+    # Hermes talks to WhatsApp and Slack over ordinary TCP and needs none
+    # of them. no-new-privileges stops a setuid binary regaining what was
+    # dropped; pids_limit turns a fork bomb into one dead container.
+    # Verify rather than believe:
+    #   docker exec hermes grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
+    # `gateway run` is the daemon form. Without it the image would land in
+    # its interactive CLI, which is not what a restart-policy service wants.
+    command: gateway run
+    environment:
+      # ── Identity of the process that writes to the bind mount ─────────
+      # See block 1 above. Empty here would mean uid 10000 against a
+      # directory owned by you.
+      PUID: ${PUID}
+      PGID: ${PGID}
+
+      # ── The OpenAI-compatible API server ──────────────────────────────
+      # 0.0.0.0 so other containers on ai-net can reach it; the key is what
+      # makes that safe, and upstream requires it regardless of bind.
+      API_SERVER_ENABLED: "true"
+      API_SERVER_HOST: "0.0.0.0"
+      API_SERVER_PORT: "8642"
+      API_SERVER_KEY: ${API_SERVER_KEY}
+
+      # ── The dashboard ─────────────────────────────────────────────────
+      # Supervised only when this is 1. Username/password is the bundled
+      # provider that suits a self-hosted box; the alternatives are OAuth
+      # through Nous Portal or your own OIDC issuer, both of which need
+      # infrastructure this repo does not assume.
+      #
+      # PASSWORD is the plaintext variable on purpose: upstream hashes it
+      # in memory at load and it takes precedence over PASSWORD_HASH, so
+      # the hash form would mean running a python one-liner inside the
+      # image to gain nothing. The value lives in a 600 .env either way.
+      HERMES_DASHBOARD: ${HERMES_DASHBOARD:-0}
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${HERMES_DASHBOARD_BASIC_AUTH_USERNAME:-}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${HERMES_DASHBOARD_BASIC_AUTH_PASSWORD:-}
+      # Signs session tokens. Left unset, a fresh key is generated per
+      # process and every login is invalidated on restart.
+      HERMES_DASHBOARD_BASIC_AUTH_SECRET: ${HERMES_DASHBOARD_BASIC_AUTH_SECRET:-}
+
+    volumes:
+      # Everything the agent owns: config.yaml, .env, SOUL.md, sessions,
+      # memories, skills, logs. A bind mount rather than a named volume so
+      # you can read the agent's memory and skills directly — and because
+      # backup/restore for this service is capturing real user data, not
+      # re-downloadable weights.
+      - ./data:/opt/data
+
+    networks:
+      - ai-net
+
+networks:
+  ai-net:
+    external: true
