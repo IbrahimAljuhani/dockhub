@@ -293,9 +293,7 @@ That produced a few habits worth knowing about as a reader:
 
 ## 📌 Status
 
-**38 of 41 services are built.** The remaining three are all in [Multi-Agent](services/Multi-Agent/) — Dify, Flowise and Langflow.
-
-> ⚠️ **Paperclip is the exception to "live-tested".** Every other service in this catalogue was deployed on a real server before it was documented. Paperclip was built on 2026-08-18 against upstream's own compose files and a registry check, and has **not been run yet** — see its [known unknowns](services/Multi-Agent/paperclip/README.md#-known-unknowns). This line will say otherwise once it has.
+**38 of 41 services are built and live-tested.** The remaining three are all in [Multi-Agent](services/Multi-Agent/) — Dify, Flowise and Langflow.
 
 Categories, conventions and the shared library (`lib/`) are stable. Service scripts are added one at a time, each verified on real hardware before it lands.
 

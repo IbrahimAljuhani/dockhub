@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"
+     role="img" aria-label="Paperclip (unofficial icon)">
+  <title>Paperclip — unofficial icon drawn for DockHub</title>
+
+  <!--
+    NOT AN OFFICIAL MARK.
+
+    Paperclip (github.com/paperclipai/paperclip) publishes no logo or brand
+    asset of its own; checked on 2026-08-18. This icon was drawn for DockHub's
+    catalogue so the entry is not blank, and it is our work, not theirs. It
+    carries no endorsement and must never be presented as the project's
+    official mark. If upstream ever publishes one, this file should be
+    deleted rather than kept alongside it.
+
+    See assets/services/README.md for the policy this follows.
+
+    The subject is a paper clip: an ordinary office object, drawn from
+    scratch here, and deliberately not a trace of anyone's artwork.
+
+    Colours follow DockHub's own palette so the catalogue reads as one set.
+    Same two-level var() as the lockup: the page's token if one is inherited,
+    this file's own if not. The fallbacks use DIFFERENT names on purpose, so
+    that inlining this never overrides the palette of the page it lands in.
+  -->
+  <style>
+    svg{ --ic-signal:#F0714A; --ic-dim:#748A8D }
+    @media (prefers-color-scheme: light){
+      svg{ --ic-signal:#BF3F1B; --ic-dim:#5A6B6C }
+    }
+    .clip{
+      fill:none;
+      stroke:var(--signal, var(--ic-signal));
+      stroke-width:7; stroke-linecap:round; stroke-linejoin:round;
+    }
+    .held{ fill:var(--text-faint, var(--ic-dim)) }
+  </style>
+
+  <!-- Offsets measured, not guessed. The wire's inked extent is its geometry
+       plus half the 7-unit stroke on every side, which getBBox does not
+       include — so centring on the bbox alone leaves the icon visibly off.
+       With this translate the ink sits at x 32.5-67.5, y 11.5-88.5: centred
+       on 50 both ways. -->
+  <g transform="translate(6 -5)">
+    <!-- One continuous wire, the way a real clip is one continuous wire:
+         up the left, over the top on a 10-radius turn, down the right, under
+         the bottom on a wider 14-radius turn, then back up the inside and
+         stopping short. The two different radii are what stop it reading as
+         a flat racetrack. -->
+    <path class="clip" d="M 38 74 V 30 a 10 10 0 0 1 20 0 V 76 a 14 14 0 0 1 -28 0 V 34"/>
+
+    <!-- Three agents, held. Paperclip's whole job is holding a team of them
+         together, so the icon says that rather than only naming the object.
+         They sit in the clear channel between the two inner rails: the rails
+         ink x 34.5-41.5 and 54.5-61.5, these span 44.6-51.4, so nothing
+         touches at any size.
+
+         Honest limitation: below roughly 24px these merge into the wire and
+         the icon turns muddy. Nothing here prevents that — a stylesheet
+         cannot know its own rendered size. If a micro tier is ever needed,
+         copy this file, delete these three circles, and the clip alone
+         still reads. That is a decision for whoever needs it, not a
+         behaviour to claim in a comment. -->
+
+    <circle class="held" cx="48" cy="44" r="3.4"/>
+    <circle class="held" cx="48" cy="55" r="3.4"/>
+    <circle class="held" cx="48" cy="66" r="3.4"/>
+  </g>
+</svg>
