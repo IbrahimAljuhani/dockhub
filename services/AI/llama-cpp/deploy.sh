@@ -270,6 +270,8 @@ prepare_model_dir "$ENV_MODELS_PATH" "ghcr.io/ggml-org/llama.cpp:$ENV_TAG" \
     || print_error "Fix the permissions above and rerun."
 print_info "Models: $ENV_MODELS_PATH"
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting llama.cpp — first run downloads the model, which takes a while..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start llama.cpp. Check log: $LOGFILE"

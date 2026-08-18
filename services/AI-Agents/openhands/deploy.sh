@@ -304,7 +304,7 @@ fi
 # by OpenHands at first session otherwise, which looks like a hang inside
 # the web UI where there is no progress bar to watch.
 print_info "Pulling the app image..."
-(cd "$INSTALL_DIR" && $COMPOSE_CMD pull 2>&1 | tee -a "$LOGFILE") \
+pull_with_progress "$INSTALL_DIR" \
     || print_warn "Pull failed — the start below will report the real error."
 
 print_info "Pulling the session runtime image ($ENV_RUNTIME_TAG)..."

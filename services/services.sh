@@ -35,6 +35,19 @@ fi
 # shellcheck source=/dev/null
 source "$LIB_COMMON"
 
+# The masthead and menu colours, guarded. Four `dockhub_*` functions and some
+# `_BN_*` colour variables; no side effects on anything above —
+# see the header of lib/banner.sh for why it is a separate file. A standalone
+# curl run without the repo beside it simply gets no banner.
+if [[ -f "$SCRIPT_DIR/../lib/banner.sh" ]]; then
+    # shellcheck source=../lib/banner.sh
+    source "$SCRIPT_DIR/../lib/banner.sh"
+fi
+declare -F dockhub_banner >/dev/null || dockhub_banner() { :; }
+# Not no-ops: a missing banner is cosmetic, a missing menu is the script.
+declare -F dockhub_ask  >/dev/null || dockhub_ask()  { printf '\n%s\n' "$1"; }
+declare -F dockhub_item >/dev/null || dockhub_item() { printf '[ %s ] %s\n' "$1" "$2"; }
+
 # Extra files (besides deploy.sh) each service needs — keep this in sync with
 # that service's own README.md "Installation" curl commands.
 declare -A SERVICE_FILES=(
@@ -228,8 +241,8 @@ prompt_choice() {
     # prompts in the service deploy.sh files: keeps the prompt on the real
     # terminal instead of a captured subshell).
     local count="$1" label="${2:-Exit}" choice
-    echo "  0) $label"
-    read -rp "Choice (0-$count): " choice || { CHOSEN_INDEX="0"; return 0; }
+    dockhub_item 0 "$label" "$count"
+    read -rp "Choice [ 0-$count ]: " choice || { CHOSEN_INDEX="0"; return 0; }
     if [[ "$choice" == "0" ]]; then
         CHOSEN_INDEX="0"
         return 0
@@ -375,10 +388,10 @@ restore_menu() {
             print_warn "No backups found for '$name'."
             return
         fi
-        echo "Instances with backups:"
+        dockhub_ask "Instances with backups:"
         local i=1 d
         for d in "${scope_dirs[@]}"; do
-            echo "  $i) $(basename "$d")"
+            dockhub_item "$i" "$(basename "$d")" "${#scope_dirs[@]}"
             i=$((i + 1))
         done
         prompt_choice "${#scope_dirs[@]}" "Back" || return
@@ -393,10 +406,10 @@ restore_menu() {
         return
     fi
 
-    echo "Available backups (newest first):"
+    dockhub_ask "Available backups (newest first):"
     local i=1 f
     for f in "${archives[@]}"; do
-        echo "  $i) $(basename "$f" .tar.gz)"
+        dockhub_item "$i" "$(basename "$f" .tar.gz)" "${#archives[@]}"
         i=$((i + 1))
     done
     prompt_choice "${#archives[@]}" "Back" || return
@@ -470,10 +483,10 @@ pick_instance() {
         INSTANCE_PATH="${instances[0]}"
         return 0
     fi
-    echo "Multiple instances found:"
+    dockhub_ask "Multiple instances found:"
     local i=1 inst
     for inst in "${instances[@]}"; do
-        echo "  $i) $(basename "$inst")"
+        dockhub_item "$i" "$(basename "$inst")" "${#instances[@]}"
         i=$((i + 1))
     done
     if ! prompt_choice "${#instances[@]}" "Back"; then
@@ -494,6 +507,10 @@ service_menu() {
     # (e.g. a stale value from a previous call to this function).
     local name="$1" category="$2"
     local svc_runtime_dir="$HOME/docker/$name"
+    # The last clean screen of the descent. Everything from here on produces
+    # output worth keeping — deploy logs, removal receipts, backup paths —
+    # so the menu redraws underneath it rather than over it.
+    dockhub_banner "$category · $name"
     while true; do
         local -a instances=()
         while IFS= read -r line; do
@@ -508,11 +525,12 @@ service_menu() {
         else
             echo "'$name' is not deployed yet."
         fi
-        echo "1) Deploy / manage (runs deploy.sh — safe for new or existing deployments)"
-        echo "2) Remove"
-        echo "3) Reinstall (remove, then deploy fresh)"
-        echo "4) Backup"
-        echo "5) Restore from backup"
+        dockhub_ask "What would you like to do?"
+        dockhub_item 1 "Deploy / manage (runs deploy.sh — safe for new or existing deployments)"
+        dockhub_item 2 "Remove"
+        dockhub_item 3 "Reinstall (remove, then deploy fresh)"
+        dockhub_item 4 "Backup"
+        dockhub_item 5 "Restore from backup"
         local choice
         if ! prompt_choice 5 "Back"; then
             continue
@@ -551,6 +569,9 @@ service_menu() {
 # in this same category list.
 category_menu() {
     local category="$1"
+    # Descending a level: a new step, so a clean screen. See main_menu above
+    # for why this is not repeated on the loop.
+    dockhub_banner "$category"
     while true; do
         local -a slugs=() names=() marks=()
         local entry cat slug name
@@ -566,11 +587,10 @@ category_menu() {
             fi
         done
 
-        echo
-        echo "$category:"
+        dockhub_ask "$category:"
         local i
         for ((i = 1; i <= ${#names[@]}; i++)); do
-            echo "  $i) ${names[$((i - 1))]}${marks[$((i - 1))]}"
+            dockhub_item "$i" "${names[$((i - 1))]}${marks[$((i - 1))]}" "${#names[@]}"
         done
         prompt_choice "${#names[@]}" "Back" || continue
         [[ "$CHOSEN_INDEX" == "0" ]] && return
@@ -600,12 +620,20 @@ main_menu() {
         [[ "$already_listed" == false ]] && categories+=("$cat")
     done
 
+    # ── Where the screen is cleared, and where it is not ────────────────
+    # Clearing happens on the way DOWN — entering a menu is a new step and
+    # earns a clean screen. It never happens on the way back up, because by
+    # then the screen holds output the operator has not finished with: a
+    # deploy summary with its URLs, a removal receipt naming wiped data, a
+    # warning. "Clear at every choice" is close, but returning from a deploy
+    # is a choice too, and wiping that would cost more than the tidiness is
+    # worth. Same reason "Invalid choice." survives.
+    dockhub_banner "services"
     while true; do
-        echo
-        echo "Categories:"
+        dockhub_ask "Categories:"
         local i
         for ((i = 1; i <= ${#categories[@]}; i++)); do
-            echo "  $i) ${categories[$((i - 1))]}"
+            dockhub_item "$i" "${categories[$((i - 1))]}" "${#categories[@]}"
         done
         prompt_choice "${#categories[@]}" "Exit" || continue
         [[ "$CHOSEN_INDEX" == "0" ]] && exit 0

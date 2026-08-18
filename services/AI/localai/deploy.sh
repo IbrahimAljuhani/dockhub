@@ -206,6 +206,8 @@ prepare_model_dir "$ENV_MODELS_PATH/backends" "localai/localai:$ENV_TAG" \
 print_info "Models:   $ENV_MODELS_PATH/models"
 print_info "Backends: $ENV_MODELS_PATH/backends  ← keeping these is what makes a redeploy fast"
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting LocalAI..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start LocalAI. Check log: $LOGFILE"

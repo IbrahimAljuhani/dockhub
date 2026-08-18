@@ -269,7 +269,7 @@ fi
 # "Setting gateway.mode" with nothing to watch. Every live test so far had
 # the image cached from an earlier run, so this never showed.
 print_info "Pulling the image (first run downloads it; the browser variant is large)..."
-(cd "$INSTALL_DIR" && $COMPOSE_CMD pull 2>&1 | tee -a "$LOGFILE") \
+pull_with_progress "$INSTALL_DIR" \
     || print_warn "Pull failed here — the steps below will try again."
 
 print_info "Setting gateway.mode=local in the config..."

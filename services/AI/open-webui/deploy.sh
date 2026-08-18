@@ -216,6 +216,8 @@ fi
 [[ -n "$ENV_MEM_LIMIT" ]] && print_info "Memory limit $ENV_MEM_LIMIT applied to the 'open-webui' container."
 [[ -n "$ENV_HOST_PORT" ]] && print_info "Host port $ENV_HOST_PORT published for direct access."
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Open WebUI (first run initialises its database)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Open WebUI. Check log: $LOGFILE"

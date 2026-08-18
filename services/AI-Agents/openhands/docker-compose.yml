@@ -122,6 +122,35 @@ services:
     image: docker.openhands.dev/openhands/openhands:${OPENHANDS_TAG:-1.8}
     container_name: openhands
     restart: unless-stopped
+    # ── Hardening, measured on a real container rather than copied ───────
+    # From the OpenSandbox trial (2026-08-17). Its config drops nine
+    # capabilities; decoding the CapEff it actually produced showed six of
+    # them were never in Docker's default grant. These three are the whole
+    # real difference — 11 capabilities instead of Docker's 14.
+    #
+    # ⚠️ AND HERE IT BUYS LESS THAN IT LOOKS. This container mounts
+    # /var/run/docker.sock (see the volumes block below). Anything that can
+    # talk to that socket can ask the daemon to start a NEW container that
+    # is privileged and mounts the host filesystem — and that new container
+    # inherits none of the limits set here. Dropping capabilities from the
+    # process that holds the key does not lock the door.
+    #
+    # What it does buy: a flaw that yields code execution *inside this
+    # container* without reaching the socket now gets a smaller toolkit,
+    # and a runaway process cannot exhaust host PIDs. That is worth having.
+    # It is not containment, and this file will not pretend otherwise.
+    #
+    # The session runtimes OpenHands starts are created through the socket,
+    # not by this file, so they are NOT covered by these settings at all.
+    # Verify rather than believe:
+    #   docker exec openhands grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
     environment:
       # Which runtime image sessions get. Repository and tag are separate
       # variables upstream, so they stay separate here.

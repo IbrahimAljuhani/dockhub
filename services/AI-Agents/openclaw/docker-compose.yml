@@ -46,6 +46,27 @@ services:
     image: ghcr.io/openclaw/openclaw:${OPENCLAW_TAG:-latest}
     container_name: openclaw
     restart: unless-stopped
+    # ── Hardening, measured on a real container rather than copied ───────
+    # From the OpenSandbox trial (2026-08-17). Its config drops nine
+    # capabilities, which looks impressive until you decode the CapEff it
+    # actually produced: six of the nine were never in Docker's default
+    # grant. These three are the entire real difference — 11 capabilities
+    # instead of Docker's 14.
+    #   MKNOD        create device nodes
+    #   NET_RAW      raw sockets: ARP and DNS spoofing against ai-net
+    #   AUDIT_WRITE  write to the kernel audit log
+    # An agent needs none of them. no-new-privileges stops a setuid binary
+    # inside from regaining what was dropped; pids_limit turns a fork bomb
+    # into one dead container instead of a dead host.
+    # Verify rather than believe:
+    #   docker exec openclaw grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
     # /readyz is unauthenticated by design, so `docker ps` can show real
     # health rather than just "Up". start_period is generous because the
     # gateway loads plugins before it answers — on the browser variant that

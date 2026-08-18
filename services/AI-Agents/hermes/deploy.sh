@@ -219,6 +219,15 @@ else
         else
             HERMES_SANDBOX_VALUE=1
             print_info "Sandbox enabled. deploy.sh will set terminal.backend=docker."
+            # The cost of the thing we just recommended, stated at the moment
+            # of the recommendation rather than left for the operator to find
+            # in a startup warning. Observed on a live run: Hermes warns that
+            # with the docker backend and no host-visible output mount, MEDIA
+            # delivery can fail for container-local paths like /output/…
+            print_warn "  The trade: the agent's shell is now in a separate container, so"
+            print_warn "  files it writes to paths like /output or /workspace are not"
+            print_warn "  visible to this host. Text answers are unaffected; sending you"
+            print_warn "  a generated FILE can fail. Hermes says so on every start."
         fi
     else
         HERMES_SOCK_VALUE=0
@@ -707,7 +716,10 @@ print_info "Running as uid $(id -u):$(id -g) inside the container (PUID/PGID)."
 # a multi-hundred-megabyte download under a message about something else
 # reads as a hang.
 print_info "Pulling the image (first run downloads it)..."
-(cd "$INSTALL_DIR" && $COMPOSE_CMD pull 2>&1 | tee -a "$LOGFILE") \
+# One line that changes, instead of the ~400 that a live run of this very
+# service produced. The full output still goes to $LOGFILE, and is printed
+# in full if the pull fails. DOCKHUB_VERBOSE=1 restores the old wall.
+pull_with_progress "$INSTALL_DIR" \
     || print_warn "Pull failed — the start below will report the real error."
 
 # ── The sandbox setting, written with Hermes' own CLI ───────────────────
@@ -761,24 +773,79 @@ SANDBOX_STATE="off"
 # prove something is listening. Sending the key proves three things at once:
 # the server is up, the key is right, and config.yaml parsed. That is worth
 # more here than closing a window onto a secret its holder already has.
+# ── Whose key is it, actually ───────────────────────────────────────────
+# Hermes keeps its own secrets file at data/.env — `hermes config show`
+# prints the path — and it GENERATES its own API_SERVER_KEY there. Once
+# that file exists, its value wins over the environment this compose file
+# passes in. Measured on a live server: our key and its key were both
+# 64 hex characters and completely different, and every request carrying
+# ours came back 401 while messaging kept working.
+#
+# So the key we generate is a seed for the first boot, not the key. Read
+# the effective one rather than keep announcing ours. Writing over its
+# file was the other option and is the wrong one: this script already
+# tells you data/ is the agent's own, and a rule that holds only until it
+# is inconvenient is not a rule.
+HERMES_OWN_ENV="$INSTALL_DIR/data/.env"
+EFFECTIVE_API_KEY="$ENV_API_KEY"
+KEY_SOURCE="the compose .env (first boot — Hermes has not written its own yet)"
+if [[ -f "$HERMES_OWN_ENV" ]]; then
+    HERMES_FILE_KEY=$(read_env_value "API_SERVER_KEY" "$HERMES_OWN_ENV")
+    if [[ -n "$HERMES_FILE_KEY" ]]; then
+        EFFECTIVE_API_KEY="$HERMES_FILE_KEY"
+        KEY_SOURCE="$HERMES_OWN_ENV — Hermes generated this one"
+    fi
+fi
+
+# Keep the file we point you at truthful. It is written once at first
+# deploy, when our key still worked; from the moment Hermes writes its own
+# it becomes a wrong password in a file labelled "credentials".
+if [[ -f "$SECRETS_FILE" && "$EFFECTIVE_API_KEY" != "$ENV_API_KEY" ]]; then
+    sed -i "s|^\(  API key (8642):  \).*|\1$EFFECTIVE_API_KEY|" "$SECRETS_FILE"
+    print_info "Hermes generated its own API key — updated $SECRETS_FILE to match."
+fi
+
 print_info "Waiting for the API to answer..."
+
+# ── Two probes, not one ─────────────────────────────────────────────────
+# This used to send the key and treat any failure as "the service is
+# broken". The comment above defended that: one request proving three
+# things at once. A live run settled it the other way — the gateway was
+# up, config.yaml had parsed, WhatsApp was answering real messages, and
+# the deploy still reported failure and sat for three minutes, because
+# the API key alone was refused.
+#
+# A check that proves three things at once cannot say which one failed.
+# So liveness comes first, WITHOUT credentials, accepting 401 as proof
+# that something is listening and answering. The key is then a separate
+# question with its own answer — a finding, not a verdict on the deploy.
 if docker exec hermes sh -c 'command -v curl' >/dev/null 2>&1; then
-    HERMES_PROBE="curl -fsS -H 'Authorization: Bearer $ENV_API_KEY' http://localhost:8642/v1/models"
     PROBE_TOOL="curl"
+    # Any three-digit status is an answer, 401 included.
+    HERMES_LIVE="curl -sS -o /dev/null -w '%{http_code}' http://localhost:8642/v1/models | grep -qE '^[1-5][0-9][0-9]$'"
+    HERMES_AUTH="curl -fsS -o /dev/null -H 'Authorization: Bearer $EFFECTIVE_API_KEY' http://localhost:8642/v1/models"
 elif docker exec hermes sh -c 'command -v wget' >/dev/null 2>&1; then
-    HERMES_PROBE="wget -q --spider --header='Authorization: Bearer $ENV_API_KEY' http://localhost:8642/v1/models"
     PROBE_TOOL="wget"
+    # wget exits 8 on an HTTP error response — which is still an answer.
+    HERMES_LIVE="wget -q -O /dev/null http://localhost:8642/v1/models; rc=\$?; [ \$rc -eq 0 ] || [ \$rc -eq 8 ]"
+    HERMES_AUTH="wget -q -O /dev/null --header='Authorization: Bearer $EFFECTIVE_API_KEY' http://localhost:8642/v1/models"
 else
-    # urlopen raises HTTPError on 4xx/5xx, so a bad key or an unparsed
-    # config still fails the probe rather than passing silently.
-    HERMES_PROBE="python3 -c \"import urllib.request as u; u.urlopen(u.Request('http://localhost:8642/v1/models', headers={'Authorization':'Bearer $ENV_API_KEY'}), timeout=5)\""
     PROBE_TOOL="python3"
+    # http.client returns the status instead of raising on it, so a 401
+    # is reported rather than thrown — which is the whole point here.
+    HERMES_LIVE="python3 -c \"import http.client as h; c=h.HTTPConnection('localhost',8642,timeout=5); c.request('GET','/v1/models'); c.getresponse()\""
+    HERMES_AUTH="python3 -c \"import urllib.request as u; u.urlopen(u.Request('http://localhost:8642/v1/models', headers={'Authorization':'Bearer $EFFECTIVE_API_KEY'}), timeout=5)\""
 fi
 print_info "  (probing with $PROBE_TOOL — whichever the image ships)"
 
 set +e
-wait_for_container_ready "hermes" "$HERMES_PROBE" 45 4
+wait_for_container_ready "hermes" "$HERMES_LIVE" 20 3
 WAIT_RC=$?
+HERMES_KEY_OK=unknown
+if (( WAIT_RC == 0 )); then
+    docker exec hermes sh -c "$HERMES_AUTH" >/dev/null 2>&1 \
+        && HERMES_KEY_OK=yes || HERMES_KEY_OK=no
+fi
 set -e
 
 if (( WAIT_RC == 1 )); then
@@ -925,11 +992,28 @@ echo "🔑 Credentials:     $SECRETS_FILE"
 echo "📜 Log:             $LOGFILE"
 echo "──────────────────────────────────────────────"
 echo
-if (( WAIT_RC == 0 )); then
-    print_info "Self-test passed — the API answered with its key, so the server is up,"
-    print_info "the key works, and config.yaml parsed."
+if (( WAIT_RC == 0 )) && [[ "$HERMES_KEY_OK" == "yes" ]]; then
+    print_info "Self-test passed — the gateway answered, and it accepted the API key."
+    print_info "  Key in use came from: $KEY_SOURCE"
+    print_info "  Not proven: that the model replies. Send a real message for that."
+elif (( WAIT_RC == 0 )); then
+    # The case a live run produced: gateway up, messaging working, key
+    # refused. Reporting that as a failed deploy was wrong, and reporting
+    # it as success would be worse. It is one named finding.
+    print_info "The gateway is up and answering on 8642."
+    print_warn "But it refused the key read from: $KEY_SOURCE"
+    echo
+    print_info "  What this does NOT break: messaging. WhatsApp, Slack and the rest"
+    print_info "  do not use this key — they were working in the run that found this."
+    print_info "  What it DOES break: anything calling http://hermes:8642/v1 with a"
+    print_info "  bearer token, including other DockHub services."
+    echo
+    print_info "  Hermes keeps its own secrets in $HERMES_OWN_ENV and generates its"
+    print_info "  own API_SERVER_KEY there; that file wins over the compose one."
+    print_info "  Read the key it is actually using with:"
+    print_info "    grep '^API_SERVER_KEY=' $HERMES_OWN_ENV"
 else
-    print_warn "The API did not answer within 3 minutes. Watch it with:"
+    print_warn "The gateway did not answer within a minute. Watch it with:"
     print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD logs -f hermes"
 fi
 

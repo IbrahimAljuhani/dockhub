@@ -93,6 +93,12 @@ This is the strongest layer, and the one most people do not know exists.
 - `nosuid` tmpfs for `/tmp` and `/var/tmp`
 - no volumes mounted by default
 
+**And what it costs, because a layer described only by its strengths is a sales pitch.** With no volumes mounted, files the agent writes to container-local paths — `/output/…`, `/workspace/…` — do not exist anywhere you can reach. Hermes says so on every start:
+
+> *Docker backend is enabled for the messaging gateway but no explicit host-visible output mount … MEDIA file delivery can fail for container-local paths.*
+
+Text answers are unaffected; **sending you a file it generated can fail.** That is the same property that makes the layer worth having, seen from the other side. If you need file delivery, add a mount to Hermes' own terminal volume list (`hermes config get terminal`) and accept that the sandbox now has one door into your filesystem — deliberately, and only that one.
+
 **OpenHands** goes further by architecture: **every session gets its own fresh container**, and the code the agent writes never executes in the app container at all. Isolation is the entire reason it wants the Docker socket. That is a security-*positive* design, and it is why DockHub grants it rather than refusing.
 
 ```bash
@@ -103,7 +109,34 @@ docker exec -it hermes hermes config get terminal
 
 Messaging agents **deny unknown senders by default**. A stranger who finds your bot's number gets nothing; you add yourself to an allowlist explicitly. This is upstream behaviour, and DockHub documents it rather than switching it off — because the failure mode (silence) looks exactly like a broken deploy, and people "fix" it by disabling the protection.
 
-### Layer 6 — Identity and blast radius
+### Layer 6 — Kernel capabilities: a smaller toolkit inside the container
+
+Docker grants every container 14 Linux capabilities by default. All three agents here drop three of them and refuse privilege escalation:
+
+```yaml
+security_opt: [ "no-new-privileges:true" ]
+cap_drop:     [ MKNOD, NET_RAW, AUDIT_WRITE ]
+pids_limit:   4096
+```
+
+| | What it removes | Why an agent does not need it |
+|---|---|---|
+| `MKNOD` | Creating device nodes | Nothing here creates devices |
+| `NET_RAW` | Raw sockets | Removes ARP and DNS spoofing against other containers on `ai-net` |
+| `AUDIT_WRITE` | Writing kernel audit records | Removes a way to pollute the host's audit trail |
+| `no-new-privileges` | — | A setuid binary inside cannot regain what was dropped |
+| `pids_limit` | — | A fork bomb becomes one dead container, not a dead host |
+
+**Where these numbers come from.** They are not copied from a hardening blog. In August 2026 we deployed [OpenSandbox](https://github.com/opensandbox-group/OpenSandbox) — Alibaba's sandbox runtime for AI agents — on a real server and inspected the container it produced. Its configuration drops *nine* capabilities, which reads impressively until you decode the `CapEff` mask it actually yields: `0x800405fb`, which is **11 capabilities where Docker's default is 14**. Six of its nine were never granted in the first place. These three are the entire real difference, so these three are what we adopted.
+
+**Check it on your own host** rather than believing this table:
+
+```bash
+docker exec openclaw grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+docker inspect openclaw --format '{{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}'
+```
+
+### Layer 7 — Identity and blast radius
 
 - Give the agent **its own** API keys and bot tokens, never your primary ones. An agent holding your main key can spend it.
 - Containers run as a non-root user where the image allows it (Hermes: `PUID`/`PGID`, uid 1000 by default here).
@@ -115,7 +148,9 @@ Messaging agents **deny unknown senders by default**. A stranger who finds your 
 
 A threat model that only lists its strengths is marketing. These are the real edges, stated plainly — and knowing them is what makes the layers above worth trusting.
 
-**1. The Docker socket is root-equivalent.** When you enable it, anything that reaches it can start a privileged container. The sandbox layer narrows what the agent's *commands* can do; it does not change what the socket *is*. DockHub does not refuse it — [core infrastructure already installs Portainer with the same socket](../../README.md) — but the difference is who holds the trigger: Portainer is driven by you, an agent by a language model reading untrusted text.
+**1. The Docker socket is root-equivalent, and Layer 6 does not change that.** When you enable it, anything that reaches it can ask the daemon to start a *new* container that is privileged and mounts the host filesystem — and that new container inherits none of the capabilities dropped above. Dropping capabilities from the process that holds the key does not lock the door. Layer 6 buys something real and smaller: a flaw that yields code execution *inside* the agent container without reaching the socket now has a shorter list of things to try. DockHub does not refuse the socket — [core infrastructure can install Portainer with the same one](../../README.md) — but the difference is who holds the trigger: Portainer is driven by you, an agent by a language model reading untrusted text.
+
+> The same applies to the session runtimes OpenHands starts. They are created **through the socket**, not by its compose file, so none of Layer 6 reaches them.
 
 **2. OpenHands has no authentication of its own.** Not a weak login — none. Anyone who reaches its port gets a fully privileged agent. This is why the port is loopback-only and why it must never be published to `0.0.0.0`, whatever a tutorial suggests.
 
