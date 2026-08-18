@@ -173,6 +173,8 @@ proxy_send_timeout 1200s;
 send_timeout 1200s;
 NGINXEOF
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Seafile (first run initialises three databases — this takes a few minutes)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Seafile. Check log: $LOGFILE"

@@ -236,6 +236,8 @@ else
     rm -f "$INSTALL_DIR/docker-compose.override.yml"
 fi
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Taiga (first run can take a few minutes to pull 9 images)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Taiga. Check log: $LOGFILE"

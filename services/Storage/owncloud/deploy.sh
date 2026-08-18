@@ -159,6 +159,8 @@ fi
 [[ -n "$ENV_HOST_PORT" ]] && print_info "Host port $ENV_HOST_PORT published for direct access."
 [[ -n "$ENV_OCIS_DOMAIN" ]] && print_info "Mapped $ENV_OCIS_DOMAIN to host-gateway inside the container, so oCIS can reach its own OIDC endpoint."
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting ownCloud Infinite Scale (first run generates its config and secrets)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start oCIS. Check log: $LOGFILE"

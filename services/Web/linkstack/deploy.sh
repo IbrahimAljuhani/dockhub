@@ -111,6 +111,8 @@ if [[ -n "$MEM_LIMIT" || -n "$HOST_PORT" ]]; then
     } > "$INSTANCE_DIR/docker-compose.override.yml"
 fi
 
+pull_with_progress "$INSTANCE_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting LinkStack instance '$INSTANCE_NAME'..."
 (cd "$INSTANCE_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start LinkStack. Check log: $LOGFILE"

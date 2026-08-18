@@ -186,6 +186,8 @@ else
     rm -f "$INSTALL_DIR/docker-compose.override.yml"
 fi
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting OpenVPN Access Server (first run generates a PKI and can take a couple of minutes)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start OpenVPN Access Server. Check log: $LOGFILE"

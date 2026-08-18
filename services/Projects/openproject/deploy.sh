@@ -153,6 +153,8 @@ location /hocuspocus {
 }
 NGINXEOF
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting OpenProject (first run seeds the database and can take a few minutes)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start OpenProject. Check log: $LOGFILE"

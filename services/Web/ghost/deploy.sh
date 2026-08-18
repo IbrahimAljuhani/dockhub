@@ -135,6 +135,8 @@ cat > "$INSTALL_DIR/npm-custom-nginx.conf" <<'NGINXEOF'
 client_max_body_size 50M;
 NGINXEOF
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Ghost (first run initialises the database — this takes a minute)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Ghost. Check log: $LOGFILE"

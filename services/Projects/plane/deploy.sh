@@ -146,6 +146,8 @@ else
     rm -f "$INSTALL_DIR/docker-compose.override.yml"
 fi
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Plane (first run can take several minutes to pull 13 images and run migrations)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Plane. Check log: $LOGFILE"

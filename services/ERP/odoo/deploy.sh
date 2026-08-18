@@ -453,6 +453,8 @@ location /websocket {
 }
 NGINXEOF
 
+    pull_with_progress "$INSTANCE_DIR" \
+        || print_warn "Pull failed — the start below will report the real error."
     print_step "Starting Odoo instance..."
     (cd "$INSTANCE_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
         || print_error "Failed to start Odoo containers. Check log: $LOGFILE"

@@ -60,11 +60,26 @@ else
     # derived from. Note it does NOT have to match the domain you serve on —
     # docker-compose.yml pins FRAPPE_SITE_NAME_HEADER to this name, so any
     # Host header resolves here (see the summary at the end of this script).
-    echo "Every ERPNext site has a name, and this is it. Use the domain you'll"
-    echo "serve it on: any domain reaches the site either way, but this is what"
-    echo "the links in password-reset and notification emails are built from."
-    echo "A LAN IP is fine too, if you just want to try it without a domain."
-    prompt_domain "Domain or IP for this ERPNext site (e.g. erp.example.com, or this server's LAN IP): " "site domain"
+    # The value is required — Frappe cannot create a nameless site. The
+    # QUESTION is not: this host's own address is right here, and a live run
+    # made the operator type back the same 10.0.0.27 the summary prints four
+    # times. So it is offered as a default, not demanded as an answer.
+    ERP_SITE_DEFAULT=$(hostname -I 2>/dev/null | awk '{print $1}')
+    # Asking for a "name" and then rejecting a name is the script's fault,
+    # not the operator's: a live run typed 'test' — a perfectly valid Frappe
+    # site name — and got a domain-shaped error. Frappe would accept it; we
+    # do not, because this value becomes host_name and 'http://test' is a
+    # link that reaches nothing. So the question now asks for what it will
+    # actually accept.
+    echo "This site needs a domain or an IP — not a bare name. Frappe would take"
+    echo "'test', but the value becomes the address in password-reset and"
+    echo "notification links, and 'http://test' reaches nobody."
+    echo "It need not match the domain you serve on: any domain reaches this site."
+    if [[ -n "$ERP_SITE_DEFAULT" ]]; then
+        prompt_domain "Site domain or IP [$ERP_SITE_DEFAULT]: " "site domain" "$ERP_SITE_DEFAULT"
+    else
+        prompt_domain "Site domain or IP (e.g. erp.example.com): " "site domain"
+    fi
     SITE_NAME_VALUE="$PROMPTED_DOMAIN"
 
     DB_PASSWORD=$(generate_secret 24)
@@ -158,6 +173,8 @@ else
     HOST_NAME_URL="https://$ENV_SITE_NAME"
 fi
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting ERPNext (first run pulls several images — this takes a while)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start ERPNext. Check log: $LOGFILE"
