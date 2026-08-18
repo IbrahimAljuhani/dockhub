@@ -18,11 +18,11 @@ And both differ from [AI](../AI/), which is the model layer underneath: the prov
 | [**Dify**](dify/) | Full-stack LLM app platform — workflow orchestration, production RAG with hybrid search, agent management, team accounts | Heaviest: ~10 containers, 4 GB minimum |
 | [**Langflow**](langflow/) | The most powerful builder — LangGraph multi-agent support, custom Python nodes inside the visual surface, MIT licensed | Medium |
 | [**Flowise**](flowise/) | The fastest to get moving — drag-and-drop builder on LangChain | Lightest: runs in ~1 GB |
-| [**Paperclip**](paperclip/) 🚧 | "The open-source app everyone uses to manage agents at work" | Deferred — see below |
+| [**Paperclip**](paperclip/) | "The open-source app everyone uses to manage agents at work" — org hierarchy, goals, budgets, tickets | Light: 2 containers |
 
 > 📌 **Dify was moved here from `AI`.** It describes itself as an LLM *application development platform* with agent management, which puts it alongside Langflow and Flowise rather than alongside Ollama. Filing it under AI sent people looking in the wrong place.
 
-> 📌 **Paperclip stays 🚧 for one reason:** upstream publishes no official image. A third-party one exists (`tuyenvd/paperclip`), but DockHub's rule since Strapi is that a service needs an image its own authors publish. The moment that changes, it's a normal build.
+> 📌 **Paperclip was 🚧 for one reason, and that reason expired.** This page used to say it was deferred because upstream published no official image, and that *"the moment that changes, it's a normal build."* It changed. Checked against the registry itself on **2026-08-18**: `ghcr.io/paperclipai/paperclip:latest` is published by the authors' own organisation, carries `org.opencontainers.image.source = github.com/paperclipai/paperclip`, was built hours earlier (`2026.817.0`), and covers `linux/amd64` and `linux/arm64`. The third-party image this note used to mention is no longer relevant and is not used.
 
 ---
 

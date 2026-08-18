@@ -91,6 +91,11 @@ declare -A SERVICE_FILES=(
     # captures them as part of the tree rather than via the volume loop.
     [hermes]="docker-compose.yml"
     [openhands]="docker-compose.yml"
+    # Multi-Agent. Paperclip DOES ship a backup.sh, unlike the agents above,
+    # and for the opposite reason: its state is split between a separate
+    # Postgres container and a bind mount. The generic volume backup covers
+    # the mount but would take a raw mid-write copy of the database.
+    [paperclip]="docker-compose.yml backup.sh"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"

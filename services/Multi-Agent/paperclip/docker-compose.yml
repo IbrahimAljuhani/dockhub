@@ -1,0 +1,142 @@
+# Paperclip — "the open-source app everyone uses to manage agents at work".
+#
+# The first entry built in Multi-Agent, and it exists here because a condition
+# this repo wrote down was finally met. services/Multi-Agent/README.md said:
+#
+#     "Paperclip stays 🚧 for one reason: upstream publishes no official
+#      image ... The moment that changes, it's a normal build."
+#
+# It changed. Verified on 2026-08-18 against the registry itself, not a blog:
+#
+#     ghcr.io/paperclipai/paperclip:latest
+#       org.opencontainers.image.source   github.com/paperclipai/paperclip
+#       org.opencontainers.image.licenses MIT
+#       org.opencontainers.image.version  2026.817.0
+#       org.opencontainers.image.created  2026-08-18T03:19Z   ← hours old
+#       platforms                         linux/amd64, linux/arm64
+#
+# Published by the authors' own org, current, and multi-arch. The third-party
+# image the README mentioned (tuyenvd/paperclip) is now irrelevant and is NOT
+# used here.
+#
+# ── WE PULL; UPSTREAM'S OWN COMPOSE FILES BUILD ─────────────────────────
+# Both docker/docker-compose.yml and docker/docker-compose.quickstart.yml in
+# the source tree use `build: context: ..`, not `image:`. That is right for
+# contributors working on the code and wrong for everyone else — it turns a
+# deploy into a pnpm monorepo build on your server. Since the authors also
+# publish the built result, this file pulls it. Same rule as the rest of the
+# catalogue.
+#
+# ── NO DOCKER SOCKET ────────────────────────────────────────────────────
+# Worth stating plainly because the sister category made the opposite call:
+# OpenHands cannot run without /var/run/docker.sock and says so. Paperclip's
+# own compose files mount no socket and set no privileged flag, so this file
+# grants neither. That also means the hardening block below buys real
+# containment here, rather than the partial protection it gives OpenHands.
+#
+# ⚠️ NOT YET PROVEN ON A RUNNING SERVER. Upstream publishes agent-runtime-*
+# images alongside this one, which suggests agents may execute in containers
+# of their own. If a live run shows Paperclip needs the daemon to start those,
+# that is a category-level security decision to make deliberately — not a line
+# to quietly add here. Until then this deploys as an ordinary web service.
+#
+# ── DATABASE: THE SEPARATE ONE, NOT THE EMBEDDED ONE ────────────────────
+# Paperclip can run a single container with an embedded Postgres. Upstream
+# calls that the LOCAL mode and points production at a real Postgres, which
+# is what a server behind NGINX Proxy Manager is. So: two containers, the
+# same postgres:17-alpine upstream tests against.
+#
+# This is a single-instance service, under ~/docker/paperclip/.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it (and
+# the generated .env) to ~/docker/paperclip/ and runs it from there.
+
+services:
+  paperclip:
+    image: ghcr.io/paperclipai/paperclip:${PAPERCLIP_VERSION:-latest}
+    container_name: paperclip-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    # ── Hardening, measured rather than copied ───────────────────────────
+    # From the OpenSandbox trial (2026-08-17): of the nine capabilities that
+    # config drops, six were never in Docker's default grant. These three are
+    # the entire real difference — 11 capabilities instead of Docker's 14.
+    # Verify rather than believe:
+    #   docker exec paperclip-app grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
+    environment:
+      # Names taken verbatim from upstream's docker/docker-compose.yml. Do not
+      # "tidy" them — PAPERCLIP_PUBLIC_URL and BETTER_AUTH_SECRET in
+      # particular are read exactly as spelled, and a renamed key fails as a
+      # misconfiguration rather than an error.
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}"
+      PORT: "3100"
+      HOST: "0.0.0.0"
+      # Without this the API answers and the web interface does not exist.
+      SERVE_UI: "true"
+      # Upstream's own defaults, kept explicit so a future image changing its
+      # baked-in values cannot silently open this deployment up.
+      PAPERCLIP_DEPLOYMENT_MODE: "authenticated"
+      PAPERCLIP_DEPLOYMENT_EXPOSURE: "private"
+      # Set by deploy.sh from your domain, or from <server-ip>:<port> when you
+      # opt into a direct host port. Wrong value = login redirects that loop.
+      PAPERCLIP_PUBLIC_URL: "${PUBLIC_URL}"
+      # Upstream marks this required with `:?` and refuses to start without
+      # it. deploy.sh generates one; it is never left to a default.
+      BETTER_AUTH_SECRET: "${BETTER_AUTH_SECRET}"
+      # Off by default. DockHub's position throughout is that a self-hosted
+      # thing should not phone home unless its operator asks it to. Delete
+      # this line to restore upstream's behaviour.
+      PAPERCLIP_TELEMETRY_DISABLED: "1"
+    volumes:
+      # A bind mount, not a named volume, and deliberately: /paperclip holds
+      # instance config, agent teams, goals and tickets — produced by you and
+      # not re-downloadable. The menu's Backup option captures the install
+      # tree, so this puts that data inside it. Upstream's own compose uses a
+      # named volume, which the generic backup would miss.
+      - ./state:/paperclip
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - paperclip-net
+      - main-net
+
+  db:
+    image: postgres:17-alpine
+    container_name: paperclip-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h localhost so this tests the TCP listener the app will actually use.
+      # Bare pg_isready succeeds on the unix socket while the network listener
+      # is still coming up, which lets the app start too early and fail its
+      # first connection.
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      # Never on main-net. The database is reachable by the app and nothing
+      # else — the proxy has no business seeing it.
+      - paperclip-net
+
+volumes:
+  db-data:
+
+networks:
+  paperclip-net:
+  main-net:
+    external: true
