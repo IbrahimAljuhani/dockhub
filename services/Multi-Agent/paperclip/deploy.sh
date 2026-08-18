@@ -339,4 +339,73 @@ echo
 print_warn "The 'Connect a model' screen lists nine adapters; this image contains four"
 print_warn "(Claude Code, Codex, Gemini CLI, OpenCode). Cursor, Grok Build and Pi are"
 print_warn "offered but have no CLI behind them here and will fail. See the README."
+
+# ── The two gateway adapters, and DockHub's own agents ──────────────────
+# hermes_gateway and openclaw_gateway do not spawn a CLI — they drive an
+# agent that is ALREADY RUNNING. DockHub deploys both, all three containers
+# sit on ai-net, so the route is container-name direct.
+#
+# The endpoints are not guesses. Paperclip's own hermes-gateway smoke test
+# (docker/hermes-gateway-smoke/entrypoint.sh) defaults API_SERVER_PORT to
+# 8642 — the exact port services/AI-Agents/hermes/docker-compose.yml sets.
+#
+# Reachability is PROVED from inside this container before anything is
+# printed, rather than asserted from "the container is running". A running
+# container on a network you are not on is not reachable, and finding that
+# out from a silent failure in a web form is the worst place to find it out.
+_probe_from_paperclip() {   # $1 = url — returns 0 if the TCP port answers
+    docker exec paperclip-app node -e "
+        const u=new URL('$1');
+        require('net').connect(u.port,u.hostname)
+          .on('connect',()=>process.exit(0)).on('error',()=>process.exit(1));
+    " >/dev/null 2>&1
+}
+
+_HERMES_URL="http://hermes:8642"
+_OPENCLAW_URL="http://openclaw:18789"
+_found_agent=0
+
+if docker ps --format '{{.Names}}' | grep -qx hermes; then
+    _found_agent=1
+    echo
+    if _probe_from_paperclip "$_HERMES_URL"; then
+        print_info "Hermes is running AND reachable from Paperclip at $_HERMES_URL"
+    else
+        print_warn "Hermes is running but Paperclip cannot reach $_HERMES_URL — check both are on ai-net."
+    fi
+    # Hermes GENERATES its own API_SERVER_KEY in its own secrets file, and
+    # that file wins over the compose environment. Reading the compose .env
+    # instead hands you a key that returns 401 — a mistake this project has
+    # already made once, in Hermes' own deploy.sh, and fixed there the same way.
+    _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/data/.env")"
+    _hsrc="$HOME/docker/hermes/data/.env (Hermes generated this one)"
+    if [[ -z "$_hk" ]]; then
+        _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/.env")"
+        _hsrc="$HOME/docker/hermes/.env (first boot — Hermes has not written its own yet)"
+    fi
+    echo "    Adapter  : Hermes"
+    echo "    URL      : $_HERMES_URL"
+    echo "    Key from : $_hsrc"
+fi
+
+if docker ps --format '{{.Names}}' | grep -qx openclaw; then
+    _found_agent=1
+    echo
+    if _probe_from_paperclip "$_OPENCLAW_URL"; then
+        print_info "OpenClaw is running AND reachable from Paperclip at $_OPENCLAW_URL"
+    else
+        print_warn "OpenClaw is running but Paperclip cannot reach $_OPENCLAW_URL — check both are on ai-net."
+    fi
+    echo "    Adapter  : OpenClaw"
+    echo "    URL      : $_OPENCLAW_URL"
+    echo "    Token in : $HOME/docker/openclaw/.env  (OPENCLAW_GATEWAY_TOKEN)"
+fi
+
+if (( _found_agent )); then
+    echo
+    echo "  Enter those in the adapter's form on the 'Connect a model' screen."
+    print_warn "Not yet exercised end to end. The addresses and credentials above are"
+    print_warn "verified; whether these Hermes/OpenClaw versions speak the protocol"
+    print_warn "Paperclip's gateway adapters expect has NOT been proven. Report back."
+fi
 print_tunnel_reminder_if_relevant

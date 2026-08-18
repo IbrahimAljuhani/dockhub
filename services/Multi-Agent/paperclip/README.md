@@ -67,9 +67,22 @@ Add whichever keys you have to `~/docker/paperclip/.env` and rerun `deploy.sh`. 
 - **`process`** — runs *any* shell command with your own `command`, `env` and `cwd`. This is the real escape hatch for wiring up a framework Paperclip has never heard of.
 - **`http`** — **not** an inference bridge. It POSTs a webhook to an agent service you host elsewhere, which then calls Paperclip's API back. Useful, but not a way to plug in a model.
 
-### The gateways — and why they matter *here*
+### The gateways — driving DockHub's own agents
 
-`hermes_gateway` and `openclaw_gateway` do not spawn a CLI; they talk to an **already-running agent**. DockHub deploys both [Hermes](../../AI-Agents/hermes/) and [OpenClaw](../../AI-Agents/openclaw/). So Paperclip can drive the agents you already run rather than its own built-in ones. Not wired up yet — noted because nothing else in this catalogue can do it.
+`hermes_gateway` and `openclaw_gateway` do not spawn a CLI; they talk to an **already-running agent**. DockHub deploys both [Hermes](../../AI-Agents/hermes/) and [OpenClaw](../../AI-Agents/openclaw/), and all three containers sit on `ai-net` — so the route is direct, by container name.
+
+`deploy.sh` detects whichever is running, **proves Paperclip can actually reach it** from inside the container, and prints what to enter:
+
+| Adapter | URL | Credential |
+|---|---|---|
+| **Hermes** | `http://hermes:8642` | `API_SERVER_KEY` — from `~/docker/hermes/data/.env` |
+| **OpenClaw** | `http://openclaw:18789` | `OPENCLAW_GATEWAY_TOKEN` — from `~/docker/openclaw/.env` |
+
+**The port is not a guess.** Paperclip's own smoke test (`docker/hermes-gateway-smoke/entrypoint.sh`) defaults `API_SERVER_PORT` to `8642` — exactly what our Hermes sets. The two were built to the same number independently.
+
+> 🔑 **Read Hermes' key from `data/.env`, not from its compose `.env`.** Hermes *generates its own* key in its own secrets file, and that file wins. The compose one returns 401. This project already made that mistake once inside Hermes' own deploy.sh; `deploy.sh` here reads the right file and tells you which one it used.
+
+> ⚠️ **Endpoints and credentials are verified; the protocol handshake is not.** Whether these versions of Hermes and OpenClaw speak what Paperclip's gateway adapters expect has not been exercised end to end. Paperclip documents no configuration schema for these two adapters at all — the fields come from the form in the UI.
 
 **Where they execute matters.** Paperclip runs these harnesses as **processes inside the app container** — not in containers of their own, and not through the Docker socket. That is why this deployment needs no socket at all.
 
