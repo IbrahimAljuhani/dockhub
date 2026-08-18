@@ -123,6 +123,8 @@ proxy_send_timeout 600s;
 send_timeout 600s;
 NGINXEOF
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Immich (first run pulls 4 images and can take a few minutes)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Immich. Check log: $LOGFILE"

@@ -57,6 +57,7 @@ prompt_media_path() {
                 echo "A path is required." >&2
                 continue
             fi
+            path=$(normalize_host_path "$path") || continue
             if err=$(mkdir -p "$path" 2>&1); then
                 MEDIA_PATH_VALUE="$(cd "$path" && pwd)"
                 return 0
@@ -71,6 +72,7 @@ prompt_media_path() {
                 echo "A path is required." >&2
                 continue
             fi
+            path=$(normalize_host_path "$path") || continue
             if [[ -d "$path" ]]; then
                 MEDIA_PATH_VALUE="$(cd "$path" && pwd)"
                 return 0
@@ -109,6 +111,20 @@ ensure_main_net
 
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
+
+    # A reused .env can point at a directory that has since moved or been
+    # deleted. Docker would not complain: a bind mount to a missing path is
+    # silently created as an empty root-owned folder, and the library simply
+    # appears empty. Found the hard way after a bad path was cleaned up and
+    # the redeploy happily bound the hole it left behind.
+    _mp=$(read_env_value "MEDIA_PATH" "$INSTALL_DIR/.env")
+    if [[ -n "$_mp" && ! -d "$_mp" ]]; then
+        print_warn "The MEDIA_PATH in the existing .env no longer exists:"
+        print_warn "  $_mp"
+        print_warn "Docker will bind-mount it anyway and create it empty, so the"
+        print_warn "library will look wiped. Fix the path, then rerun:"
+        print_warn "  sed -i 's|^MEDIA_PATH=.*|MEDIA_PATH=/your/real/path|' $INSTALL_DIR/.env"
+    fi
 else
     print_warn "Plex is proprietary freemium software and requires a free Plex account (unlike every other service here). If you'd rather run a fully open-source media server, this repo also ships Jellyfin."
 
@@ -201,6 +217,8 @@ else
     rm -f "$INSTALL_DIR/docker-compose.override.yml"
 fi
 
+pull_with_progress "$INSTALL_DIR" \
+    || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Plex..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Plex. Check log: $LOGFILE"
