@@ -47,20 +47,45 @@ mkdir -p "$RUNTIME_DIR"
 # the failure this repo hit on OpenProject, Nextcloud and n8n independently
 # before it became a fixed convention.
 ask_reachability() {
-    prompt_host_port "$CONTAINER_PORT"
+    # ── The security question first, and asked OUT LOUD ──────────────────
+    # An earlier version of this script inferred main-net from the host-port
+    # answer: no port meant NPM, which meant main-net. It produced the right
+    # topology and was still wrong, because "do you want a direct port?" is a
+    # CONVENIENCE question, and its answer was quietly deciding how far the
+    # agents in this container can reach. The operator answered about ports
+    # and received a security posture they were never shown.
+    #
+    # prompt_agent_network is the same question the three AI-Agents services
+    # ask, with the same reasons named — Portainer, the socket, an agent
+    # acting on text it did not write. Those reasons are identical here
+    # because the situation is identical: Paperclip runs its harnesses as
+    # processes in this container. Reused rather than re-implemented, so the
+    # two categories cannot drift apart.
+    prompt_agent_network "Paperclip"
+    ON_MAIN_NET="$AGENT_ON_MAIN_NET"
 
-    if [[ -n "$HOST_PORT" ]]; then
-        # Direct access: the URL must be the IP and port a browser will use,
-        # not a domain that does not resolve yet.
+    if (( ON_MAIN_NET )); then
+        # NPM can serve it, so a domain is the expected route — but a host
+        # port alongside is still allowed for LAN access while DNS settles.
+        prompt_domain "Public domain for Paperclip (e.g. agents.example.com): " "domain"
+        PUBLIC_URL="https://$PROMPTED_DOMAIN"
+        print_info "Public URL set to $PUBLIC_URL — point NGINX Proxy Manager at paperclip-app:$CONTAINER_PORT."
+        prompt_host_port "$CONTAINER_PORT"
+    else
+        # Off main-net there is no proxy, so a host port is the ONLY way in.
+        # Asking "do you want one?" here would be offering a deployment
+        # nobody can reach.
+        print_info "Not on 'main-net', so a host port is the only way to reach it."
+        HOST_PORT=""
+        while [[ -z "$HOST_PORT" ]]; do
+            prompt_host_port "$CONTAINER_PORT"
+            [[ -n "$HOST_PORT" ]] || print_warn "A port is required in this mode — otherwise nothing can reach Paperclip."
+        done
         local server_ip
         server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
         [[ -n "$server_ip" ]] || server_ip="localhost"
         PUBLIC_URL="http://${server_ip}:${HOST_PORT}"
         print_info "Public URL set to $PUBLIC_URL (direct host port)."
-    else
-        prompt_domain "Public domain for Paperclip (e.g. agents.example.com): " "domain"
-        PUBLIC_URL="https://$PROMPTED_DOMAIN"
-        print_info "Public URL set to $PUBLIC_URL — point NGINX Proxy Manager at paperclip-app:$CONTAINER_PORT."
     fi
 }
 
@@ -92,6 +117,7 @@ if [[ -f "$RUNTIME_DIR/docker-compose.yml" ]]; then
         # and the override generator below treats empty as "no port", so an
         # empty line switches direct access off without needing a delete.
         set_env_value HOST_PORT "${HOST_PORT:-}" "$RUNTIME_DIR/.env"
+        set_env_value ON_MAIN_NET "${ON_MAIN_NET:-0}" "$RUNTIME_DIR/.env"
         print_info "Reconfigured. Secrets and data untouched."
     fi
 else
@@ -115,6 +141,7 @@ else
         echo "PUBLIC_URL=$PUBLIC_URL"
         [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT"
         [[ -n "$HOST_PORT" ]] && echo "HOST_PORT=$HOST_PORT"
+        echo "ON_MAIN_NET=${ON_MAIN_NET:-0}"
     } > "$RUNTIME_DIR/.env"
     chmod 600 "$RUNTIME_DIR/.env"
     umask 022
@@ -132,6 +159,11 @@ fi
 # delete the line), then rerun this script.
 ENV_MEM_LIMIT="$(read_env_value MEM_LIMIT "$RUNTIME_DIR/.env" || true)"
 ENV_HOST_PORT="$(read_env_value HOST_PORT "$RUNTIME_DIR/.env" || true)"
+# Deployments made before this setting existed have no line; they were created
+# under the old rule, where "no host port" meant NPM meant main-net. Defaulting
+# to that keeps them working exactly as they were until reconfigured.
+ENV_ON_MAIN_NET="$(read_env_value ON_MAIN_NET "$RUNTIME_DIR/.env" || true)"
+[[ -z "$ENV_ON_MAIN_NET" ]] && { [[ -z "$ENV_HOST_PORT" ]] && ENV_ON_MAIN_NET=1 || ENV_ON_MAIN_NET=0; }
 
 # This file is now always written, because it carries more than the optional
 # extras: it decides whether the app joins main-net at all.
@@ -154,21 +186,23 @@ ENV_HOST_PORT="$(read_env_value HOST_PORT "$RUNTIME_DIR/.env" || true)"
     echo "    networks:"
     echo "      - paperclip-net"
     echo "      - ai-net"
-    if [[ -z "$ENV_HOST_PORT" ]]; then
+    # Keyed off the question that was actually ASKED, not off the port. The
+    # two are now independent: a host port is convenience, main-net is reach.
+    if (( ENV_ON_MAIN_NET )); then
         echo "      - main-net"
     fi
 } > "$RUNTIME_DIR/docker-compose.override.yml"
 
 [[ -n "$ENV_MEM_LIMIT" ]] && print_info "Memory limit $ENV_MEM_LIMIT applied to paperclip-app (db stays unbounded)."
-if [[ -n "$ENV_HOST_PORT" ]]; then
-    print_info "Host port $ENV_HOST_PORT published for direct access."
-    print_info "Not joined to 'main-net' — NGINX Proxy Manager is not in the path, so the"
-    print_info "agents cannot reach the other services on it. This is the safer shape."
-else
-    print_warn "Joined to 'main-net' so NGINX Proxy Manager can reach it — which also means"
-    print_warn "the agent harnesses in this container can reach everything else on it,"
+[[ -n "$ENV_HOST_PORT" ]] && print_info "Host port $ENV_HOST_PORT published for direct access."
+if (( ENV_ON_MAIN_NET )); then
+    print_warn "On 'main-net' so NGINX Proxy Manager can reach it — which also means the"
+    print_warn "agent harnesses in this container can reach everything else on it,"
     print_warn "including portainer:9000 (Docker socket) and NPM's admin interface."
     print_warn "Change both of their default passwords. See services/Multi-Agent/README.md."
+else
+    print_info "Networks: paperclip-net, ai-net. Deliberately NOT main-net — the agents"
+    print_info "in this container cannot reach the other services on it."
 fi
 
 pull_with_progress "$RUNTIME_DIR"
@@ -206,8 +240,20 @@ fi
 
 echo
 print_info "$SERVICE_NAME is running."
-echo "  Proxy target for NPM : paperclip-app:$CONTAINER_PORT  (on main-net)"
-echo "  Public URL           : $(read_env_value PUBLIC_URL "$RUNTIME_DIR/.env" || echo '?')"
+# Reported from the mode that was actually applied, not printed blind. The
+# earlier version announced "Proxy target for NPM: paperclip-app:3100 (on
+# main-net)" unconditionally — including on direct-port deployments, which
+# this script had just finished keeping OFF main-net two lines above. A
+# script contradicting itself on one screen is worse than one that stays
+# quiet.
+echo "  Public URL           : $(read_env_value PUBLIC_URL "$RUNTIME_DIR/.env")"
+if (( ENV_ON_MAIN_NET )); then
+    echo "  Proxy target for NPM : paperclip-app:$CONTAINER_PORT  (on main-net)"
+    echo "  Networks             : paperclip-net, ai-net, main-net"
+else
+    echo "  Networks             : paperclip-net, ai-net  (deliberately NOT main-net)"
+fi
+[[ -n "$ENV_HOST_PORT" ]] && echo "  Direct host port     : $ENV_HOST_PORT"
 echo "  Data                 : $RUNTIME_DIR/state   (agent teams, goals, tickets)"
 echo "  Credentials file     : $RUNTIME_DIR/.env    (chmod 600)"
 echo
