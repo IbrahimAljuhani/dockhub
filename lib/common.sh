@@ -158,16 +158,42 @@ validate_domain() {
 # full https:// URL), and a helper in a shared library must not quietly
 # reach into a caller's namespace and overwrite it.
 PROMPTED_DOMAIN=""
+# $3 = an optional default. When given, an empty answer takes it instead of
+# being rejected. This is for values the script has already worked out — the
+# host's own LAN address, say — where making the operator retype what is
+# printed four lines further down is ceremony, not consent. A live ERPNext
+# run pressed Enter and got a red "A site domain is required" for a question
+# the script could have answered itself.
+#
+# The default goes through validate_domain like any typed answer, so a bad
+# default is caught here rather than baked into a site name.
 prompt_domain() {
-    local prompt="$1" label="${2:-domain}" value msg
+    local prompt="$1" label="${2:-domain}" default="${3:-}" value msg eof=0
     PROMPTED_DOMAIN=""
     while true; do
-        read -rp "$prompt" value
+        # Pressing Enter is a choice; stdin ending is not. `read` fails on
+        # EOF leaving value empty, and treating that as "took the default"
+        # let a rejected answer become the default one line later — caught
+        # by a test, not by reading. Retrying is worse still: a closed
+        # stream will never produce another line, so the loop would spin.
+        # Three outcomes, not two. `read` also returns non-zero when it got a
+        # final line with no trailing newline — data, not absence — so the
+        # status alone is not enough and an answer typed without Enter was
+        # being thrown away in favour of the default.
+        if read -rp "$prompt" value || [[ -n "$value" ]]; then
+            [[ -z "$value" && -n "$default" ]] && value="$default"
+        else
+            eof=1
+            [[ -n "$default" ]] || print_error "No $label given, and input has ended."
+            echo "Input ended — taking the default: $default" >&2
+            value="$default"
+        fi
         if msg=$( (validate_domain "$value" "$label") 2>&1 ); then
             PROMPTED_DOMAIN="$value"
             return 0
         fi
         echo "$msg" >&2
+        (( eof )) && print_error "The default '$default' is not a valid $label, and there is no more input."
     done
 }
 
@@ -881,4 +907,140 @@ list_backups() {
     [[ -n "$instance" ]] && backup_root="$backup_root/$instance"
     [[ -d "$backup_root" ]] || return 0
     find "$backup_root" -maxdepth 1 -name '*.tar.gz' | sort -r
+}
+
+# ── Image pulls: one line that changes, instead of several hundred ──────
+#
+# `docker compose pull` prints a line per layer per progress tick. A live
+# Hermes deploy produced roughly four hundred lines of "Downloading 274.1MB"
+# before the container even started — the operator cannot see the deploy's
+# own messages in that, and cannot tell a slow pull from a stuck one.
+#
+# Two honesty rules this keeps, because a prettier lie is still a lie:
+#
+#   · The percentage counts LAYERS and says so on the line. Layers are not
+#     equal in size, so it never claims to be a percentage of bytes. The
+#     bytes are shown separately as a running total with no denominator,
+#     because the registry never told us one.
+#   · On failure the full captured output is printed. A progress bar that
+#     swallows the error it ended on is worse than the wall it replaced.
+#
+# Falls back to plain passthrough when there is no terminal (CI, `| tee`,
+# nohup) or when DOCKHUB_VERBOSE=1 — in those cases the wall is the point.
+#
+# Usage:  pull_with_progress <compose-dir> [service…]
+pull_with_progress() {
+    local dir="$1"; shift
+    local raw rc _pwp_log
+    raw="$(mktemp)"
+    # Deploy scripts here call their log $LOGFILE; keep DEPLOY_LOG working
+    # too so this is usable from anything. Unquoted $COMPOSE_CMD below is
+    # deliberate — it holds two words ("docker compose"), exactly as every
+    # other call site in this repo expands it.
+    _pwp_log="${LOGFILE:-${DEPLOY_LOG:-/dev/null}}"
+
+    # The bar writes to /dev/tty so the pipe cannot swallow it. If stdout is
+    # not a terminal, or /dev/tty is not writable (a container without a
+    # controlling terminal, some CI runners), fall through to the plain wall
+    # — which is the correct output there, not a degraded one.
+    if [[ ! -t 1 || "${DOCKHUB_VERBOSE:-0}" == "1" ]] || ! : > /dev/tty 2>/dev/null; then
+        (cd "$dir" && ${COMPOSE_CMD:-docker compose} pull "$@") 2>&1 | tee -a "$_pwp_log"
+        rc="${PIPESTATUS[0]}"
+        rm -f "$raw"
+        return "$rc"
+    fi
+
+    # No newline: every render below overwrites this line with \r, so the
+    # whole pull occupies exactly one line whatever happens.
+    printf '  checking images…'
+
+    # Piping makes compose choose its plain, one-event-per-line output, so
+    # no --progress flag is needed and none is assumed to exist.
+    (cd "$dir" && ${COMPOSE_CMD:-docker compose} pull "$@") 2>&1 | tee "$raw" | awk -v W=24 '
+        function tobytes(s,   n) {
+            n = s + 0
+            if (s ~ /GB$/) return n * 1000000000
+            if (s ~ /MB$/) return n * 1000000
+            if (s ~ /kB$/) return n * 1000
+            if (s ~ /B$/)  return n
+            return 0
+        }
+        function render(   i, pct, bar, filled, sum, k) {
+            # Nothing to draw when nothing is being downloaded. A live run
+            # with the image already present printed "[........] 0% 0/0",
+            # which invents a measurement out of an event that never
+            # happened — the same sin as a percentage with no denominator.
+            if (total == 0) return
+            # A layer can report "Already exists" without ever announcing
+            # "Pulling fs layer", so completions can outrun the total we
+            # counted. Clamp rather than print 130%: a bar that exceeds its
+            # own scale tells the reader the tool is confused, which is
+            # worse than telling them nothing.
+            if (complete > total) total = complete
+            pct = (total ? int(complete * 100 / total) : 0)
+            if (pct > 100) pct = 100
+            filled = int(pct * W / 100)
+            bar = ""
+            for (i = 0; i < W; i++) bar = bar (i < filled ? "#" : ".")
+            sum = 0
+            for (k in cur) sum += cur[k]
+            printf "\r  [%s] %3d%% of layers  %d/%d  %6.0f MB", \
+                   bar, pct, complete, total, sum / 1000000 > "/dev/tty"
+            fflush("/dev/tty")
+        }
+        /Pulling fs layer/            { if (!($1 in seen))  { seen[$1] = 1;  total++    } ; render(); next }
+        /Already exists|Pull complete/{ if (!($1 in fin))   { fin[$1]  = 1;  complete++ } ; render(); next }
+        /Downloading|Extracting/      { b = tobytes($NF); if (b > cur[$1]) { cur[$1] = b }
+                                        if (++tick % 12 == 0) render(); next }
+        /Pulled|Downloaded newer|up to date/ { render(); next }
+        { next }
+        # Trailing spaces erase whatever the longer bar left on the line.
+        END {
+            if (total == 0)
+                printf "\r  images already present — nothing to download%20s\n", "" > "/dev/tty"
+            else
+                printf "\n" > "/dev/tty"
+        }
+    '
+    rc="${PIPESTATUS[0]}"
+
+    # The wall still exists — it goes to the log, where it belongs. What
+    # changed is that it no longer buries the deploy's own messages.
+    cat "$raw" >> "$_pwp_log" 2>/dev/null || true
+
+    if [[ "$rc" -ne 0 ]]; then
+        print_error "Image pull failed (exit $rc). Full output:"
+        sed 's/^/    /' "$raw" >&2
+    fi
+    rm -f "$raw"
+    return "$rc"
+}
+
+# ── A path a human typed is not a path bash can use ─────────────────────
+# `read` performs no expansion, so "~/media" arrives as four literal
+# characters. `mkdir -p` on that creates a directory actually NAMED "~" in
+# the current working directory — which, when deploy.sh is run from the
+# git checkout, is inside the repository. A live run did exactly that and
+# produced .../services/Media/jellyfin/~/media, using the prompt's own
+# example as the input. A prompt that offers a form its code cannot handle
+# is a trap the script sets for its own user.
+#
+# Echoes the cleaned path. Returns 1 with a message on stderr when the
+# result is still not absolute: "media" could mean $HOME/media or ./media,
+# and guessing between them is how a media library ends up somewhere its
+# owner never looks again.
+normalize_host_path() {
+    local p="$1"
+    p="${p#"${p%%[![:space:]]*}"}"        # strip leading whitespace
+    p="${p%"${p##*[![:space:]]}"}"        # strip trailing whitespace
+    case "$p" in
+        "~")   p="$HOME" ;;
+        "~/"*) p="$HOME/${p#\~/}" ;;
+    esac
+    [[ "$p" != "/" ]] && p="${p%/}"       # drop a trailing slash, never eat "/"
+    if [[ "$p" != /* ]]; then
+        echo "'$1' is not an absolute path. Use a full path such as /mnt/media, or ~/media for your home." >&2
+        return 1
+    fi
+    printf '%s' "$p"
 }

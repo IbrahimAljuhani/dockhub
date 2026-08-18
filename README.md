@@ -1,4 +1,11 @@
-# 🐳 DockHub
+<!-- The blank lines inside this div are load-bearing. An HTML block in
+     GitHub-flavoured markdown swallows everything until a blank line, so
+     without them every badge below would render as literal `[![...]](...)`
+     text. With them, the div opens, markdown resumes, and the badges are
+     still badges — centred, because they inherit the div's alignment. -->
+<div align="center">
+
+<img src="assets/dockhub-lockup.svg" alt="DockHub — your self-hosted server, simplified" width="420">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![ShellCheck](https://github.com/IbrahimAljuhani/dockhub/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/IbrahimAljuhani/dockhub/actions/workflows/shellcheck.yml)
@@ -8,12 +15,14 @@
 [![ARM64](https://img.shields.io/badge/arch-x86__64%20%7C%20ARM64-lightgrey)](#-supported-systems)
 
 [![Services](https://img.shields.io/badge/Services-37%20built%20%2F%2041-brightgreen)](#-the-catalogue)
-[![Categories](https://img.shields.io/badge/Categories-16-blue)](#-the-catalogue)
+[![Categories](https://img.shields.io/badge/Categories-15-blue)](#-the-catalogue)
 [![NPM](https://img.shields.io/badge/NGINX%20Proxy%20Manager-latest-00A98F)](#-environment-variable-overrides)
 [![Portainer](https://img.shields.io/badge/Portainer--CE-latest-13BEF9)](#-environment-variable-overrides)
 [![TLS](https://img.shields.io/badge/TLS-Let's%20Encrypt-003A70)](#-two-networks-and-why)
 [![Backups](https://img.shields.io/badge/Backup%20%26%20Restore-built--in-6E4AFF)](#-backups)
 [![GPU](https://img.shields.io/badge/GPU-optional-76B900?logo=nvidia&logoColor=white)](services/AI/)
+
+</div>
 
 **Self-hosted services, deployed properly.** One script installs the Docker foundation; a menu deploys any of **37 services** on top of it — each with a reverse proxy route, a backup path, and documentation written from actually running it.
 
@@ -80,7 +89,7 @@ You get a category menu, then a service menu, then a short interview — domain 
 |---|---|---|
 | **Docker CE + Compose** | Installed for your distribution, or skipped if already present | — |
 | **NGINX Proxy Manager** | Routes domains to containers, issues Let's Encrypt certificates | `:81` admin |
-| **Portainer CE** | A web view of every container, volume and network | `:9000` / `:9443` |
+| **Portainer CE** | A web view of every container, volume and network | **no host port by default** — see below |
 | **`main-net`** | The shared bridge network the proxy and your services meet on | — |
 
 **First-login credentials** — change both immediately:
@@ -89,6 +98,12 @@ You get a category menu, then a service menu, then a short interview — domain 
 |---|---|
 | NGINX Proxy Manager | `admin@example.com` / `changeme` |
 | Portainer | No default — **the first visitor creates the admin account.** Do not leave it reachable before you have |
+
+**Docker is not optional; NPM and Portainer are.** The installer asks about the last two, because a host that only ever uses LAN ports needs neither. It does not ask about Docker — a choice you cannot decline is not a choice.
+
+**Portainer gets no host port unless you ask for it.** It mounts `/var/run/docker.sock`, so reaching its web interface is equivalent to root on the machine — it is not a dashboard, it is a key. By default it joins `main-net` only, reachable as `portainer:9000`, and you publish it deliberately through NGINX Proxy Manager with HTTPS in front. Answer yes to the port question and it binds every interface, which on a VPS means the internet.
+
+> The same rule already removed the host-port option from [Vaultwarden](services/Security/vaultwarden/) outright. Portainer is the more dangerous of the two and kept its ports open for longer than it should have.
 
 The installer also asks, once, whether this is a **home server or a VPS**, and how you intend to reach it from outside — port forwarding or Cloudflare Tunnel. The answer is remembered in `~/docker/.dockhub-env` and shapes the advice every later script gives you.
 

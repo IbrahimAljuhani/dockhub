@@ -96,6 +96,26 @@ WARN='\033[0;33m'
 ERROR='\033[0;31m'
 NC='\033[0m'
 
+# ── The masthead ────────────────────────────────────────────────────────
+# Guarded, never required. lib/banner.sh defines four `dockhub_*` functions,
+# a handful of `_BN_*` colour variables, and
+# touches nothing else, which is why it is safe to take here — sourcing
+# lib/common.sh instead would silently replace every print_* below it, since
+# that file writes "[✓]" to stderr where this one writes "[INFO]" to stdout.
+# A curl-only run with no repo beside it simply gets no banner, and that is
+# a cosmetic loss, never a failure.
+_DH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "$_DH_DIR/lib/banner.sh" ]]; then
+    # shellcheck source=lib/banner.sh
+    source "$_DH_DIR/lib/banner.sh"
+fi
+declare -F dockhub_banner >/dev/null || dockhub_banner() { :; }
+# These two are NOT no-op fallbacks. A missing banner is cosmetic; a missing
+# menu is the script. Without lib/banner.sh they print the same menu without
+# the colours.
+declare -F dockhub_ask  >/dev/null || dockhub_ask()  { printf '\n%s\n' "$1"; }
+declare -F dockhub_item >/dev/null || dockhub_item() { printf '[ %s ] %s\n' "$1" "$2"; }
+
 print_info()    { echo -e "${INFO}[INFO]${NC} $1"; }
 print_ok()      { echo -e "${OK}[OK]${NC} $1"; }
 print_warn()    { echo -e "${WARN}[WARN]${NC} $1" >&2; }
@@ -143,11 +163,24 @@ check_port() {
     return 0
 }
 
+# check_ports_or_warn <service-label> <own-container|""> <port>...
+#
+# A port held by the very container we are about to recreate is not a
+# conflict — it is the previous run of this same service. Warning about it
+# turns every rerun into a question that means nothing, which is exactly the
+# kind of prompt this project removes elsewhere. If `docker port` cannot
+# answer, we fall back to treating the port as busy: a needless warning is
+# survivable, a missed collision is not.
 check_ports_or_warn() {
-    local svc=$1; shift
+    local svc=$1 own=$2; shift 2
     local busy=()
     for p in "$@"; do
-        check_port "$p" || busy+=("$p")
+        if ! check_port "$p"; then
+            if [[ -n "$own" ]] && docker port "$own" 2>/dev/null | grep -qE ":${p}\$"; then
+                continue
+            fi
+            busy+=("$p")
+        fi
     done
     if (( ${#busy[@]} > 0 )); then
         print_warn "$svc needs ports ${busy[*]} but they are already in use on the host."
@@ -155,6 +188,42 @@ check_ports_or_warn() {
         [[ "${ans,,}" == "y" ]] || return 1
     fi
     return 0
+}
+
+# Ask a yes/no question with an explicit default. Returns 0 for yes.
+#
+# Two things it deliberately does NOT do. It does not loop forever on a
+# missing terminal — a provisioning script piping into this installer would
+# hang, so no TTY means take the stated default and say so out loud. And it
+# does not accept a bare Enter as agreement to something dangerous: the
+# caller chooses the default, and for anything root-equivalent that default
+# is 'n'.
+prompt_yes_no() {
+    local question="$1" default="${2:-y}" ans hint
+    if [[ "${default,,}" == "y" ]]; then hint="Y/n"; else hint="y/N"; fi
+
+    if [[ ! -t 0 ]]; then
+        print_info "$question ($hint) — no terminal attached, taking the default: $default"
+        [[ "${default,,}" == "y" ]]
+        return
+    fi
+
+    # The separating space lives OUTSIDE the command substitution. Inside it
+    # depends on nothing eating trailing whitespace between print_info, echo
+    # and $( ) — a live run showed the re-asked prompt losing it. Out here it
+    # is part of the read prompt itself and cannot be lost.
+    local prompt
+    prompt="$(print_info "$question ($hint):")"
+    while true; do
+        read -rp "$prompt " ans || ans=""
+        ans="${ans,,}"
+        [[ -z "$ans" ]] && ans="${default,,}"
+        case "$ans" in
+            y|yes) return 0 ;;
+            n|no)  return 1 ;;
+            *)     print_warn "Please answer y or n." ;;
+        esac
+    done
 }
 
 # Run a command in the background with a spinner, then propagate its exit code.
@@ -206,11 +275,19 @@ map_os() {
     esac
 }
 
+# Drawn here, before OS detection, and not again on the first menu pass.
+# Detection can print a warning and open a manual picker, and a banner that
+# arrived afterwards would wipe the very question the operator just answered.
+dockhub_banner
+
 DETECTED=$(detect_os)
 OS=$(map_os "$DETECTED")
-print_info "Detected OS: $DETECTED"
-
+# Detection is deliberately silent on success — the banner directly above
+# already printed the distribution, and saying it twice in two different
+# formats invites the reader to wonder which one is authoritative. Failure
+# still speaks, loudly, immediately below.
 if [[ "$OS" == "unknown" ]]; then
+    echo
     print_warn "Could not auto-detect your OS. Please choose manually."
     PS3="Select your OS: "
     options=(
@@ -315,20 +392,18 @@ detect_environment() {
     local env_file="$REAL_HOME/docker/.dockhub-env"
     [[ -f "$env_file" ]] && return 0
 
-    echo
-    print_info "One-time setup question: what kind of server is this?"
-    echo "1) Home server (behind a home router — no public IP guaranteed)"
-    echo "2) VPS / cloud server (has a public IP)"
+    dockhub_ask "One-time setup question: what kind of server is this?"
+    dockhub_item 1 "Home server (behind a home router — no public IP guaranteed)"
+    dockhub_item 2 "VPS / cloud server (has a public IP)"
     local choice environment access_method=""
-    read -rp "Choice (1-2): " choice || choice=""
+    read -rp "Choice [ 1-2 ]: " choice || choice=""
     if [[ "$choice" == "1" ]]; then
         environment="home"
-        echo
-        echo "How do you plan to reach your services from the internet?"
-        echo "1) Port forwarding (forward 80/443 on your router to this server)"
-        echo "2) Cloudflare Tunnel (no port forwarding needed)"
+        dockhub_ask "How do you plan to reach your services from the internet?"
+        dockhub_item 1 "Port forwarding (forward 80/443 on your router to this server)"
+        dockhub_item 2 "Cloudflare Tunnel (no port forwarding needed)"
         local sub
-        read -rp "Choice (1-2): " sub || sub=""
+        read -rp "Choice [ 1-2 ]: " sub || sub=""
         if [[ "$sub" == "2" ]]; then
             access_method="tunnel"
         else
@@ -398,8 +473,46 @@ run_core_install() {
         INSTALL_COMPOSE="y"
     fi
 
-    INSTALL_NPM="y"
-    INSTALL_PORTAINER="y"
+    # Docker and Compose are settled above without a question, because there
+    # is no version of this project that works without them — offering a
+    # choice you cannot decline is theatre, not consent. These two are a
+    # different matter: a host that only ever uses LAN ports needs neither.
+    echo
+    print_info "Docker is the foundation and is not optional. These two are:"
+    if prompt_yes_no "  Install NGINX Proxy Manager? (domain names + free HTTPS)" y; then
+        INSTALL_NPM="y"
+    else
+        INSTALL_NPM="n"
+        print_info "  Skipped. Services will be reachable by host port only."
+    fi
+    if prompt_yes_no "  Install Portainer CE? (web view of your containers)" y; then
+        INSTALL_PORTAINER="y"
+    else
+        INSTALL_PORTAINER="n"
+    fi
+
+    # Whether Portainer gets a host port is a separate, harder question than
+    # whether to install it. It mounts the Docker socket, so reaching its web
+    # UI is equivalent to root on this host. Vaultwarden had its host-port
+    # option removed outright for being a password store; Portainer is the
+    # more dangerous of the two and kept its ports open by default. That was
+    # an inconsistency in this project, not a considered decision.
+    PORTAINER_PUBLISH="n"
+    if [[ "$INSTALL_PORTAINER" == "y" ]]; then
+        echo
+        print_warn "Portainer mounts /var/run/docker.sock. Anything that reaches its web"
+        print_warn "interface can start a container as root on this host. It is not a"
+        print_warn "dashboard — it is a key to the machine."
+        echo
+        print_info "  Saying no keeps it on 'main-net' only, reachable by container name."
+        print_info "  You then publish it deliberately, behind NGINX Proxy Manager and HTTPS."
+        if prompt_yes_no "  Publish Portainer's ports on this host anyway?" n; then
+            PORTAINER_PUBLISH="y"
+            print_warn "  Ports will be published on ALL interfaces. On a VPS that is the internet."
+        else
+            print_ok "  Portainer will have no host ports."
+        fi
+    fi
 
     # Only touch the package manager if we're actually about to install something —
     # an all-already-installed rerun (e.g. just adding NPM/Portainer later) should
@@ -446,7 +559,10 @@ run_core_install() {
     fi
 
     if [[ "${INSTALL_NPM,,}" == "y" ]]; then
-    if check_ports_or_warn "NGINX Proxy Manager" "$NPM_HTTP_PORT" "$NPM_HTTPS_PORT" "$NPM_ADMIN_PORT"; then
+    # 'npm-app-1' is what Compose names the 'app' service in the 'npm' folder.
+    # If a future Compose names it differently the lookup simply fails and we
+    # get the old, noisier behaviour — never a wrong one.
+    if check_ports_or_warn "NGINX Proxy Manager" "npm-app-1" "$NPM_HTTP_PORT" "$NPM_HTTPS_PORT" "$NPM_ADMIN_PORT"; then
         print_info "Installing NGINX Proxy Manager ($NPM_IMAGE)..."
         NPM_DIR="$REAL_HOME/docker/npm"
         mkdir -p "$NPM_DIR"
@@ -506,10 +622,63 @@ YAML
 fi
 
 if [[ "${INSTALL_PORTAINER,,}" == "y" ]]; then
-    if check_ports_or_warn "Portainer-CE" "$PORTAINER_EDGE_PORT" "$PORTAINER_HTTP_PORT" "$PORTAINER_HTTPS_PORT"; then
+    # Only a published port can collide with something. With no ports there is
+    # nothing to check, and asking about a conflict that cannot happen would
+    # be one more question that means nothing.
+    PORTAINER_PORTS_FREE=true
+    if [[ "$PORTAINER_PUBLISH" == "y" ]]; then
+        check_ports_or_warn "Portainer-CE" "portainer" "$PORTAINER_EDGE_PORT" "$PORTAINER_HTTP_PORT" "$PORTAINER_HTTPS_PORT" \
+            || PORTAINER_PORTS_FREE=false
+    fi
+    if [[ "$PORTAINER_PORTS_FREE" == true ]]; then
         print_info "Installing Portainer-CE ($PORTAINER_IMAGE)..."
         PORTAINER_DIR="$REAL_HOME/docker/portainer"
         mkdir -p "$PORTAINER_DIR"
+
+        # An existing compose file is reused, never overwritten — that promise
+        # is in the README and it stays. But if the file on disk publishes
+        # ports while the operator just asked for none, honouring the file
+        # silently exposes a root-equivalent service against an explicit
+        # instruction given seconds earlier. Warning afterwards, as this did
+        # at first, tells you about it only once it is already listening.
+        # So: detect it before deploying, ask, and keep a backup either way.
+        if [[ -f "$PORTAINER_DIR/docker-compose.yml" && "$PORTAINER_PUBLISH" == "n" ]]; then
+            # Lines inside the ports: block that are not bound to loopback.
+            EXPOSED=$(awk '
+                /^[[:space:]]*ports:/        { inp = 1; next }
+                /^[[:space:]]*[a-z_]+:/      { inp = 0 }
+                inp && /^[[:space:]]*-/      { print }
+            ' "$PORTAINER_DIR/docker-compose.yml" | grep -v '127\.0\.0\.1' || true)
+
+            if [[ -n "${EXPOSED//[$' \t\n']/}" ]]; then
+                echo
+                print_warn "The existing $PORTAINER_DIR/docker-compose.yml publishes:"
+                printf '%s\n' "$EXPOSED" | sed 's/^/      /'
+                print_warn "You just asked for no host ports. Deploying this file as-is would"
+                print_warn "expose Portainer anyway."
+                if prompt_yes_no "  Rewrite it without ports? (the current file is backed up)" y; then
+                    PORTAINER_BAK="$PORTAINER_DIR/docker-compose.yml.bak.$(date +%Y%m%d-%H%M%S)"
+                    cp -a "$PORTAINER_DIR/docker-compose.yml" "$PORTAINER_BAK"
+                    rm -f "$PORTAINER_DIR/docker-compose.yml"
+                    print_ok "  Backed up to $(basename "$PORTAINER_BAK") — a fresh file will be written."
+                else
+                    print_warn "  Keeping your file. Portainer WILL publish those ports."
+                fi
+            fi
+        fi
+
+        if [[ "$PORTAINER_PUBLISH" == "y" ]]; then
+            PORTAINER_PORTS_BLOCK="    ports:
+      - '$PORTAINER_EDGE_PORT:8000'
+      - '$PORTAINER_HTTP_PORT:9000'
+      - '$PORTAINER_HTTPS_PORT:9443'"
+        else
+            PORTAINER_PORTS_BLOCK="    # No host ports, by choice at install time. Portainer is reachable
+    # only on 'main-net', by the container name 'portainer'. To open it:
+    # add a Proxy Host in NGINX Proxy Manager pointing at portainer:9000
+    # over http — NPM terminates TLS, so 9443 is not needed. Add the ports
+    # back here and 'docker compose up -d' if you change your mind."
+        fi
 
         if [[ -f "$PORTAINER_DIR/docker-compose.yml" ]]; then
             print_warn "Existing docker-compose.yml found at $PORTAINER_DIR — keeping it (not overwritten)."
@@ -531,10 +700,7 @@ services:
     command:
       - --no-setup-token
     restart: always
-    ports:
-      - '$PORTAINER_EDGE_PORT:8000'
-      - '$PORTAINER_HTTP_PORT:9000'
-      - '$PORTAINER_HTTPS_PORT:9443'
+$PORTAINER_PORTS_BLOCK
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
@@ -562,7 +728,19 @@ YAML
         sleep 3
         if (cd "$PORTAINER_DIR" && docker compose ps --status=running --quiet | grep -q .); then
             print_ok "Portainer-CE is running."
-            print_warn "Portainer mounts /var/run/docker.sock (root-equivalent on host). Keep it behind a firewall."
+            # Verify what was actually published rather than trusting the
+            # compose file we just wrote. A stale docker-compose.yml from an
+            # earlier install is reused, not overwritten — so the answer given
+            # a minute ago may not be the answer that is running.
+            PORTAINER_BOUND=$(docker port portainer 2>/dev/null | tr '\n' ' ' || true)
+            if [[ -n "${PORTAINER_BOUND// /}" ]]; then
+                print_warn "Portainer is publishing: $PORTAINER_BOUND"
+                print_warn "That interface reaches a root-equivalent service. Firewall it."
+                [[ "$PORTAINER_PUBLISH" == "n" ]] && \
+                    print_warn "You asked for no ports — this came from an existing docker-compose.yml at $PORTAINER_DIR."
+            else
+                print_ok "Portainer publishes no host ports — reachable on main-net as 'portainer'."
+            fi
         else
             print_warn "Portainer started but no running container detected. Check: (cd $PORTAINER_DIR && docker compose logs)"
         fi
@@ -574,7 +752,27 @@ fi
 
 # --- Summary ---
 echo
-print_ok "Installation completed successfully!"
+# A live run declined both optional components immediately after a reset had
+# removed them, and this line still said "Installation completed
+# successfully!" — congratulating the operator for ending up with less than
+# they started with. Reporting success over an empty action is the exact
+# failure this project names on its own front page.
+CORE_CHANGED=false
+[[ "${INSTALL_DOCKER,,}"    == "y" || "${INSTALL_COMPOSE,,}"   == "y" \
+|| "${INSTALL_NPM,,}"       == "y" || "${INSTALL_PORTAINER,,}" == "y" ]] && CORE_CHANGED=true
+
+if [[ "$CORE_CHANGED" == true ]]; then
+    print_ok "Installation completed successfully!"
+else
+    print_warn "Nothing was installed — you declined both optional components."
+    if [[ "${DID_RESET:-false}" == true ]]; then
+        print_warn "The reset had already removed NPM and Portainer, so this host now has"
+        print_warn "neither. Rerun and answer yes if that is not what you meant."
+    fi
+    echo
+    print_info "Docker and the 'main-net' network are in place, which is all a service"
+    print_info "actually needs. Deploy one with:  bash services/services.sh"
+fi
 echo
 
 SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -598,9 +796,24 @@ fi
 
 if [[ "${INSTALL_PORTAINER,,}" == "y" ]]; then
     echo "-> Portainer-CE:"
-    echo "   URL (HTTP):  http://$SERVER_IP:$PORTAINER_HTTP_PORT"
-    echo "   URL (HTTPS): https://$SERVER_IP:$PORTAINER_HTTPS_PORT"
-    echo "   (Create admin account on first login)"
+    if [[ "$PORTAINER_PUBLISH" == "y" ]]; then
+        echo "   URL (HTTP):  http://$SERVER_IP:$PORTAINER_HTTP_PORT"
+        echo "   URL (HTTPS): https://$SERVER_IP:$PORTAINER_HTTPS_PORT"
+        echo "   (Create the admin account on first login — before anyone else does)"
+    else
+        echo "   No host port. Reachable on 'main-net' as: portainer:9000"
+        if [[ "${INSTALL_NPM,,}" == "y" ]]; then
+            echo "   To open it, add a Proxy Host in NGINX Proxy Manager:"
+            echo "     Forward Hostname / IP : portainer"
+            echo "     Forward Port          : 9000"
+            echo "     Scheme                : http     (NPM handles the HTTPS)"
+        else
+            echo "   You declined NPM, so nothing can reach it yet. Either install NPM,"
+            echo "   or add the ports back in $REAL_HOME/docker/portainer/docker-compose.yml."
+        fi
+        echo "   Whichever you choose, the admin account is claimed by the first"
+        echo "   visitor — reach it yourself before it is reachable by anyone else."
+    fi
     echo
 fi
 
@@ -620,7 +833,7 @@ if systemctl is-active --quiet firewalld 2>/dev/null; then
     print_warn "firewalld is active. If you cannot reach the services, open the ports, e.g.:"
     [[ "${INSTALL_NPM,,}" == "y" ]] && \
         echo "   sudo firewall-cmd --permanent --add-port=$NPM_HTTP_PORT/tcp --add-port=$NPM_HTTPS_PORT/tcp --add-port=$NPM_ADMIN_PORT/tcp"
-    [[ "${INSTALL_PORTAINER,,}" == "y" ]] && \
+    [[ "${INSTALL_PORTAINER,,}" == "y" && "$PORTAINER_PUBLISH" == "y" ]] && \
         echo "   sudo firewall-cmd --permanent --add-port=$PORTAINER_HTTP_PORT/tcp --add-port=$PORTAINER_HTTPS_PORT/tcp"
     echo "   sudo firewall-cmd --reload"
 fi
@@ -660,7 +873,11 @@ reset_npm_portainer() {
         fi
     fi
 
-    print_ok "NPM and Portainer reset. Reinstalling fresh..."
+    # Not "reinstalling fresh" — the questions that follow may decline both,
+    # and a message that promises an install the user then refuses is a lie
+    # the script tells itself.
+    DID_RESET=true
+    print_ok "NPM and Portainer removed. You will now be asked which to reinstall."
 }
 
 core_menu() {
@@ -676,12 +893,20 @@ core_menu() {
         if [[ "$core_installed" == true ]]; then
             echo
             print_ok "Core infrastructure is already installed (Docker, Compose, NPM, Portainer)."
-            echo "1) Reset NPM & Portainer (recreate containers; you'll be asked separately about wiping their data)"
-            echo "0) Back to main menu"
+            # Option 2 exists because making Portainer's ports a choice created
+            # a trap: once both are installed, the only route back to that
+            # question was a reset that tears down both services first. Being
+            # asked to demolish a thing in order to reconfigure it is not a
+            # choice anyone should have to make.
+            dockhub_ask "Core infrastructure — what would you like to do?"
+            dockhub_item 1 "Reset NPM & Portainer  (stop and recreate them; data wipe asked separately)"
+            dockhub_item 2 "Reconfigure            (keep them running; answer the install questions again)"
+            dockhub_item 0 "Back to main menu"
             local choice
-            read -rp "Choice (0-1): " choice || exit 0
+            read -rp "Choice [ 0-2 ]: " choice || exit 0
             case "$choice" in
                 1) reset_npm_portainer; run_core_install; return ;;
+                2) run_core_install; return ;;
                 0) return ;;
                 *) echo "Invalid choice." ;;
             esac
@@ -724,14 +949,25 @@ show_services_menu() {
 }
 
 main_menu() {
+    # Clear on success, never on error. A valid choice is a step forward and
+    # earns a clean screen; an invalid one leaves "Invalid choice." where it
+    # can be read. The same reasoning keeps the banner out of every error
+    # path in this script: the text on screen after a failure is the
+    # diagnosis, and wiping it costs more than the tidiness is worth.
+    #
+    # Starts at 0 because the banner is already on screen from before OS
+    # detection, and redrawing it now would erase that detection's output —
+    # including the manual OS picker, if it ran.
+    local redraw=0
     while true; do
-        echo
-        echo "What would you like to do?"
-        echo "1) Install / manage core infrastructure (Docker CE, Compose, NPM, Portainer)"
-        echo "2) Install a service"
-        echo "0) Exit"
+        (( redraw )) && dockhub_banner
+        redraw=1
+        dockhub_ask "What would you like to do?"
+        dockhub_item 1 "Install / manage core infrastructure (Docker CE, Compose, NPM, Portainer)"
+        dockhub_item 2 "Install a service"
+        dockhub_item 0 "Exit"
         local choice
-        read -rp "Choice (0-2): " choice || exit 0
+        read -rp "Choice [ 0-2 ]: " choice || exit 0
         case "$choice" in
             # core_menu only ever returns here via its own "back to main menu"
             # choice (every other path inside it ends the script via exit 0
@@ -739,7 +975,7 @@ main_menu() {
             1) core_menu ;;
             2) show_services_menu; return ;;
             0) exit 0 ;;
-            *) echo "Invalid choice." ;;
+            *) echo "Invalid choice."; redraw=0 ;;
         esac
     done
 }
