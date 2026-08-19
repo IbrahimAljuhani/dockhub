@@ -1135,8 +1135,16 @@ pull_with_progress() {
     cat "$raw" >> "$_pwp_log" 2>/dev/null || true
 
     if [[ "$rc" -ne 0 ]]; then
-        print_error "Image pull failed (exit $rc). Full output:"
+        # ORDER MATTERS. print_error exits, so it must come LAST — the
+        # previous version called it first and then tried to print the
+        # captured output, which therefore never printed at all. A failure
+        # that announces "Full output:" and then dies before showing it is
+        # worse than one that says nothing, because it sends the reader
+        # looking for output that was never written.
+        print_warn "Image pull failed (exit $rc). Full output:"
         sed 's/^/    /' "$raw" >&2
+        rm -f "$raw"
+        print_error "Could not pull the images for this service."
     fi
     rm -f "$raw"
     return "$rc"
