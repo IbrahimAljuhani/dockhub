@@ -131,6 +131,22 @@ else
     set_env_value DIFY_AGENT_API_TOKEN        "$(generate_secret_hex 32)" "$RUNTIME_DIR/.env"
     set_env_value DIFY_AGENT_SERVER_SECRET_KEY "$(openssl rand -base64 32)" "$RUNTIME_DIR/.env"
 
+    # ── Two non-secret defaults worth changing, using upstream's own knobs ──
+    #
+    # Anonymous access to Weaviate. We generate WEAVIATE_API_KEY and write it
+    # to both the client and the server's allow-list — and .env.example then
+    # sets ANONYMOUS_ACCESS_ENABLED=true, which accepts unauthenticated
+    # requests alongside the key, so the key gated nothing. Note upstream's
+    # COMPOSE default for this is already `false`; only .env.example flips it.
+    # Weaviate holds the knowledge-base index — your documents, embedded.
+    #
+    # ⚠️ If the knowledge base stops working, Dify's client is not sending the
+    # key and this is the cause. Set it back to true and rerun.
+    set_env_value WEAVIATE_AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED "false" "$RUNTIME_DIR/.env"
+    # Telemetry off, the same call made for Paperclip. Delete the line to
+    # restore upstream's behaviour.
+    set_env_value WEAVIATE_DISABLE_TELEMETRY "true" "$RUNTIME_DIR/.env"
+
     chmod 600 "$RUNTIME_DIR/.env"
     umask 022
 
@@ -163,6 +179,32 @@ ENV_HOST_PORT="$(read_env_value DOCKHUB_HOST_PORT "$RUNTIME_DIR/.env" || true)"
 ENV_ON_MAIN_NET="$(read_env_value DOCKHUB_ON_MAIN_NET "$RUNTIME_DIR/.env" || true)"
 
 if [[ ! -f "$RUNTIME_DIR/.dockhub-asked" ]]; then
+    # ── One correction to the shared warning, because it does not fit ────
+    # prompt_agent_network says "…lets <name> reach every other DockHub
+    # service by name, including Portainer and its Docker socket." That is
+    # exactly true for Paperclip, whose single container runs the agents AND
+    # joins main-net.
+    #
+    # It is NOT true for Dify, and saying it anyway would be scaring you with
+    # someone else's topology. Verified against upstream's compose:
+    #
+    #   nginx          default + main-net   ← the only one that joins, and it
+    #                                         is a reverse proxy, not an agent
+    #   api / worker   default + ssrf_proxy_network
+    #   sandbox        ssrf_proxy_network ONLY  ← cannot reach `default` at
+    #                                             all: no database, no redis,
+    #                                             no weaviate, no main-net
+    #   local_sandbox  agent_sandbox_network + local_sandbox_proxy_network
+    #
+    # Nothing that executes model-written code is on main-net, and the code
+    # executor cannot even reach Dify's own datastores. Upstream's isolation
+    # here is genuinely good and deserves to be said plainly rather than
+    # buried under a borrowed warning.
+    print_info "Note for Dify specifically: only its nginx joins 'main-net', and"
+    print_info "nginx runs no agent code. Its sandbox — the container that actually"
+    print_info "executes generated code — is on an isolated network with no route to"
+    print_info "'main-net', to Dify's database, or to Redis. The warning below is the"
+    print_info "shared one; for Dify the exposure is the web front end, not the sandbox."
     prompt_agent_network "Dify"
     ENV_ON_MAIN_NET="$AGENT_ON_MAIN_NET"
 
@@ -201,8 +243,20 @@ if [[ -n "$ENV_HOST_PORT" ]]; then
     # nothing to do and the deploy died without ever starting a container.
     # Caught on the first live run. Generating a file is not the same as
     # generating a valid one; the check below is why this cannot recur.
-    sed -i "s|ports: !override \[\]|ports: !override\n      - \"${ENV_HOST_PORT}:80\"|" \
+    # Aimed at the DOCKHUB:HOSTPORT marker, not at the bare pattern. There are
+    # now two `ports: !override []` lines — nginx's and plugin_daemon's — and
+    # an untargeted substitution rewrote BOTH, publishing the plugin debugging
+    # daemon on the web port and undoing the fix that had just closed it.
+    sed -i "s|ports: !override \[\]   # DOCKHUB:HOSTPORT|ports: !override\n      - \"${ENV_HOST_PORT}:80\"|" \
         "$RUNTIME_DIR/docker-compose.override.yml"
+fi
+
+# Whatever happened above, the plugin debugging port stays closed. Asserted
+# rather than assumed, because this is a security property that a future edit
+# to the substitution above could silently take away.
+if grep -qE '^\s+- "[0-9]+:5003"' "$RUNTIME_DIR/docker-compose.override.yml"; then
+    print_error "The plugin debugging port would be published — refusing to start.
+    This is a bug in deploy.sh: see docker-compose.override.yml, plugin_daemon."
 fi
 
 # The override is generated, so it gets verified before anything depends on

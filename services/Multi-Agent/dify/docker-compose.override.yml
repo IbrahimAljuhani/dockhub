@@ -39,7 +39,14 @@ services:
     # only through main-net, by name, which is how every other service in
     # this catalogue is reached. deploy.sh offers an optional host port and
     # writes it back into this list when you ask for one.
-    ports: !override []
+    #
+    # The marker on the next line is required. deploy.sh substitutes the
+    # chosen host port into it, and there is now a SECOND identical
+    # `ports: !override []` further down on plugin_daemon. Without something
+    # to aim at, that substitution matched BOTH — publishing the plugin
+    # debugging daemon on the web port and silently undoing the fix that
+    # closed it. Caught by rendering the generated file, not by reading it.
+    ports: !override []   # DOCKHUB:HOSTPORT
 
     networks:
       # Upstream's default network, so nginx can still reach api/web. Named
@@ -60,6 +67,81 @@ services:
     # nginx:latest has neither wget nor curl, which is why the first version
     # of that probe could never succeed.
     container_name: dify-api
+
+  plugin_daemon:
+    # ── 5. THE DOOR WE LEFT OPEN WHILE CLOSING THE FRONT ONE ─────────────
+    # Upstream publishes a host port here too:
+    #
+    #     ports:
+    #       - "${EXPOSE_PLUGIN_DEBUGGING_PORT:-5003}:${PLUGIN_DEBUGGING_PORT:-5003}"
+    #
+    # and .env sets PLUGIN_DEBUGGING_HOST=0.0.0.0. That is the plugin REMOTE
+    # DEBUGGING endpoint, bound to every interface — published whether or not
+    # you asked for a host port, and regardless of the main-net answer.
+    #
+    # We removed nginx's 80 and 443 with some care and did not notice this
+    # one until it showed up in a Portainer container list as 5003:5003.
+    # Closing the front door while a side door stays open is not a smaller
+    # version of security; it is the appearance of it.
+    #
+    # It is for developing plugins against a running instance, not for
+    # running them. If you ever need it, publish it deliberately and to
+    # 127.0.0.1, then reach it over SSH — the same rule this project applies
+    # to OpenHands and Hermes.
+    ports: !override []
+
+  # ── 6. HARDENING, SCOPED TO WHAT IT ACTUALLY BUYS ──────────────────────
+  # Upstream sets no cap_drop, security_opt or read_only on ANY of its 39
+  # services — checked, not assumed. Paperclip and all three AI-Agents carry
+  # DockHub's three-capability block, so Dify was the odd one out.
+  #
+  # But it is applied HERE ONLY, to the three containers that run code or
+  # plugins, and not blanket across fifteen. Two reasons:
+  #
+  #   · The value is concentrated. Upstream's network isolation already does
+  #     the heavy lifting — `sandbox` sits on ssrf_proxy_network alone and
+  #     cannot reach the database, Redis, Weaviate or main-net. These flags
+  #     are defence in depth on top of a real boundary, not a substitute for
+  #     one.
+  #   · The risk is not zero. squid (ssrf_proxy) can use NET_RAW for its
+  #     optional ICMP pinger, and postgres/redis/weaviate gain nothing from
+  #     being poked at. Dropping capabilities from containers whose needs we
+  #     have not measured is how a stack breaks in a way nobody connects back
+  #     to a security change.
+  #
+  # ⚠️ NOT yet verified on a running server. Watch these three specifically
+  # on the next deploy; if one refuses to start, this block is the first
+  # place to look. Verify what actually applied with:
+  #   docker exec dify-sandbox-1 grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+  # Written out twice rather than shared with a YAML anchor. An anchor would
+  # be tidier and I could not verify it expands the way I expect under this
+  # Compose version — and this session has already shipped two "obviously
+  # fine" constructs that were not. Ten explicit lines beat five clever ones
+  # when the clever ones cannot be tested.
+  sandbox:
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
+
+  local_sandbox:
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
+
+  # Weaviate's anonymous-access fix is NOT here. It belongs in .env, because
+  # upstream's compose already reads
+  #     AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: ${WEAVIATE_..._ENABLED:-false}
+  # — their own default is already false; it is .env.example that flips it to
+  # true. Using their knob instead of overriding the container keeps this
+  # file to things upstream gives no switch for. See deploy.sh.
 
   db_postgres:
     # ── 3. A NAME backup.sh CAN REACH ────────────────────────────────────
