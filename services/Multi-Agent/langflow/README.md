@@ -9,6 +9,7 @@ Visual builder for agents and flows, on LangChain/LangGraph — with **custom Py
 | **Database** | Postgres — upstream's own reference deployment |
 | **Port** | `7860` in the container |
 | **Runtime dir** | `~/docker/langflow/` |
+| **Status** | ✅ deployed, backed up and restored on a real server, 2026-08-19 |
 
 ---
 
@@ -24,7 +25,7 @@ Or directly: `bash deploy.sh`.
 
 Your login is generated and printed at the end of the deploy. It is also in `~/docker/langflow/.env` as `LANGFLOW_SUPERUSER` / `LANGFLOW_SUPERUSER_PASSWORD`.
 
-> Langflow creates the superuser **once**, at first start. If you change the password in the UI, the value in `.env` goes stale — it is what the account was created with, not what it currently is.
+> The password in `.env` is what the superuser account was **created with**. Whether Langflow re-applies `LANGFLOW_SUPERUSER_PASSWORD` on every restart, or only on the first one, is **not stated anywhere in upstream's documentation** — so if you change the password in the UI, do not assume the change survives a redeploy until you have tested it on your own instance. (An earlier version of this README asserted it does survive. That was an assumption, not a finding, and it has been withdrawn.)
 
 ---
 
@@ -43,6 +44,8 @@ Upstream ships a two-service `docker_example/docker-compose.yml`, and this deplo
 **`postgres:17-alpine`, where upstream pins `postgres:16-trixie`.** Their comment explains that pin: a moving Debian base can update the OS under an existing data volume, and glibc collation changes can corrupt indexes. The concern is real, but it argues for *pinning*, not for Debian — and this catalogue standardises on `postgres:17-alpine`, equally pinned, alongside [Paperclip](../paperclip/) and [Flowise](../flowise/). What matters is not switching libc under an **existing** volume, so don't move a live `langflow-db` between alpine and Debian-based tags in either direction.
 
 **Telemetry off** via `DO_NOT_TRACK`, which upstream leaves on.
+
+**It joins `ai-net`**, so a flow can point at an [Ollama](../../AI/ollama/), [llama.cpp](../../AI/llama-cpp/) or [LocalAI](../../AI/localai/) deployed from the AI category **by container name** — `http://ollama:11434`, with no published port on either side. Upstream's compose has no equivalent, because upstream does not assume a model provider next door.
 
 **Capabilities dropped** — `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`.
 
@@ -74,11 +77,21 @@ Why it matters that the key is set at all: leave `LANGFLOW_SECRET_KEY` unset and
 
 ---
 
-## 🔓 `LANGFLOW_AUTO_LOGIN` — set to `False`, explicitly
+## 🔓 Three auth settings, all set explicitly
 
-`LANGFLOW_AUTO_LOGIN=True` does not mean "log in automatically". It means **there is no login**: anyone who reaches the port is the superuser.
+`LANGFLOW_AUTO_LOGIN=True` does not mean "log in automatically". It means **there is no login**: anyone who reaches the port is the superuser. Current versions default it to `False`, older ones to `True`.
 
-Current versions default it to `False`. Older ones defaulted to `True`. This deployment sets it explicitly, because the difference between "authenticated" and "wide open" is not a value to inherit from whichever image tag you happen to land on.
+`LANGFLOW_ENABLE_SIGNUP` **defaults to `True`**, which leaves `POST /api/v1/users/` open — an unauthenticated endpoint that creates rows in your database for anyone who can reach the port. It is less alarming than it sounds, because `LANGFLOW_NEW_USER_IS_ACTIVE` defaults to `False`, so a self-registered account exists but is **inactive** and cannot sign in until a superuser activates it. The default is therefore "anyone can create a dormant account", not "anyone gets in".
+
+| | set to | upstream default |
+|---|---|---|
+| `LANGFLOW_AUTO_LOGIN` | `False` | `False` now, `True` in older versions |
+| `LANGFLOW_ENABLE_SIGNUP` | `False` | **`True`** |
+| `LANGFLOW_NEW_USER_IS_ACTIVE` | `False` | `False` |
+
+All three are pinned here rather than inherited. A DockHub deployment has one operator who already holds the superuser account, so an open registration endpoint buys nothing and costs an unauthenticated write — and a security-relevant default is not a value to take from whichever image tag you happen to land on. `AUTO_LOGIN` has already moved once.
+
+**To add a second user:** sign in as the superuser and create the account, then activate it. Signup does not need to be turned back on.
 
 ---
 
@@ -106,7 +119,6 @@ To move version: edit `LANGFLOW_VERSION` in `~/docker/langflow/.env` and rerun.
 
 ## ⚠️ Known unknowns
 
-- **Not yet live-tested.** This note comes down after a real deploy on a real server. Everything above is derived from upstream's own compose file, Dockerfile and documentation, read literally — not from a running instance.
 - **Memory** — `deploy.sh` suggests a 2 GB limit, higher than the rest of the category, because Langflow loads its full component library at startup. Not a measured figure.
 - **`LANGFLOW_SSRF_PROTECTION_ENABLED` and `LANGFLOW_STORE_ENVIRONMENT_VARIABLES`** exist in upstream's `.env.example` and are left at their defaults here. Worth revisiting once the service has been exercised.
 

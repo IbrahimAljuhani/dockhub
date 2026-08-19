@@ -68,6 +68,40 @@ services:
     # of that probe could never succeed.
     container_name: dify-api
 
+    # ── THE MODEL-PROVIDER NETWORK, ADDED 2026-08-19 ─────────────────────
+    # Until this date deploy.sh printed "Dify will run on 'ai-net', where it
+    # can reach the model provider. That is all it needs to work." and NOTHING
+    # in this project joined ai-net. The statement was false and the capability
+    # was missing: the only way to reach a DockHub Ollama was the host's LAN
+    # address and a published port — i.e. exposing an API with no
+    # authentication, to obtain a connection Docker would have made privately.
+    #
+    # Now a model provider is reachable by name: http://ollama:11434
+    #
+    # THE LIST IS COMPLETE, not just the addition, and that is deliberate.
+    # Upstream declares `[ssrf_proxy_network, default]` here, so Compose MERGES
+    # and repeating them is a harmless no-op. But if a future upstream release
+    # drops the explicit list, membership becomes implicit — and a `networks:`
+    # key in an override REPLACES implicit membership rather than adding to it.
+    # Writing the full list is correct under both rules; writing only `ai-net`
+    # is correct under one of them and severs api from web/db under the other.
+    # Same reasoning already recorded for paperclip's override.
+    networks:
+      - ssrf_proxy_network
+      - default
+      - ai-net
+
+  worker:
+    # The async half — Celery tasks: document indexing, embedding generation,
+    # scheduled runs. It calls model providers exactly as `api` does, so it
+    # needs the same reach; giving it to `api` alone would make synchronous
+    # chat work against a local model while RAG indexing silently failed.
+    # Upstream declares the same two networks here.
+    networks:
+      - ssrf_proxy_network
+      - default
+      - ai-net
+
   plugin_daemon:
     # ── 5. THE DOOR WE LEFT OPEN WHILE CLOSING THE FRONT ONE ─────────────
     # Upstream publishes a host port here too:
@@ -89,6 +123,18 @@ services:
     # 127.0.0.1, then reach it over SSH — the same rule this project applies
     # to OpenHands and Hermes.
     ports: !override []
+
+    # ai-net here too, and for a reason specific to Dify 1.x: MODEL PROVIDERS
+    # ARE PLUGINS in this version, and this daemon is what runs them. Which
+    # process opens the actual socket to Ollama — api, worker, or the plugin
+    # hosting the provider — is not something upstream's compose states, and
+    # guessing wrong reproduces exactly the bug this change fixes. Joining a
+    # network costs nothing, so all three plausible callers get it rather than
+    # one chosen by assumption. Complete list, for the reason given on `api`.
+    networks:
+      - ssrf_proxy_network
+      - default
+      - ai-net
 
   # ── 6. HARDENING, SCOPED TO WHAT IT ACTUALLY BUYS ──────────────────────
   # Upstream sets no cap_drop, security_opt or read_only on ANY of its 39
@@ -158,8 +204,22 @@ services:
     # backup_service_generic for what was wrong and why it is fixed.
     container_name: dify-db
 
-# DOCKHUB:MAINNET-BLOCK-START
+# ── ONE top-level `networks:` key, and the markers sit INSIDE it ────────
+# This shape is load-bearing. deploy.sh deletes everything between
+# MAINNET-BLOCK-START and MAINNET-BLOCK-END when you decline main-net, so the
+# `networks:` key itself must live OUTSIDE the markers — otherwise declining
+# would delete the map that ai-net is declared in and take ai-net with it.
+#
+# The obvious alternative — a second `networks:` block for ai-net — is a
+# DUPLICATE TOP-LEVEL KEY. That is the exact fault that once killed this
+# service silently: Compose could not parse the project, `pull` reported
+# "images already present", and the deploy died with no error.
 networks:
+  # Always declared: reaching a local model provider is not part of the
+  # main-net question, and Dify must keep it in both answers.
+  ai-net:
+    external: true
+# DOCKHUB:MAINNET-BLOCK-START
   main-net:
     external: true
 # DOCKHUB:MAINNET-BLOCK-END

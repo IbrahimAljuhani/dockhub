@@ -185,8 +185,23 @@ volumes:
   db-data:
 
 networks:
-  # Declared HERE, not in the override, because it is not a choice: it exists
-  # whichever answer you gave the main-net question. The override still owns
-  # the app's OTHER network, and top-level `networks:` maps merge across
-  # files, so the two declarations coexist rather than collide.
+  # Declared HERE, not in the override, because neither of these is a choice:
+  # both exist whichever answer you gave the main-net question. The override
+  # still owns the app's OTHER network, and top-level `networks:` maps merge
+  # across files, so the declarations coexist rather than collide.
   flowise-db-net:
+  # The shared model-provider network, so a flow can point at an Ollama /
+  # llama.cpp / LocalAI deployed from the AI category BY CONTAINER NAME —
+  # http://ollama:11434 rather than a published host port.
+  #
+  # This was missing until 2026-08-19, and its absence made deploy.sh a liar:
+  # prompt_agent_network prints "Flowise will run on 'ai-net', where it can
+  # reach the model provider. That is all it needs to work." while nothing
+  # joined it. The only route left was the host's LAN address and a published
+  # Ollama port — which means exposing an API that has no authentication at
+  # all, to get a connection Docker was willing to make privately.
+  #
+  # Declared external and joined from the override (membership is what
+  # merges), the same shape paperclip uses.
+  ai-net:
+    external: true

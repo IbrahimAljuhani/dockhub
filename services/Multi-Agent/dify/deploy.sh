@@ -31,6 +31,9 @@ fi
 
 check_prerequisites
 ensure_main_net
+# api, worker and plugin_daemon join this unconditionally, so it must exist
+# even on a host that has never deployed anything from the AI category.
+ensure_ai_net
 
 # ── Compose 2.24+ is required, and the reason is specific ───────────────
 # docker-compose.override.yml uses the `!override` tag to REPLACE upstream's

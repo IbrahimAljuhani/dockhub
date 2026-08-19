@@ -32,6 +32,8 @@ Or directly: `bash deploy.sh`.
 
 **Postgres, with a generated password.** Upstream's `.env.example` sets `DATABASE_TYPE=postgres` with the literal `DATABASE_PASSWORD=mypassword` and *no database container to talk to* — so following it gives you a published password and a service that cannot connect. Here there is a real `flowise-db`, on a private network of its own, with a password generated on first deploy.
 
+**It joins `ai-net`**, so a flow can point at an [Ollama](../../AI/ollama/), [llama.cpp](../../AI/llama-cpp/) or [LocalAI](../../AI/localai/) deployed from the AI category **by container name** — `http://ollama:11434` in the node's Base URL, with no published port on either side. Upstream's compose has no equivalent, because upstream does not assume a model provider next door.
+
 **Every file path points inside the volume.** Upstream's example leaves `LOG_PATH`, `BLOB_STORAGE_PATH` and the rest as `/your_*_path` placeholders. Unset, logs and uploads land in the image's ephemeral layer, where replacing the container destroys them.
 
 **Capabilities dropped** — `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`. Warranted here more than in most of the catalogue; see below.

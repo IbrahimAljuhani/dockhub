@@ -115,6 +115,28 @@ services:
       LANGFLOW_SUPERUSER: "${LANGFLOW_SUPERUSER}"
       LANGFLOW_SUPERUSER_PASSWORD: "${LANGFLOW_SUPERUSER_PASSWORD}"
 
+      # ── PUBLIC REGISTRATION, CLOSED ──────────────────────────────────
+      # LANGFLOW_ENABLE_SIGNUP defaults to TRUE. That leaves
+      # `POST /api/v1/users/` open: an UNAUTHENTICATED endpoint that creates
+      # rows in your database, reachable by anyone who can reach the port.
+      #
+      # It is not as bad as it first looks, because LANGFLOW_NEW_USER_IS_ACTIVE
+      # defaults to False — a self-registered account exists but is INACTIVE
+      # and cannot sign in until a superuser activates it. So the default is
+      # "anyone can create a dormant account", not "anyone gets in".
+      #
+      # Both are set explicitly anyway, for the same reason AUTO_LOGIN is: a
+      # DockHub deployment has one operator who already has the superuser
+      # account, so an open registration endpoint buys nothing and costs an
+      # unauthenticated write. And a security-relevant default is not
+      # something to inherit from whichever image tag you land on — this one
+      # in particular has moved before.
+      #
+      # To add a real second user: log in as the superuser and create the
+      # account, then activate it. Turning signup back on is not required.
+      LANGFLOW_ENABLE_SIGNUP: "False"
+      LANGFLOW_NEW_USER_IS_ACTIVE: "False"
+
       DO_NOT_TRACK: "true"
 
     volumes:
@@ -187,7 +209,22 @@ volumes:
   db-data:
 
 networks:
-  # Declared HERE rather than in the override because it is not a choice —
-  # it exists in both answers. Top-level `networks:` maps merge across files,
-  # so this coexists with whatever the override declares.
+  # Declared HERE rather than in the override because neither is a choice —
+  # both exist in both answers. Top-level `networks:` maps merge across
+  # files, so these coexist with whatever the override declares.
   langflow-db-net:
+  # The shared model-provider network, so a flow can point at an Ollama /
+  # llama.cpp / LocalAI deployed from the AI category BY CONTAINER NAME —
+  # http://ollama:11434 rather than a published host port.
+  #
+  # This was missing until 2026-08-19, and its absence made deploy.sh a liar:
+  # prompt_agent_network prints "Langflow will run on 'ai-net', where it can
+  # reach the model provider. That is all it needs to work." while nothing
+  # joined it. The only route left was the host's LAN address and a published
+  # Ollama port — which means exposing an API that has no authentication at
+  # all, to get a connection Docker was willing to make privately.
+  #
+  # Declared external and joined from the override (membership is what
+  # merges), the same shape paperclip uses.
+  ai-net:
+    external: true
