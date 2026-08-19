@@ -82,32 +82,111 @@ else
     # most valuable thing this script does.
     cp "$RUNTIME_DIR/.env.example" "$RUNTIME_DIR/.env"
 
+    # ── Secrets that are USED IN PAIRS ───────────────────────────────────
+    # Generated into variables first, because several of these appear in more
+    # than one key and both ends must match. The first version of this set
+    # each key independently and shipped a deployment where:
+    #
+    #   REDIS_PASSWORD    = <generated>
+    #   CELERY_BROKER_URL = redis://:difyai123456@redis:6379/1   ← unchanged
+    #
+    # — two different passwords for one Redis — and where SANDBOX_API_KEY was
+    # regenerated while CODE_EXECUTION_API_KEY, the other end of the same
+    # handshake, still said `dify-sandbox`. Found by reading the .env a live
+    # deploy produced, not by reading this script.
+    local _redis_pw _sandbox_key _weaviate_key
+    _redis_pw="$(generate_secret 32)"
+    _sandbox_key="$(generate_secret_hex 32)"
+    _weaviate_key="$(generate_secret_hex 32)"
+
     umask 077
     # Dify's own docs specify base64 for SECRET_KEY; the rest are ours.
     set_env_value SECRET_KEY                "$(openssl rand -base64 42)" "$RUNTIME_DIR/.env"
     set_env_value INIT_PASSWORD             "$(generate_secret 24)"      "$RUNTIME_DIR/.env"
     set_env_value DB_PASSWORD               "$(generate_secret 32)"      "$RUNTIME_DIR/.env"
-    set_env_value REDIS_PASSWORD            "$(generate_secret 32)"      "$RUNTIME_DIR/.env"
-    set_env_value SANDBOX_API_KEY           "$(generate_secret_hex 32)"  "$RUNTIME_DIR/.env"
     set_env_value PLUGIN_DAEMON_KEY         "$(generate_secret_hex 32)"  "$RUNTIME_DIR/.env"
     set_env_value PLUGIN_DIFY_INNER_API_KEY "$(generate_secret_hex 32)"  "$RUNTIME_DIR/.env"
+
+    # Redis — the password and every URL that embeds it.
+    set_env_value REDIS_PASSWORD    "$_redis_pw" "$RUNTIME_DIR/.env"
+    set_env_value CELERY_BROKER_URL "redis://:${_redis_pw}@redis:6379/1" "$RUNTIME_DIR/.env"
+
+    # The sandbox handshake — one key, two names, both ends.
+    set_env_value SANDBOX_API_KEY        "$_sandbox_key" "$RUNTIME_DIR/.env"
+    set_env_value CODE_EXECUTION_API_KEY "$_sandbox_key" "$RUNTIME_DIR/.env"
+
+    # Weaviate ships a published key in three places at once: the client's
+    # key, the server's allow-list, and nothing checks they agree except
+    # reality. All three get the same generated value.
+    set_env_value WEAVIATE_API_KEY                        "$_weaviate_key" "$RUNTIME_DIR/.env"
+    set_env_value WEAVIATE_AUTHENTICATION_APIKEY_ALLOWED_KEYS "$_weaviate_key" "$RUNTIME_DIR/.env"
+
+    # Two that upstream's own .env.example tells you to replace, in writing:
+    #   "Replace this development default in production."
+    # A default that documents its own unsuitability is still a default.
+    set_env_value DIFY_AGENT_API_TOKEN        "$(generate_secret_hex 32)" "$RUNTIME_DIR/.env"
+    set_env_value DIFY_AGENT_SERVER_SECRET_KEY "$(openssl rand -base64 32)" "$RUNTIME_DIR/.env"
+
     chmod 600 "$RUNTIME_DIR/.env"
     umask 022
-    print_info "Generated every credential — none of upstream's published defaults survive."
+
+    # ── Verified, not asserted ───────────────────────────────────────────
+    # An earlier version printed "none of upstream's published defaults
+    # survive" and it was FALSE — five did. A script must not claim something
+    # its own output file contradicts, so the claim is now a check.
+    local _left
+    _left="$(grep -nE 'difyai123456|dify-sandbox|WVF5YThaHlkYwhGUSmCRgsX3tD5ngdN8pkih|dify-agent-run-token-for-dev-only|MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY' \
+        "$RUNTIME_DIR/.env" || true)"
+    if [[ -n "$_left" ]]; then
+        print_warn "Upstream default credentials still present in .env — this is a bug in deploy.sh:"
+        echo "$_left" | sed 's/^/    /' >&2
+        print_error "Refusing to start with published credentials in place."
+    fi
+    print_info "Generated every credential, and verified no published default survived."
 fi
 
 # Our layer, refreshed every run so an edit here reaches existing deployments.
 cp "$SOURCE_DIR/docker-compose.override.yml" "$RUNTIME_DIR/"
 
-# ── Optional host port ──────────────────────────────────────────────────
-# The override removes upstream's 80/443 outright. This adds one back only if
-# asked, and never 80 — that belongs to NGINX Proxy Manager.
+# ── How Dify is reached, asked the same way its category-mates are ──────
+# Dify was originally deployed asking ONE question — the host port — while
+# Paperclip, in the same category, asks the main-net security question first.
+# That inconsistency was wrong in the more dangerous direction: Dify runs a
+# CODE SANDBOX. It executes code a model wrote, on behalf of text the model
+# read. The Multi-Agent threat model applies to it more than to Paperclip,
+# not less, so it gets the same question with the same reasons named.
 ENV_HOST_PORT="$(read_env_value DOCKHUB_HOST_PORT "$RUNTIME_DIR/.env" || true)"
-if [[ -z "$ENV_HOST_PORT" ]] && [[ ! -f "$RUNTIME_DIR/.dockhub-asked" ]]; then
-    prompt_host_port 8088
-    set_env_value DOCKHUB_HOST_PORT "${HOST_PORT:-}" "$RUNTIME_DIR/.env"
-    touch "$RUNTIME_DIR/.dockhub-asked"
+ENV_ON_MAIN_NET="$(read_env_value DOCKHUB_ON_MAIN_NET "$RUNTIME_DIR/.env" || true)"
+
+if [[ ! -f "$RUNTIME_DIR/.dockhub-asked" ]]; then
+    prompt_agent_network "Dify"
+    ENV_ON_MAIN_NET="$AGENT_ON_MAIN_NET"
+
+    if (( ENV_ON_MAIN_NET )); then
+        prompt_host_port 8088
+    else
+        # No proxy in the path, so a host port is the only way in. Offering
+        # to skip it would be offering a deployment nobody can reach.
+        print_info "Not on 'main-net', so a host port is the only way to reach it."
+        HOST_PORT=""
+        while [[ -z "$HOST_PORT" ]]; do
+            prompt_host_port 8088
+            [[ -n "$HOST_PORT" ]] || print_warn "A port is required in this mode — otherwise nothing can reach Dify."
+        done
+    fi
     ENV_HOST_PORT="${HOST_PORT:-}"
+    set_env_value DOCKHUB_HOST_PORT   "$ENV_HOST_PORT"   "$RUNTIME_DIR/.env"
+    set_env_value DOCKHUB_ON_MAIN_NET "$ENV_ON_MAIN_NET" "$RUNTIME_DIR/.env"
+    touch "$RUNTIME_DIR/.dockhub-asked"
+fi
+# Deployments made before this setting existed were always on main-net.
+[[ -z "$ENV_ON_MAIN_NET" ]] && ENV_ON_MAIN_NET=1
+
+if (( ! ENV_ON_MAIN_NET )); then
+    # Both halves, by marker — the attachment and the external declaration.
+    sed -i '/# DOCKHUB:MAINNET$/d' "$RUNTIME_DIR/docker-compose.override.yml"
+    sed -i '/# DOCKHUB:MAINNET-BLOCK-START/,/# DOCKHUB:MAINNET-BLOCK-END/d' \
+        "$RUNTIME_DIR/docker-compose.override.yml"
 fi
 if [[ -n "$ENV_HOST_PORT" ]]; then
     # Substituted INTO the existing nginx block, not appended as a new one.
@@ -145,9 +224,15 @@ print_info "Starting $SERVICE_NAME (this brings up ~15 containers)..."
 # Probed from inside dify-nginx against its own port, so this tests Dify
 # rather than the host's networking. A 200 or a redirect both mean the stack
 # answered; anything else is reported as it is rather than interpreted.
+# Probed from dify-api, not dify-nginx. The first version ran `wget` inside
+# nginx:latest — which ships neither wget nor curl, so the probe could never
+# succeed and every deployment waited the full 200s before warning about a
+# stack that was already up. dify-api is a Python image, so python is there
+# by construction. It connects to nginx by service name across the compose
+# network, which is the path a browser's request actually takes.
 print_info "Waiting for Dify to answer (first boot runs database migrations)..."
-if wait_for_container_ready "dify-nginx" \
-     "wget -q -O /dev/null -T 3 http://localhost:80/ || wget -q -S -O /dev/null -T 3 http://localhost:80/ 2>&1 | grep -q 'HTTP/'" \
+if wait_for_container_ready "dify-api" \
+     "python -c \"import socket,sys; socket.create_connection(('nginx',80),3); sys.exit(0)\"" \
      40 5; then
     print_info "Dify is answering."
 else

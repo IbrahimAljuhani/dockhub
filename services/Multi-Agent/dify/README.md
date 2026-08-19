@@ -44,17 +44,24 @@ Read that and you have read every change DockHub makes.
 
 ## 🔐 What the override and deploy.sh actually change
 
-**Every credential is generated.** Upstream's `.env.example` ships working defaults for all of them:
+**Every credential is generated — and the result is checked, not assumed.** Upstream's `.env.example` ships working defaults for all of them, several being real keys published in a public repository:
 
 ```
-DB_PASSWORD=difyai123456
-REDIS_PASSWORD=difyai123456
-SANDBOX_API_KEY=dify-sandbox
-PLUGIN_DAEMON_KEY=lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+Sjc3ZtU+qUEi
-PLUGIN_DIFY_INNER_API_KEY=QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1
+DB_PASSWORD=difyai123456          REDIS_PASSWORD=difyai123456
+SANDBOX_API_KEY=dify-sandbox      CODE_EXECUTION_API_KEY=dify-sandbox
+CELERY_BROKER_URL=redis://:difyai123456@redis:6379/1
+WEAVIATE_API_KEY=WVF5YThaHlkYwhGUSmCRgsX3tD5ngdN8pkih
+PLUGIN_DAEMON_KEY=lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+…
+PLUGIN_DIFY_INNER_API_KEY=QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy69…
+DIFY_AGENT_API_TOKEN=dify-agent-run-token-for-dev-only
+DIFY_AGENT_SERVER_SECRET_KEY=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
 ```
 
-Those last two are **real keys published in a public repository**. Anyone who copied the example and moved on is running a deployment whose every secret is on GitHub. `deploy.sh` replaces all of them, plus `SECRET_KEY` and `INIT_PASSWORD`, before the first start.
+Anyone who copied the example and moved on is running a deployment whose every secret is on GitHub. The last two are flagged *by upstream's own file* — "Replace this development default in production" — which is a default that documents its own unsuitability.
+
+**Several of these come in pairs**, and that is where the first version of this script got it wrong: it regenerated `REDIS_PASSWORD` but left `CELERY_BROKER_URL` embedding the old one, and regenerated `SANDBOX_API_KEY` while `CODE_EXECUTION_API_KEY` — the other end of the same handshake — still read `dify-sandbox`. Both ends are now written from one generated value.
+
+`deploy.sh` then **greps the finished `.env` for every one of those literals and refuses to start if any survived**. It used to print "none of upstream's published defaults survive"; that claim was false, and a claim its own output file contradicts is worse than no claim.
 
 **The port collision is removed.** Upstream publishes `80:80` and `443:443`. DockHub's NGINX Proxy Manager already owns both — deploying Dify unchanged would fight the proxy meant to serve it, and on a VPS take the host's HTTP down with it. The override drops both; a host port is added back only if you ask, and never 80.
 

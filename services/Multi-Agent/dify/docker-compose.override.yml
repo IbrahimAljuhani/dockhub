@@ -47,7 +47,19 @@ services:
       # default membership — omitting it here would cut nginx off from the
       # application it proxies.
       - default
-      - main-net
+      # The marker is load-bearing: deploy.sh deletes this line, and the
+      # matching block at the end of the file, when you decline main-net.
+      - main-net   # DOCKHUB:MAINNET
+
+  api:
+    # ── 4. A NAME FOR THE THING YOU ARE TOLD TO WATCH ────────────────────
+    # deploy.sh tells you to run `docker logs -f dify-api` when the first
+    # boot is slow. Without this the container is called dify-api-1 and that
+    # command fails — an instruction that does not work is worse than none.
+    # It also gives the readiness probe a container with python in it;
+    # nginx:latest has neither wget nor curl, which is why the first version
+    # of that probe could never succeed.
+    container_name: dify-api
 
   db_postgres:
     # ── 3. A NAME backup.sh CAN REACH ────────────────────────────────────
@@ -64,6 +76,8 @@ services:
     # backup_service_generic for what was wrong and why it is fixed.
     container_name: dify-db
 
+# DOCKHUB:MAINNET-BLOCK-START
 networks:
   main-net:
     external: true
+# DOCKHUB:MAINNET-BLOCK-END
