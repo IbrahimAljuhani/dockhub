@@ -1,0 +1,109 @@
+# Flowise — drag-and-drop LLM flow builder on LangChain.
+#
+# The lightest thing in this category: ONE container. Unlike Dify — whose
+# 1,345-line compose forced us to fetch upstream's tree — Flowise's own
+# compose is a single service, so DockHub writes its own and you can read
+# every line of what you deploy.
+#
+# ── DELIBERATE DEVIATIONS FROM UPSTREAM'S OWN COMPOSE ───────────────────
+#
+# 1. DATA LIVES INSIDE THE INSTALL DIRECTORY.
+#    Upstream mounts `~/.flowise:/home/node/.flowise` — the invoking user's
+#    HOME, outside anything DockHub manages. Every backup in this project
+#    archives ~/docker/<service>/, so that layout would produce archives with
+#    none of your flows, credentials or uploaded files in them, reporting
+#    success. Here it is ./data, inside the tree that gets backed up.
+#
+# 2. NO HOST PORT UNLESS ASKED, AND NEVER 3000.
+#    Upstream publishes `${PORT}:${PORT}`, and PORT defaults to 3000 — which
+#    in this catalogue already belongs to Open WebUI, and is why OpenHands
+#    was moved to 3001. NPM reaches this by container name on main-net;
+#    deploy.sh offers a host port and suggests 3200.
+#
+# 3. SQLITE, NOT POSTGRES.
+#    Upstream's .env.example sets DATABASE_TYPE=postgres with a published
+#    DATABASE_PASSWORD=mypassword and no database container to talk to.
+#    Flowise's real default is SQLite inside .flowise, which is what makes it
+#    the one-container service this category advertises. Set DATABASE_TYPE
+#    and friends in .env if you want Postgres; nothing here prevents it.
+#
+# 4. TELEMETRY OFF, and upstream already agrees — their own example ships
+#    DISABLE_FLOWISE_TELEMETRY=true. Kept explicit so an image default cannot
+#    quietly change it.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it (and
+# the generated .env) to ~/docker/flowise/ and runs it from there.
+
+services:
+  flowise:
+    image: flowiseai/flowise:${FLOWISE_VERSION:-latest}
+    container_name: flowise
+    restart: unless-stopped
+    env_file:
+      - .env
+
+    # ── Hardening ────────────────────────────────────────────────────────
+    # Warranted here more than in most of this catalogue, and for a specific
+    # reason: Flowise's Custom Tool nodes run JavaScript you (or a model
+    # acting for you) write, and upstream's own example allows those tools to
+    # `require('fs')` — see TOOL_FUNCTION_BUILTIN_DEP in .env. Code with
+    # filesystem access is exactly the case these three flags exist for.
+    #
+    # From the OpenSandbox trial (2026-08-17): of the nine capabilities that
+    # config drops, six were never in Docker's default grant. These three are
+    # the whole real difference — 11 capabilities instead of 14. Verify:
+    #   docker exec flowise grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
+
+    environment:
+      # The container's own port. The HOST port, if any, is set separately in
+      # docker-compose.override.yml so that changing one never silently moves
+      # the other.
+      PORT: 3000
+      # All four paths point inside the single mounted volume. Upstream's
+      # example scatters them across /your_*_path placeholders that do not
+      # exist; leaving those unset would drop logs and uploads in the image's
+      # ephemeral layer, where a container replacement destroys them.
+      DATABASE_PATH: /home/node/.flowise
+      SECRETKEY_PATH: /home/node/.flowise
+      LOG_PATH: /home/node/.flowise/logs
+      BLOB_STORAGE_PATH: /home/node/.flowise/storage
+      DISABLE_FLOWISE_TELEMETRY: "true"
+
+    volumes:
+      # A bind mount, not a named volume: this holds your flows, the
+      # encrypted credential store and everything you upload. Inside the
+      # install directory it travels with the DockHub backup; a named volume
+      # would too, but a directory you can open and read is worth more when
+      # something has gone wrong.
+      - ./data:/home/node/.flowise
+
+    healthcheck:
+      # Upstream's own endpoint, taken from their compose rather than guessed.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/v1/ping || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+    # ── NO `networks:` KEY HERE, AND THAT IS DELIBERATE ──────────────────
+    # docker-compose.override.yml, which deploy.sh generates, owns the
+    # network membership entirely — including the top-level declaration.
+    #
+    # The reason is a Compose rule that is easy to get wrong: a service's
+    # `networks:` list MERGES across files, it does not replace. So if this
+    # file said `- main-net` and the override said `- flowise-net`, the
+    # result would be BOTH — and answering "no" to the main-net question
+    # would join main-net anyway. Dify hit the same rule with `ports:` and
+    # needed the Compose 2.24 `!override` tag to escape it. Leaving the key
+    # out here achieves the same thing with no version requirement.
+    #
+    # Consequence worth knowing: this file is not runnable on its own. It is
+    # never meant to be — deploy.sh always writes the override beside it, and
+    # Compose loads that automatically.

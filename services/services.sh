@@ -102,6 +102,10 @@ declare -A SERVICE_FILES=(
     # and is regenerated each release — a hand-maintained fork of it would be
     # wrong within a version. Our entire contribution is the override.
     [dify]="docker-compose.override.yml backup.sh"
+    # Flowise needs NO backup.sh: no separate database container, and all of
+    # its state (SQLite, credential store, uploads, logs) sits under ./data
+    # inside the install tree, which the generic backup already captures.
+    [flowise]="docker-compose.yml"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
