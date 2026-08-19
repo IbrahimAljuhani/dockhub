@@ -94,7 +94,11 @@ else
     # regenerated while CODE_EXECUTION_API_KEY, the other end of the same
     # handshake, still said `dify-sandbox`. Found by reading the .env a live
     # deploy produced, not by reading this script.
-    local _redis_pw _sandbox_key _weaviate_key
+    # NO `local` here. This is top-level script, not a function body, and
+    # `local` outside a function is a RUNTIME error — "can only be used in a
+    # function". `bash -n` accepts it happily, which is exactly how it
+    # reached a live deploy. ShellCheck catches it as SC2168; CI would have
+    # too, had this been pushed before it was run.
     _redis_pw="$(generate_secret 32)"
     _sandbox_key="$(generate_secret_hex 32)"
     _weaviate_key="$(generate_secret_hex 32)"
@@ -134,7 +138,7 @@ else
     # An earlier version printed "none of upstream's published defaults
     # survive" and it was FALSE — five did. A script must not claim something
     # its own output file contradicts, so the claim is now a check.
-    local _left
+    _left=""
     _left="$(grep -nE 'difyai123456|dify-sandbox|WVF5YThaHlkYwhGUSmCRgsX3tD5ngdN8pkih|dify-agent-run-token-for-dev-only|MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY' \
         "$RUNTIME_DIR/.env" || true)"
     if [[ -n "$_left" ]]; then
