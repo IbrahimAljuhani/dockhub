@@ -136,6 +136,26 @@ services:
       - default
       - ai-net
 
+  # ── agent_backend DELIBERATELY DOES NOT GET ai-net ─────────────────────
+  # It was the obvious fourth candidate — 1.16 introduced it and both api and
+  # worker depend on it — and adding it would have been wrong.
+  #
+  # agent_backend runs Dify's AGENT SANDBOX: a Linux environment where an
+  # agent installs packages and writes files. Upstream deliberately routes its
+  # egress through a dedicated Squid forward proxy whose ACL permits only
+  # `/files/` on api and `/agent-stub/` on agent_backend, precisely so the
+  # sandbox cannot reach internal services. Attaching it to ai-net would put a
+  # code-executing sandbox directly onto the shared network carrying Ollama,
+  # Hermes, OpenClaw, OpenHands and Paperclip — punching a hole through an
+  # isolation boundary upstream built on purpose.
+  #
+  # It does not need one: it reaches models the same way everything else does,
+  # by calling back into `api`, which IS on ai-net. Verified against upstream's
+  # release notes rather than inferred from the compose file.
+  #
+  # Nothing is defined for agent_backend below. That absence IS the decision,
+  # and it is recorded here so nobody "completes the set" later.
+
   # ── 6. HARDENING, SCOPED TO WHAT IT ACTUALLY BUYS ──────────────────────
   # Upstream sets no cap_drop, security_opt or read_only on ANY of its 39
   # services — checked, not assumed. Paperclip and all three AI-Agents carry

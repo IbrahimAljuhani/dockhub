@@ -129,6 +129,35 @@ services:
     image: postgres:17-alpine
     container_name: paperclip-db
     restart: unless-stopped
+
+    # ── Hardening, the same three flags as the app beside it ─────────────
+    # This container used to be the odd one out: the app next to it dropped
+    # capabilities while the database holding all of its data ran with
+    # Docker's full default grant. An asymmetry with no reason behind it.
+    #
+    # Safe for postgres specifically, and worth saying why rather than
+    # asserting it. The official image starts as root and drops to the
+    # postgres user with gosu, which calls setuid() DIRECTLY while still
+    # root — it does not exec a setuid binary. `no-new-privileges` only
+    # blocks privileges GAINED through execve (setuid bits, file
+    # capabilities), so it cannot interfere with an already-root process
+    # giving privileges up. And postgres needs none of these three: it
+    # creates no device nodes, opens no raw sockets, writes no audit records.
+    #
+    # Everything the entrypoint DOES need — CHOWN, DAC_OVERRIDE, FOWNER,
+    # SETUID, SETGID, to fix ownership of the data directory and then drop
+    # privileges — is deliberately left in place.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    # Generous on purpose: postgres forks a backend process per connection,
+    # so a limit tuned to "feels like enough" becomes refused connections
+    # under a load nobody predicted.
+    pids_limit: 4096
+
     environment:
       POSTGRES_USER: "${POSTGRES_USER}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"

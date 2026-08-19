@@ -163,6 +163,13 @@ if [[ ! -f "$RUNTIME_DIR/.dockhub-asked" ]]; then
 fi
 [[ -z "$ENV_ON_MAIN_NET" ]] && ENV_ON_MAIN_NET=1
 ENV_MEM_LIMIT="$(read_env_value DOCKHUB_MEM_LIMIT "$RUNTIME_DIR/.env" || true)"
+# The database's limit is settable but NOT prompted — add DOCKHUB_DB_MEM_LIMIT
+# to .env by hand and rerun. Deliberately not a question: the deploy interview
+# is already long, and a wrong answer here is worse than no answer. Postgres
+# that hits a hard memory ceiling does not slow down, it gets OOM-killed
+# mid-write, and the size it actually needs depends on the largest restore you
+# will ever run, which nobody knows at deploy time. Documented in the README.
+ENV_DB_MEM_LIMIT="$(read_env_value DOCKHUB_DB_MEM_LIMIT "$RUNTIME_DIR/.env" || true)"
 
 # ── Regenerated every run, never hand-edited ─────────────────────────────
 # Written whole rather than appended to, and its shape is checked below: the
@@ -195,6 +202,13 @@ ENV_MEM_LIMIT="$(read_env_value DOCKHUB_MEM_LIMIT "$RUNTIME_DIR/.env" || true)"
         # every other unattached container on the host.
         echo "      - langflow-net"
     fi
+    # Second service block, and only when asked for — an empty `langflow-db:`
+    # key with nothing under it is a null value, not an empty map, and
+    # Compose rejects the file.
+    if [[ -n "$ENV_DB_MEM_LIMIT" ]]; then
+        echo "  langflow-db:"
+        echo "    mem_limit: $ENV_DB_MEM_LIMIT"
+    fi
     echo "networks:"
     if (( ENV_ON_MAIN_NET )); then
         echo "  main-net:"
@@ -213,6 +227,15 @@ if ! (cd "$RUNTIME_DIR" && $COMPOSE_CMD config -q 2>/tmp/langflow-cfg.err); then
     print_error "Refusing to continue with a configuration Compose cannot read."
 fi
 rm -f /tmp/langflow-cfg.err
+
+# Before anything is pulled or started: is this rerun quietly an upgrade?
+confirm_version_change "langflow" \
+    "langflowai/langflow:$(read_env_value LANGFLOW_VERSION "$RUNTIME_DIR/.env")" \
+    "Langflow"
+
+# And is the kept compose file behind the one in this repo? Only informs.
+notify_compose_drift "$RUNTIME_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
+    "rm $RUNTIME_DIR/docker-compose.yml && bash $0"
 
 pull_with_progress "$RUNTIME_DIR"
 

@@ -34,9 +34,22 @@ Or directly: `bash deploy.sh`.
 
 **It joins `ai-net`**, so a flow can point at an [Ollama](../../AI/ollama/), [llama.cpp](../../AI/llama-cpp/) or [LocalAI](../../AI/localai/) deployed from the AI category **by container name** — `http://ollama:11434` in the node's Base URL, with no published port on either side. Upstream's compose has no equivalent, because upstream does not assume a model provider next door.
 
+> Verified live 2026-08-19: from inside the container, `curl http://ollama:11434/api/tags` returns the model list — no port published on either side.
+
 **Every file path points inside the volume.** Upstream's example leaves `LOG_PATH`, `BLOB_STORAGE_PATH` and the rest as `/your_*_path` placeholders. Unset, logs and uploads land in the image's ephemeral layer, where replacing the container destroys them.
 
-**Capabilities dropped** — `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`. Warranted here more than in most of the catalogue; see below.
+**Capabilities dropped — on *both* containers.** `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`. Warranted for the app more than in most of the catalogue (see below); added to `flowise-db` too, because a hardened app beside a database running with Docker's full default grant was an asymmetry with no reason behind it. Safe for Postgres specifically: the official image drops privileges with `gosu`, which calls `setuid()` while still root rather than exec'ing a setuid binary, so `no-new-privileges` cannot interfere — and everything the entrypoint needs (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`) is left in place.
+
+---
+
+## 🧰 Two things you can set by hand in `.env`
+
+Neither is prompted — the deploy interview is long enough, and both are better decided after you have run the service than before.
+
+| key | effect |
+|---|---|
+| `FLOWISE_VERSION` | the image tag. Changing it and rerunning is an **upgrade**, and `deploy.sh` now notices: it prints the old and new tags, warns that startup migrations are one-way, and refuses to continue without a `y`. |
+| `DOCKHUB_DB_MEM_LIMIT` | a memory ceiling for `flowise-db` (e.g. `512m`). Left unset by default on purpose: Postgres that hits a hard ceiling is not slowed down, it is **OOM-killed mid-write**, and how much it needs depends on the largest restore you will ever run — which nobody knows at deploy time. |
 
 ---
 
@@ -109,6 +122,8 @@ The `postgres` branch of the same function uses `connect-pg-simple`, which the i
 ## 💾 Backup
 
 `backup.sh` dumps Postgres with `pg_dump` before archiving, then on restore drops the database, recreates it, and replays the dump in a single transaction with `ON_ERROR_STOP`. (Without the drop, the replay lands on the volume `restore_service_generic` has *already* restored — and `psql < file` exits 0 even when every statement failed.)
+
+**Logs are excluded from the archive.** `LOG_PATH` points at `./data/logs` so logs survive a container replacement — which also meant every log line rode inside every archive, so ten backups held ten copies of a file that only grows. `backup.sh` sets `BACKUP_EXCLUDE_PATHS="data/logs"`, which drops it from the staging *copy*; the live directory is untouched and `docker logs flowise` is unaffected. ([Langflow](../langflow/) never needed this — it sets no `LOG_PATH`, so its logs go to stdout and were never in the archive.)
 
 > 🔑 **The credentials and the key travel together.** Your model-provider API keys are stored encrypted *in Postgres*, and the key that decrypts them is a file under `./data`. One archive holds both, which is the point — restoring a database dump against a different install's data directory leaves credentials that decrypt to nothing.
 

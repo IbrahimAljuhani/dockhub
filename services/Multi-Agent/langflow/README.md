@@ -47,7 +47,20 @@ Upstream ships a two-service `docker_example/docker-compose.yml`, and this deplo
 
 **It joins `ai-net`**, so a flow can point at an [Ollama](../../AI/ollama/), [llama.cpp](../../AI/llama-cpp/) or [LocalAI](../../AI/localai/) deployed from the AI category **by container name** — `http://ollama:11434`, with no published port on either side. Upstream's compose has no equivalent, because upstream does not assume a model provider next door.
 
-**Capabilities dropped** — `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`.
+> Verified live 2026-08-19: from inside the container, `curl http://ollama:11434/api/tags` returns the model list — no port published on either side.
+
+**Capabilities dropped — on *both* containers.** `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`. Added to `langflow-db` too, because a hardened app beside a database running with Docker's full default grant was an asymmetry with no reason behind it. Safe for Postgres specifically: the official image drops privileges with `gosu`, which calls `setuid()` while still root rather than exec'ing a setuid binary, so `no-new-privileges` cannot interfere — and everything the entrypoint needs (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`) is left in place.
+
+---
+
+## 🧰 Two things you can set by hand in `.env`
+
+Neither is prompted — the deploy interview is long enough, and both are better decided after you have run the service than before.
+
+| key | effect |
+|---|---|
+| `LANGFLOW_VERSION` | the image tag. Changing it and rerunning is an **upgrade**, and `deploy.sh` now notices: it prints the old and new tags, warns that startup migrations are one-way, and refuses to continue without a `y`. |
+| `DOCKHUB_DB_MEM_LIMIT` | a memory ceiling for `langflow-db` (e.g. `512m`). Left unset by default on purpose: Postgres that hits a hard ceiling is not slowed down, it is **OOM-killed mid-write**, and how much it needs depends on the largest restore you will ever run — which nobody knows at deploy time. |
 
 ---
 

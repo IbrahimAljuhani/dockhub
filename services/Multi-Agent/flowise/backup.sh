@@ -24,6 +24,19 @@ backup_flowise() {
     local instance="$1" install_dir="$2"
     local dump_file="$install_dir/db.sql"
 
+    # ── Logs are not backup material ─────────────────────────────────────
+    # LOG_PATH points at ./data/logs so that logs survive a container
+    # replacement — which is right, and also means every log line would ride
+    # inside every archive. Ten backups, ten copies of a file that only ever
+    # grows, none of it restorable state.
+    #
+    # Removed from the staging COPY only; the live directory is untouched and
+    # `docker logs flowise` is unaffected. Langflow, the other half of this
+    # pair, never needed it: no LOG_PATH is set there, so its logs go to
+    # stdout and were never in the archive at all. That difference was an
+    # accident of how the two were written, not a decision.
+    BACKUP_EXCLUDE_PATHS="data/logs"
+
     local pg_user pg_db
     pg_user="$(read_env_value POSTGRES_USER "$install_dir/.env")"
     pg_db="$(read_env_value POSTGRES_DB "$install_dir/.env")"
