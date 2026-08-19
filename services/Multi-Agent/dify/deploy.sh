@@ -110,11 +110,30 @@ if [[ -z "$ENV_HOST_PORT" ]] && [[ ! -f "$RUNTIME_DIR/.dockhub-asked" ]]; then
     ENV_HOST_PORT="${HOST_PORT:-}"
 fi
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    # Appended to our override rather than written into .env, because the
-    # override is the file that owns the ports list.
-    printf '\n# Added by deploy.sh — direct access without NPM.\nservices:\n  nginx:\n    ports: !override\n      - "%s:80"\n' \
-        "$ENV_HOST_PORT" >> "$RUNTIME_DIR/docker-compose.override.yml"
+    # Substituted INTO the existing nginx block, not appended as a new one.
+    #
+    # The first version of this appended a second `services:` section to the
+    # end of the file. That is a DUPLICATE TOP-LEVEL KEY, which YAML does not
+    # allow — Compose could not parse the project at all, so `pull` reported
+    # nothing to do and the deploy died without ever starting a container.
+    # Caught on the first live run. Generating a file is not the same as
+    # generating a valid one; the check below is why this cannot recur.
+    sed -i "s|ports: !override \[\]|ports: !override\n      - \"${ENV_HOST_PORT}:80\"|" \
+        "$RUNTIME_DIR/docker-compose.override.yml"
 fi
+
+# The override is generated, so it gets verified before anything depends on
+# it — one top-level `services:` and one `networks:`, or stop here.
+_dupes="$(grep -oE '^[a-z_]+:' "$RUNTIME_DIR/docker-compose.override.yml" | sort | uniq -d)"
+[[ -z "$_dupes" ]] || print_error "Generated an invalid override (duplicate top-level key: $_dupes).
+    This is a bug in deploy.sh — please report it. Nothing was started."
+if ! (cd "$RUNTIME_DIR" && $COMPOSE_CMD config -q 2>/tmp/dify-cfg.err); then
+    print_warn "Compose rejected the merged configuration:"
+    sed 's/^/    /' /tmp/dify-cfg.err >&2
+    rm -f /tmp/dify-cfg.err
+    print_error "Refusing to continue with a configuration Compose cannot read."
+fi
+rm -f /tmp/dify-cfg.err
 
 pull_with_progress "$RUNTIME_DIR"
 
