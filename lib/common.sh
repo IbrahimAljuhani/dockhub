@@ -321,6 +321,79 @@ ensure_ai_net() {
     fi
 }
 
+# ── Stop an accidental one-way upgrade ──────────────────────────────────
+# $1 = container name, $2 = the image:tag this run is about to start,
+# $3 = human label for the messages.
+#
+# The problem this exists for: every service here tells you to change a
+# version in .env and rerun, and on rerun the application performs DATABASE
+# SCHEMA MIGRATIONS at startup. Those are one-way. Put the old version back
+# afterwards and it meets a database it does not understand — so the moment
+# to take a backup is *before*, and by then the person has already typed the
+# command.
+#
+# It deliberately does NOT run the backup itself. The backup path lives in
+# services.sh (menu option 4) with the per-service hooks, and reproducing it
+# inside every deploy.sh is how two implementations drift apart until one of
+# them is quietly wrong. Instead: detect, explain, and require a yes.
+#
+# Returns 0 to continue. Exits the script if the operator declines.
+confirm_version_change() {
+    local container="$1" wanted="$2" label="$3" running answer
+    running="$(docker inspect -f '{{.Config.Image}}' "$container" 2>/dev/null || true)"
+
+    # Nothing deployed, or the tag is unchanged: not an upgrade, say nothing.
+    [[ -n "$running" ]] || return 0
+    [[ -n "$wanted" ]]  || return 0
+    [[ "$running" != "$wanted" ]] || return 0
+
+    echo >&2
+    print_warn "VERSION CHANGE DETECTED for $label:"
+    print_warn "    running:  $running"
+    print_warn "    starting: $wanted"
+    print_warn ""
+    print_warn "$label runs database schema migrations on startup, and those are"
+    print_warn "ONE-WAY. If the new version misbehaves, putting the old tag back"
+    print_warn "does not undo them — the old code meets a schema it cannot read."
+    print_warn ""
+    print_warn "Take a backup first if you have not:"
+    print_warn "    bash services/services.sh   →  this service  →  4) Backup"
+    echo >&2
+    read -rp "Continue with the version change? (y/N): " answer
+    if [[ "${answer,,}" != "y" ]]; then
+        print_info "Stopped. Nothing was changed — the running deployment is untouched."
+        exit 0
+    fi
+    return 0
+}
+
+# ── Tell the operator when their kept compose file is behind ────────────
+# $1 = deployed compose, $2 = the version in this repo, $3 = the command to
+# take the update.
+#
+# Every service here keeps an existing docker-compose.yml rather than
+# overwriting it, which is the right default — it may carry edits somebody
+# made on purpose. The cost is that our own later fixes never arrive, and the
+# deployment looks healthy while missing them. OpenHands already solved this
+# for one specific key; this is the same idea without needing to know in
+# advance which key will matter.
+#
+# It only ever prints. Deciding is the operator's.
+notify_compose_drift() {
+    local deployed="$1" source_file="$2" take_cmd="$3"
+    [[ -f "$deployed" && -f "$source_file" ]] || return 0
+    cmp -s "$deployed" "$source_file" && return 0
+
+    echo >&2
+    print_warn "Your deployed docker-compose.yml differs from the one in this repo."
+    print_warn "That is expected if you edited it yourself — in which case ignore this."
+    print_warn "Otherwise it predates fixes made since you deployed. To take them:"
+    print_warn "    $take_cmd"
+    print_warn "Your .env, data directory and volumes are not touched by that."
+    echo >&2
+    return 0
+}
+
 # Every model provider in DockHub, by container name. Used to keep exactly
 # one of them running at a time.
 AI_PROVIDER_CONTAINERS=(ollama llama-cpp localai)
@@ -849,6 +922,42 @@ backup_service_generic() {
     docker run --rm -v "$install_dir":/data:ro -v "$staging/install_dir":/backup alpine \
         sh -c "cp -a /data/. /backup/" \
         || print_warn "Some files under $install_dir may not have been backed up — check permissions."
+
+    # ── Optional exclusions, dropped from STAGING (never from the source) ─
+    # A service's backup hook may set BACKUP_EXCLUDE_PATHS to paths relative
+    # to its install directory. They are removed from the COPY, so the live
+    # deployment is never touched — the source is mounted :ro above, and this
+    # runs against the staging copy only.
+    #
+    # This exists for log directories. Flowise points LOG_PATH inside its
+    # bind-mounted ./data so logs survive a container replacement, which also
+    # puts every log line inside every archive: keep ten backups and you keep
+    # ten copies of a file that only grows. Nothing else here needed an
+    # exclusion, which is why this is opt-in rather than a built-in list of
+    # "probably junk" names — guessing what is disposable inside someone
+    # else's data directory is how a backup quietly stops containing the one
+    # thing they needed.
+    #
+    # Deleted from a root container for the same reason the copy is made in
+    # one: these files were written by a container's own uid, and the
+    # invoking user often cannot remove them.
+    if [[ -n "${BACKUP_EXCLUDE_PATHS:-}" ]]; then
+        local _ex _ex_args=""
+        for _ex in $BACKUP_EXCLUDE_PATHS; do
+            # Refuse anything that could climb out of the staging copy. A bad
+            # value here would delete from a real directory, not from a copy.
+            if [[ "$_ex" = /* || "$_ex" == *..* ]]; then
+                print_warn "Ignoring unsafe BACKUP_EXCLUDE_PATHS entry: $_ex"
+                continue
+            fi
+            _ex_args+=" '/staged/$_ex'"
+        done
+        if [[ -n "$_ex_args" ]]; then
+            docker run --rm -v "$staging/install_dir":/staged alpine \
+                sh -c "rm -rf $_ex_args" >/dev/null 2>&1 \
+                || print_warn "Could not apply backup exclusions — the archive may be larger than expected."
+        fi
+    fi
 
     local project_name volumes vol
     project_name="$(basename "$install_dir")"
