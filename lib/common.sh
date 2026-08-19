@@ -36,6 +36,43 @@ check_prerequisites() {
     fi
 }
 
+# The address a browser on your LAN can actually reach this host at.
+#
+# NOT `hostname -I | awk '{print $1}'`, which is what every script here used
+# until 2026-08-19. That prints EVERY address in kernel order, and each Docker
+# network adds a bridge gateway to the list — so the first entry is a lottery
+# whose odds get worse with every service deployed. A live Dify deploy lost
+# it and printed `http://172.23.0.1:8088`, a docker bridge, as the URL to
+# open. Dify creates four networks at once.
+#
+# Three strategies, best first:
+#   1. Ask the kernel which source address it WOULD use to reach the outside
+#      world. That is the routing decision itself, not a guess about it, and
+#      no number of bridges can change it.
+#   2. Enumerate global addresses and drop the ones on container interfaces.
+#      Filtered by INTERFACE NAME, not by address range — 172.16/12 is
+#      Docker's default pool but it is also a legitimate LAN range, and
+#      excluding it by number would break real networks.
+#   3. The old behaviour, kept as a last resort for hosts without iproute2.
+host_lan_ip() {
+    local ip
+    ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*[[:space:]]src[[:space:]]\+\([0-9.]\+\).*/\1/p' | head -1)"
+    [[ -n "$ip" ]] && { printf '%s\n' "$ip"; return 0; }
+
+    ip="$(ip -o -4 addr show scope global 2>/dev/null \
+          | awk '$2 !~ /^(docker|br-|veth|virbr|cni|flannel|kube)/ {print $4}' \
+          | cut -d/ -f1 | head -1)"
+    [[ -n "$ip" ]] && { printf '%s\n' "$ip"; return 0; }
+
+    # The old behaviour, and it must stay written out LONGHAND. The rollout
+    # that introduced this function replaced the idiom repo-wide with a call
+    # to `host_lan_ip` — including this line, inside host_lan_ip itself,
+    # which made the last resort infinite recursion. `bash -n` accepted it.
+    # A search-and-replace that rewrites its own replacement is a hazard of
+    # every mechanical rollout; the fix is to notice, not to trust the diff.
+    hostname -I 2>/dev/null | awk '{print $1}'
+}
+
 # Random alphanumeric string, $1 = length (default 20). This is the canonical
 # replacement for every service's old generate_secret()/generate_password().
 generate_secret() {
@@ -690,7 +727,7 @@ confirm_vulnerable_deploy() {
 # determined — failing closed is the right direction here.
 SECLAB_BIND=""
 detect_seclab_bind() {
-    SECLAB_BIND=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    SECLAB_BIND=$(host_lan_ip || true)
     if [[ -z "${SECLAB_BIND:-}" ]]; then
         SECLAB_BIND="127.0.0.1"
         print_warn "Could not determine this host's LAN address — binding to 127.0.0.1."

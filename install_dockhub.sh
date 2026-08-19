@@ -775,7 +775,7 @@ else
 fi
 echo
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+SERVER_IP=$(host_lan_ip)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 # Gather additional non-loopback, non-docker-bridge IPs for the summary.
