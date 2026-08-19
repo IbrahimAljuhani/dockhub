@@ -792,14 +792,56 @@ backup_service_generic() {
         (( vol_ok )) || print_warn "Backup completed with at least one volume failure — check above."
     fi
 
-    tar czf "$backup_root/${ts}.tar.gz" -C "$staging" .
+    # ── The archive, written from a root context ─────────────────────────
+    # This used to be a plain host-side `tar czf`, and it FAILED SILENTLY on
+    # any service whose install_dir holds container-written files:
+    #
+    #     tar: ./install_dir/db-data: Cannot open: Permission denied
+    #     tar: Exiting with failure status due to previous errors
+    #     [✓] Backup saved: ...
+    #
+    # Caught on a live odoo backup, 2026-08-19. Two separate faults:
+    #
+    #   1. The staging copy above runs as root inside a container, so
+    #      root-owned files land in the staging directory. A host-side tar
+    #      running as the invoking user then cannot read them, and the
+    #      archive quietly omitted the entire database directory.
+    #   2. Its exit status was never checked and "Backup saved" printed
+    #      regardless — the one failure mode a backup tool must not have.
+    #
+    # Fixed at the root: tar inside the same root context that wrote the
+    # files, so the archive is complete, and then CHECK it. Cleanup runs the
+    # same way; it hit the identical permission wall.
+    local _tar_err
+    _tar_err="$(mktemp)"
+    if ! docker run --rm -v "$staging":/staging:ro -v "$backup_root":/out alpine \
+            tar czf "/out/${ts}.tar.gz" -C /staging . 2>"$_tar_err"; then
+        print_warn "Failed to write the archive — this backup is NOT usable:"
+        [[ -s "$_tar_err" ]] && sed 's/^/    /' "$_tar_err" >&2
+        rm -f "$_tar_err"
+        docker run --rm -v "$backup_root":/out alpine rm -f "/out/${ts}.tar.gz" >/dev/null 2>&1 || true
+        docker run --rm -v "$staging":/s alpine sh -c 'rm -rf /s/* /s/.[!.]*' >/dev/null 2>&1 || true
+        rm -rf "$staging" 2>/dev/null || true
+        return 1
+    fi
+    rm -f "$_tar_err"
+
+    # The archive belongs to root inside the container; hand it to the user
+    # who asked for it, or they cannot read their own backup.
+    docker run --rm -v "$backup_root":/out alpine \
+        chown "$(id -u):$(id -g)" "/out/${ts}.tar.gz" >/dev/null 2>&1 || true
+
     # 600, not the umask default. Every service's install_dir holds its .env,
     # and many hold a generated secrets file too — database passwords, API
     # keys, an agent's messaging tokens. Those are created 600 at the source;
     # leaving the archive that contains them world-readable would undo that
     # for anyone with an account on this host.
     chmod 600 "$backup_root/${ts}.tar.gz"
-    rm -rf "$staging"
+
+    # Root-owned staging content again — the same wall that broke the tar.
+    docker run --rm -v "$staging":/s alpine sh -c 'rm -rf /s/* /s/.[!.]*' >/dev/null 2>&1 || true
+    rm -rf "$staging" 2>/dev/null || true
+
     print_info "Backup saved: $backup_root/${ts}.tar.gz"
 }
 
@@ -853,14 +895,56 @@ backup_service_config_only() {
         print_info "Re-downloaded on the next start. Config and .env ARE in the backup."
     fi
 
-    tar czf "$backup_root/${ts}.tar.gz" -C "$staging" .
+    # ── The archive, written from a root context ─────────────────────────
+    # This used to be a plain host-side `tar czf`, and it FAILED SILENTLY on
+    # any service whose install_dir holds container-written files:
+    #
+    #     tar: ./install_dir/db-data: Cannot open: Permission denied
+    #     tar: Exiting with failure status due to previous errors
+    #     [✓] Backup saved: ...
+    #
+    # Caught on a live odoo backup, 2026-08-19. Two separate faults:
+    #
+    #   1. The staging copy above runs as root inside a container, so
+    #      root-owned files land in the staging directory. A host-side tar
+    #      running as the invoking user then cannot read them, and the
+    #      archive quietly omitted the entire database directory.
+    #   2. Its exit status was never checked and "Backup saved" printed
+    #      regardless — the one failure mode a backup tool must not have.
+    #
+    # Fixed at the root: tar inside the same root context that wrote the
+    # files, so the archive is complete, and then CHECK it. Cleanup runs the
+    # same way; it hit the identical permission wall.
+    local _tar_err
+    _tar_err="$(mktemp)"
+    if ! docker run --rm -v "$staging":/staging:ro -v "$backup_root":/out alpine \
+            tar czf "/out/${ts}.tar.gz" -C /staging . 2>"$_tar_err"; then
+        print_warn "Failed to write the archive — this backup is NOT usable:"
+        [[ -s "$_tar_err" ]] && sed 's/^/    /' "$_tar_err" >&2
+        rm -f "$_tar_err"
+        docker run --rm -v "$backup_root":/out alpine rm -f "/out/${ts}.tar.gz" >/dev/null 2>&1 || true
+        docker run --rm -v "$staging":/s alpine sh -c 'rm -rf /s/* /s/.[!.]*' >/dev/null 2>&1 || true
+        rm -rf "$staging" 2>/dev/null || true
+        return 1
+    fi
+    rm -f "$_tar_err"
+
+    # The archive belongs to root inside the container; hand it to the user
+    # who asked for it, or they cannot read their own backup.
+    docker run --rm -v "$backup_root":/out alpine \
+        chown "$(id -u):$(id -g)" "/out/${ts}.tar.gz" >/dev/null 2>&1 || true
+
     # 600, not the umask default. Every service's install_dir holds its .env,
     # and many hold a generated secrets file too — database passwords, API
     # keys, an agent's messaging tokens. Those are created 600 at the source;
     # leaving the archive that contains them world-readable would undo that
     # for anyone with an account on this host.
     chmod 600 "$backup_root/${ts}.tar.gz"
-    rm -rf "$staging"
+
+    # Root-owned staging content again — the same wall that broke the tar.
+    docker run --rm -v "$staging":/s alpine sh -c 'rm -rf /s/* /s/.[!.]*' >/dev/null 2>&1 || true
+    rm -rf "$staging" 2>/dev/null || true
+
     print_info "Backup saved: $backup_root/${ts}.tar.gz"
 }
 
@@ -871,13 +955,35 @@ restore_service_generic() {
     local service="$1" instance="${2:-}" install_dir="$3" archive="$4"
     local staging
     staging="$(mktemp -d)"
-    tar xzf "$archive" -C "$staging"
+
+    # ── Extract as ROOT, in a container ──────────────────────────────────
+    # This used to be a host-side `tar xzf`, and the comment below it claimed
+    # the copy that followed "preserves the original container-uid ownership
+    # captured at backup time". THAT WAS FALSE, and it broke a real restore:
+    #
+    #   grep: /etc/odoo/odoo.conf: Permission denied
+    #   configparser.NoSectionError: No section: 'options'
+    #   odoo-test2   Restarting (1)
+    #
+    # A non-root user CANNOT set ownership while extracting a tar. Every file
+    # landed owned by the invoking user, so by the time the root-context copy
+    # ran there was no original ownership left to preserve — it faithfully
+    # copied the wrong thing. Odoo's config file, which belongs to the odoo
+    # user inside the container, came back owned by the host user with its
+    # original restrictive mode, and the container could not read its own
+    # configuration. Diagnosed from a live restore, 2026-08-19.
+    #
+    # tar records uid/gid whoever writes the archive, so older archives are
+    # fine — it is only the EXTRACTION that needs root to apply them.
+    if ! docker run --rm -v "$archive":/archive.tar.gz:ro -v "$staging":/staging alpine \
+            tar xzf /archive.tar.gz -C /staging 2>/dev/null; then
+        print_error "Could not read the archive: $archive"
+    fi
 
     if [[ -d "$staging/install_dir" ]]; then
         mkdir -p "$install_dir"
-        # Root-context container copy, same reasoning as backup_service_generic
-        # above — preserves the original container-uid ownership captured at
-        # backup time instead of everything landing owned by the host user.
+        # Now this comment is true: staging really does carry the original
+        # uids, so cp -a really does preserve them.
         docker run --rm -v "$staging/install_dir":/backup:ro -v "$install_dir":/data alpine \
             sh -c "cp -a /backup/. /data/" \
             || print_warn "Some files may not have restored correctly — check $install_dir."
@@ -894,7 +1000,12 @@ restore_service_generic() {
                 || print_warn "Failed to restore volume '$vol_name'."
         done
     fi
-    rm -rf "$staging"
+    # Root-owned now that the extraction runs as root, so the host-side rm
+    # cannot clear it on its own — the same permission wall that broke the
+    # backup tar. Left unhandled this would leak a full copy of the service's
+    # data into /tmp on every restore.
+    docker run --rm -v "$staging":/s alpine sh -c 'rm -rf /s/* /s/.[!.]*' >/dev/null 2>&1 || true
+    rm -rf "$staging" 2>/dev/null || true
     print_info "Restored from: $archive"
 }
 
