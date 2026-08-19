@@ -269,7 +269,7 @@ confirm_version_change "flowise" \
     "Flowise"
 
 # And is the kept compose file behind the one in this repo? Only informs.
-notify_compose_drift "$RUNTIME_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
+offer_compose_update "$RUNTIME_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
     "rm $RUNTIME_DIR/docker-compose.yml && bash $0"
 
 pull_with_progress "$RUNTIME_DIR"
