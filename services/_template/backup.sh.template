@@ -17,6 +17,37 @@
 # can produce a corrupted or inconsistent backup — a proper pg_dump/
 # mysqldump does not have that problem.
 #
+# ─────────────────────────────────────────────────────────────────────────
+# READ THIS BEFORE CHANGING THE RESTORE FUNCTION
+#
+# An earlier version of this template carried a comment claiming that
+# restore_service_generic restores the database volume "only if db.sql
+# wasn't produced (pg_dump failure fallback case)".
+#
+# THAT WAS FALSE. Look at lib/common.sh: the volume loop is unconditional.
+# It does not know or care whether a dump exists —
+#
+#     find /data -mindepth 1 -delete; tar xzf /backup/<vol>.tar.gz -C /data
+#
+# — so EVERY volume, including the database, is wiped and replaced with the
+# archived copy before your restore function gets to do anything.
+#
+# That false comment was not a harmless typo. It described a mental model in
+# which the dump replays into an empty database, and on that model the code
+# below looked correct. It was copied into TWELVE services, and the bug it
+# hid survived every review because reviewers read the comment and stopped.
+#
+# What actually happened: the dump replayed into a database that was already
+# a complete copy of itself, every statement failed with "relation already
+# exists" — and `psql < file` exits 0 even when every statement inside it
+# failed, so it printed "Database restored" over a restore that did nothing.
+# A restore that cannot fail is not a restore.
+#
+# Hence the shape below: drop, recreate, then replay into a genuinely empty
+# database, with ON_ERROR_STOP so failure is failure. Verified live on
+# services/Multi-Agent/paperclip (2026-08-19) before being written here.
+# ─────────────────────────────────────────────────────────────────────────
+#
 # $1 in both functions is the instance name (empty string for single-instance
 # services — only odoo is multi-instance today). $2 is the install dir
 # (e.g. ~/docker/SERVICE_SLUG or ~/docker/odoo/<instance>).
@@ -25,17 +56,33 @@ backup_SERVICE_SLUG() {
     local instance="$1" install_dir="$2"
     local dump_file="$install_dir/db.sql"
 
-    # Read DB credentials out of the already-generated .env rather than
-    # hardcoding them here.
+    # read_env_value, never `grep KEY= .env | cut -d= -f2`. That idiom cuts at
+    # the FIRST '=' in the value, so any password containing one arrives
+    # truncated — silently, and only for the users who happen to have one.
     local pg_user pg_db
-    pg_user=$(grep -a '^POSTGRES_USER=' "$install_dir/.env" | cut -d= -f2)
-    pg_db=$(grep -a '^POSTGRES_DB=' "$install_dir/.env" | cut -d= -f2)
+    pg_user="$(read_env_value POSTGRES_USER "$install_dir/.env")"
+    pg_db="$(read_env_value POSTGRES_DB "$install_dir/.env")"
 
-    if docker exec "SERVICE_SLUG-db" pg_dump -U "$pg_user" "$pg_db" > "$dump_file" 2>/dev/null; then
-        print_info "Database dumped to $dump_file"
+    if [[ -z "$pg_user" || -z "$pg_db" ]]; then
+        print_warn "Could not read POSTGRES_USER/POSTGRES_DB from $install_dir/.env — skipping the dump."
     else
-        print_warn "pg_dump failed — falling back to a raw (less safe) volume copy for the db."
-        rm -f "$dump_file"
+        # stderr to a file, not /dev/null. Discarding it means a failed dump
+        # reports only "pg_dump failed" with the actual reason — wrong
+        # password, database still starting, disk full — thrown away at the
+        # one moment it was needed.
+        local err_file
+        err_file="$(mktemp)"
+        if docker exec "SERVICE_SLUG-db" pg_dump -U "$pg_user" "$pg_db" > "$dump_file" 2>"$err_file"; then
+            print_info "Database dumped to $dump_file"
+        else
+            print_warn "pg_dump failed — the archive will hold only a raw (less safe) copy of the db volume."
+            [[ -s "$err_file" ]] && sed 's/^/    /' "$err_file" >&2
+            # Removed, not left behind: a truncated dump is worse than none.
+            # The restore below keys off this file existing, and replaying a
+            # broken one would drop a good database in order to load it.
+            rm -f "$dump_file"
+        fi
+        rm -f "$err_file"
     fi
 
     # Still capture compose files/.env and every OTHER named volume (e.g.
@@ -47,23 +94,64 @@ backup_SERVICE_SLUG() {
 restore_SERVICE_SLUG() {
     local instance="$1" install_dir="$2" archive="$3"
 
-    # restore_service_generic first — brings back compose/.env/non-db
-    # volumes and, if db.sql wasn't produced by backup_SERVICE_SLUG() above
-    # (pg_dump failure fallback case), the raw db volume too.
+    # Brings back compose/.env and ALL volumes — including the database's,
+    # unconditionally. See the block at the top of this file.
     restore_service_generic "SERVICE_SLUG" "$instance" "$install_dir" "$archive"
 
-    if [[ -f "$install_dir/db.sql" ]]; then
-        local pg_user pg_db
-        pg_user=$(grep -a '^POSTGRES_USER=' "$install_dir/.env" | cut -d= -f2)
-        pg_db=$(grep -a '^POSTGRES_DB=' "$install_dir/.env" | cut -d= -f2)
-        # db container needs to be up (but the app itself doesn't) for this —
-        # services.sh's restore_menu already ran `compose down` before
-        # calling this, so bring just the db back up first.
-        (cd "$install_dir" && $(compose_cmd) up -d db) || true
-        sleep 3
-        docker exec -i "SERVICE_SLUG-db" psql -U "$pg_user" -d "$pg_db" < "$install_dir/db.sql" \
-            && print_info "Database restored from db.sql" \
-            || print_warn "Failed to restore db.sql — restore the volume backup manually if needed."
-        rm -f "$install_dir/db.sql"
+    [[ -f "$install_dir/db.sql" ]] || return 0
+
+    local pg_user pg_db
+    pg_user="$(read_env_value POSTGRES_USER "$install_dir/.env")"
+    pg_db="$(read_env_value POSTGRES_DB "$install_dir/.env")"
+    if [[ -z "$pg_user" || -z "$pg_db" ]]; then
+        print_warn "Could not read POSTGRES_USER/POSTGRES_DB from $install_dir/.env."
+        print_warn "The volume restore stands; the dump was NOT replayed."
+        return 0
     fi
+
+    # services.sh's restore_menu already ran `compose down`, so nothing is
+    # holding the database — but stop the app explicitly anyway: this
+    # function is also callable directly, and an open connection blocks the
+    # drop while a running app writes to the copy about to be discarded.
+    (cd "$install_dir" && $(compose_cmd) stop SERVICE_SLUG >/dev/null 2>&1) || true
+    (cd "$install_dir" && $(compose_cmd) up -d db) || true
+
+    # Wait for readiness rather than `sleep 3`. A fixed sleep is a bet that
+    # the machine restoring is at least as fast as the machine the sleep was
+    # written on — and it is lost silently, as a restore that "failed".
+    local i ready=0
+    for (( i = 1; i <= 30; i++ )); do
+        if docker exec "SERVICE_SLUG-db" pg_isready -h localhost -U "$pg_user" -d "$pg_db" >/dev/null 2>&1; then
+            ready=1; break
+        fi
+        sleep 2
+    done
+    if (( ! ready )); then
+        print_warn "SERVICE_SLUG-db did not become ready in 60s. The volume restore stands; the dump was NOT replayed."
+        return 0
+    fi
+
+    # --force (Postgres 13+) terminates any session still holding the
+    # database, so one stray connection cannot block the whole restore.
+    local err
+    err="$(docker exec "SERVICE_SLUG-db" dropdb --force --if-exists -U "$pg_user" "$pg_db" 2>&1)" \
+      && err="$(docker exec "SERVICE_SLUG-db" createdb -U "$pg_user" -O "$pg_user" "$pg_db" 2>&1)" \
+      || {
+        print_warn "Could not recreate database '$pg_db': ${err:-unknown error}"
+        print_warn "SKIPPING the dump replay — the restored volume is left intact and usable."
+        rm -f "$install_dir/db.sql"
+        return 0
+      }
+
+    # ON_ERROR_STOP so a failure is a failure; --single-transaction so a
+    # partial replay is rolled back rather than left half-applied.
+    if docker exec -i "SERVICE_SLUG-db" \
+         psql -v ON_ERROR_STOP=1 --single-transaction -q \
+              -U "$pg_user" -d "$pg_db" < "$install_dir/db.sql"; then
+        print_info "Database restored from db.sql (dropped, recreated, replayed in one transaction)."
+    else
+        print_warn "db.sql failed to replay and was rolled back — '$pg_db' is now EMPTY."
+        print_warn "Restore an older archive, or reload the dump by hand from the extracted tree."
+    fi
+    rm -f "$install_dir/db.sql"
 }
