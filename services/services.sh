@@ -105,7 +105,7 @@ declare -A SERVICE_FILES=(
     # Flowise needs NO backup.sh: no separate database container, and all of
     # its state (SQLite, credential store, uploads, logs) sits under ./data
     # inside the install tree, which the generic backup already captures.
-    [flowise]="docker-compose.yml"
+    [flowise]="docker-compose.yml backup.sh"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"

@@ -17,7 +17,7 @@ And both differ from [AI](../AI/), which is the model layer underneath: the prov
 |---|---|---|
 | [**Dify**](dify/) | Full-stack LLM app platform — workflow orchestration, production RAG with hybrid search, agent management, team accounts | Heaviest: ~15 containers, 4 GB minimum |
 | [**Langflow**](langflow/) | The most powerful builder — LangGraph multi-agent support, custom Python nodes inside the visual surface, MIT licensed | Medium |
-| [**Flowise**](flowise/) | The fastest to get moving — drag-and-drop builder on LangChain | Lightest: runs in ~1 GB |
+| [**Flowise**](flowise/) | The fastest to get moving — drag-and-drop builder on LangChain | Lightest: 2 containers |
 | [**Paperclip**](paperclip/) | "The open-source app everyone uses to manage agents at work" — org hierarchy, goals, budgets, tickets | Light: 2 containers |
 
 > 📌 **Dify was moved here from `AI`.** It describes itself as an LLM *application development platform* with agent management, which puts it alongside Langflow and Flowise rather than alongside Ollama. Filing it under AI sent people looking in the wrong place.

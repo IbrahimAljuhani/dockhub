@@ -1,9 +1,11 @@
 # Flowise — drag-and-drop LLM flow builder on LangChain.
 #
-# The lightest thing in this category: ONE container. Unlike Dify — whose
-# 1,345-line compose forced us to fetch upstream's tree — Flowise's own
-# compose is a single service, so DockHub writes its own and you can read
-# every line of what you deploy.
+# Still the lightest thing in this category, at two containers. Unlike Dify —
+# whose 1,345-line compose forced us to fetch upstream's tree — this one is
+# written here in full, so you can read every line of what you deploy.
+#
+# It was meant to be ONE container. Note 3 below is why it is not, and that
+# note is the most important thing in this file.
 #
 # ── DELIBERATE DEVIATIONS FROM UPSTREAM'S OWN COMPOSE ───────────────────
 #
@@ -20,12 +22,29 @@
 #    was moved to 3001. NPM reaches this by container name on main-net;
 #    deploy.sh offers a host port and suggests 3200.
 #
-# 3. SQLITE, NOT POSTGRES.
-#    Upstream's .env.example sets DATABASE_TYPE=postgres with a published
-#    DATABASE_PASSWORD=mypassword and no database container to talk to.
-#    Flowise's real default is SQLite inside .flowise, which is what makes it
-#    the one-container service this category advertises. Set DATABASE_TYPE
-#    and friends in .env if you want Postgres; nothing here prevents it.
+# 3. POSTGRES, BECAUSE SQLITE DOES NOT START — measured, not preferred.
+#    This began as a one-container SQLite deployment, which is what the
+#    category README advertises. It crash-looped on 3.1.4 AND on latest:
+#
+#      TypeError: this.db.exec is not a function
+#        at new SQLiteStore (connect-sqlite3/lib/connect-sqlite3.js:56)
+#        at initializeDBClientAndStore (enterprise/.../SessionPersistance.js:96)
+#
+#    Reading the failing function settled it. Flowise picks its SESSION store
+#    from DATABASE_TYPE, defaulting to sqlite, and the sqlite branch uses
+#    `connect-sqlite3`. The image ships that package without a working
+#    `sqlite3` under it — so `this.db` is not a database handle.
+#
+#    Crucially, the log also showed "Data Source initialized successfully"
+#    and "Database migrations completed successfully": Flowise's MAIN sqlite
+#    database works fine. Only the session store is broken, and only because
+#    it reaches for a different sqlite library than TypeORM does. Nothing in
+#    .env can route around that.
+#
+#    The postgres branch uses connect-pg-simple instead, which the image does
+#    carry. So this service costs a second container — and stops being the
+#    "one container" the category promised. That claim was corrected rather
+#    than the deployment being left broken to protect it.
 #
 # 4. TELEMETRY OFF, and upstream already agrees — their own example ships
 #    DISABLE_FLOWISE_TELEMETRY=true. Kept explicit so an image default cannot
@@ -71,11 +90,20 @@ services:
       # docker-compose.override.yml so that changing one never silently moves
       # the other.
       PORT: 3000
-      # All four paths point inside the single mounted volume. Upstream's
-      # example scatters them across /your_*_path placeholders that do not
-      # exist; leaving those unset would drop logs and uploads in the image's
-      # ephemeral layer, where a container replacement destroys them.
-      DATABASE_PATH: /home/node/.flowise
+      # Postgres — see note 3 in the header. Both the main data source AND
+      # the session store read these, which is the point: the sqlite session
+      # store is the thing that does not work.
+      DATABASE_TYPE: postgres
+      DATABASE_HOST: flowise-db
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: "${POSTGRES_DB}"
+      DATABASE_USER: "${POSTGRES_USER}"
+      DATABASE_PASSWORD: "${POSTGRES_PASSWORD}"
+      # These paths still matter with Postgres: the encryption key, uploads
+      # and logs are files regardless of where the tables live. Upstream's
+      # example leaves them as /your_*_path placeholders — unset, uploads and
+      # logs land in the image's ephemeral layer, where replacing the
+      # container destroys them.
       SECRETKEY_PATH: /home/node/.flowise
       LOG_PATH: /home/node/.flowise/logs
       BLOB_STORAGE_PATH: /home/node/.flowise/storage
@@ -88,6 +116,10 @@ services:
       # would too, but a directory you can open and read is worth more when
       # something has gone wrong.
       - ./data:/home/node/.flowise
+
+    depends_on:
+      flowise-db:
+        condition: service_healthy
 
     healthcheck:
       # Upstream's own endpoint, taken from their compose rather than guessed.
@@ -112,3 +144,44 @@ services:
     # Consequence worth knowing: this file is not runnable on its own. It is
     # never meant to be — deploy.sh always writes the override beside it, and
     # Compose loads that automatically.
+
+  flowise-db:
+    image: postgres:17-alpine
+    container_name: flowise-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      # A NAMED volume, unlike the app's ./data bind mount above, and for two
+      # reasons. The postgres image chowns its data directory to uid 999, so a
+      # bind mount here would leave a tree the invoking user cannot read or
+      # delete. And backup_service_generic already walks a service's named
+      # volumes — this is the same shape paperclip-db uses, so the shared
+      # backup machinery needs no special case.
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h localhost tests the TCP listener the app will actually use. Bare
+      # pg_isready succeeds on the unix socket while the network listener is
+      # still coming up, which lets the app start too early and fail its
+      # first connection.
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Never on main-net: the database is reachable by the app and nothing
+    # else. The override gives the APP its network; this one gets a private
+    # link that exists whichever answer you gave.
+    networks:
+      - flowise-db-net
+
+volumes:
+  db-data:
+
+networks:
+  # Declared HERE, not in the override, because it is not a choice: it exists
+  # whichever answer you gave the main-net question. The override still owns
+  # the app's OTHER network, and top-level `networks:` maps merge across
+  # files, so the two declarations coexist rather than collide.
+  flowise-db-net:

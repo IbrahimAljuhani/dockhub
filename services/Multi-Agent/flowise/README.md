@@ -1,12 +1,12 @@
 # Flowise
 
-Drag-and-drop builder for LLM apps and agent flows, on LangChain. The fastest thing in this category to get moving with, and the lightest — **one container**.
+Drag-and-drop builder for LLM apps and agent flows, on LangChain. The fastest thing in this category to get moving with, and still the lightest — **two containers**, against Dify's nine.
 
 |  |  |
 |---|---|
-| **Image** | `flowiseai/flowise` (official) |
-| **Containers** | 1 |
-| **Database** | SQLite, inside the data directory |
+| **Image** | `flowiseai/flowise:3.1.4` (official, pinned) |
+| **Containers** | 2 — `flowise`, `flowise-db` |
+| **Database** | Postgres — **not by preference**, see [below](#-postgres-because-sqlite-does-not-start) |
 | **Port** | `3000` in the container |
 | **Runtime dir** | `~/docker/flowise/` |
 
@@ -30,9 +30,9 @@ Or directly: `bash deploy.sh`.
 
 **No host port unless you ask, and never 3000.** Upstream publishes `${PORT}:${PORT}` with `PORT=3000` — which in this catalogue already belongs to [Open WebUI](../../AI/open-webui/), and is why [OpenHands](../../AI-Agents/openhands/) sits on 3001. `deploy.sh` suggests 3200.
 
-**SQLite, not Postgres.** Upstream's `.env.example` sets `DATABASE_TYPE=postgres` with `DATABASE_PASSWORD=mypassword` and no database container to talk to. Flowise's real default is SQLite, which is what makes this the one-container service the category advertises. Set `DATABASE_TYPE` and friends in `.env` if you want Postgres.
+**Postgres, with a generated password.** Upstream's `.env.example` sets `DATABASE_TYPE=postgres` with the literal `DATABASE_PASSWORD=mypassword` and *no database container to talk to* — so following it gives you a published password and a service that cannot connect. Here there is a real `flowise-db`, on a private network of its own, with a password generated on first deploy.
 
-**All four data paths point inside the volume.** Upstream's example leaves `LOG_PATH`, `BLOB_STORAGE_PATH` and the rest as `/your_*_path` placeholders. Unset, logs and uploads land in the image's ephemeral layer, where replacing the container destroys them.
+**Every file path points inside the volume.** Upstream's example leaves `LOG_PATH`, `BLOB_STORAGE_PATH` and the rest as `/your_*_path` placeholders. Unset, logs and uploads land in the image's ephemeral layer, where replacing the container destroys them.
 
 **Capabilities dropped** — `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`. Warranted here more than in most of the catalogue; see below.
 
@@ -40,13 +40,14 @@ Or directly: `bash deploy.sh`.
 
 ## 🔐 Secrets
 
-Five are generated on first deploy, and the deployment refuses to start if a published upstream default survived:
+Six are generated on first deploy, and the deployment refuses to start if a published upstream default survived:
 
 | | |
 |---|---|
 | `FLOWISE_SECRETKEY_OVERWRITE` | **encrypts the credential store** — every model-provider API key you paste into a flow. Upstream's example ships it as the literal `myencryptionkey`. |
 | `JWT_AUTH_TOKEN_SECRET` · `JWT_REFRESH_TOKEN_SECRET` | session signing |
 | `EXPRESS_SESSION_SECRET` · `TOKEN_HASH_SECRET` | session and token hashing |
+| `POSTGRES_PASSWORD` | the database. Upstream's example ships the literal `mypassword`. |
 
 The four auth secrets are **absent from upstream's example entirely**. An unset signing secret is not "no auth" — it is auth signed with whatever the application falls back to, identically on every install that also left it unset.
 
@@ -68,9 +69,38 @@ Read [the category threat model](../README.md) before pointing this at anything 
 
 ---
 
+## 🐘 Postgres, because SQLite does not start
+
+This service was designed as one container on SQLite. It does not work, and the reason is worth writing down because nothing in configuration can route around it.
+
+On **both** `3.1.4` and `latest`, startup ends here:
+
+```
+TypeError: this.db.exec is not a function
+  at new SQLiteStore (connect-sqlite3/lib/connect-sqlite3.js:56)
+  at initializeDBClientAndStore (enterprise/.../SessionPersistance.js:96)
+```
+
+Reading the failing function settles it. Flowise picks its **session store** from `DATABASE_TYPE`, which defaults to `sqlite`, and the sqlite branch requires `connect-sqlite3`. The image ships that package without a working `sqlite3` under it, so `this.db` is not a database handle.
+
+The decisive detail is what the log says *immediately before* the crash:
+
+```
+📦 [server]: Data Source initialized successfully
+🔄 [server]: Database migrations completed successfully
+```
+
+Flowise's **main** SQLite database works fine. Only the session store is broken, and only because it reaches for a different sqlite library than TypeORM does. There is no `.env` value that repairs that.
+
+The `postgres` branch of the same function uses `connect-pg-simple`, which the image *does* carry. So this deployment costs a second container. The "one container" claim was corrected rather than the deployment being left broken to protect it.
+
+---
+
 ## 💾 Backup
 
-No `backup.sh` here, and deliberately: there is no separate database container. Flowise keeps everything — SQLite database, encrypted credential store, uploads, logs — under `./data`, so the generic install-tree backup captures all of it correctly.
+`backup.sh` dumps Postgres with `pg_dump` before archiving, then on restore drops the database, recreates it, and replays the dump in a single transaction with `ON_ERROR_STOP`. (Without the drop, the replay lands on the volume `restore_service_generic` has *already* restored — and `psql < file` exits 0 even when every statement failed.)
+
+> 🔑 **The credentials and the key travel together.** Your model-provider API keys are stored encrypted *in Postgres*, and the key that decrypts them is a file under `./data`. One archive holds both, which is the point — restoring a database dump against a different install's data directory leaves credentials that decrypt to nothing.
 
 ---
 
@@ -96,8 +126,9 @@ To move version: edit `FLOWISE_VERSION` in `~/docker/flowise/.env` and rerun.
 
 ## ⚠️ Known unknowns
 
-- **3.1.4 has not itself been confirmed to start.** The pin is a reasoned response to a bad `latest` build, not a verified fix for the SQLite session-store crash. If 3.1.4 crashes the same way, the next thing to try is Postgres (`DATABASE_TYPE`), which takes a different session-store path — at the cost of the one-container property.
-- **Memory** — `deploy.sh` suggests a 1 GB limit, matching the category README's "runs in ~1 GB". Not a measured figure.
+- **The Postgres path has not yet been confirmed to start either.** It is the reasoned next move — `connect-pg-simple` is present in the image where `connect-sqlite3` is unusable — but "the other branch of that function" is an argument, not a green log line. This note comes down when a live deploy answers on `/api/v1/ping`.
+- **Memory** — `deploy.sh` suggests a 1 GB limit for the app, matching the category README's figure. Postgres adds its own footprint on top, and neither number is measured.
+- **Upgrading from the SQLite layout** is handled: `deploy.sh` detects a compose file with no `flowise-db`, keeps it as `docker-compose.yml.pre-postgres`, replaces it, and generates the database credentials into your existing `.env`. Nothing is lost, because the SQLite deployment never reached the point of storing anything.
 
 ---
 

@@ -58,6 +58,37 @@ if [[ -f "$RUNTIME_DIR/docker-compose.yml" ]]; then
         print_warn "Moved FLOWISE_VERSION from 'latest' to $FLOWISE_VERSION_PIN — the 'latest'"
         print_warn "tag is an earlier build than the release and crash-loops on startup."
     fi
+
+    # ── SQLite → Postgres, and this one DOES replace the compose file ────
+    # Everywhere else in this catalogue an existing docker-compose.yml is
+    # left alone, because it may carry edits the operator made. The exception
+    # is earned here: a flowise compose with no `flowise-db` service is the
+    # SQLite layout, and that layout does not start at all — it dies in
+    # SessionPersistance before serving a request. There is no running
+    # deployment to protect and no data to migrate, because it never ran.
+    #
+    # The old file is kept beside the new one rather than deleted, so a
+    # deviation made by hand is still recoverable.
+    if ! grep -q 'flowise-db' "$RUNTIME_DIR/docker-compose.yml"; then
+        cp "$RUNTIME_DIR/docker-compose.yml" "$RUNTIME_DIR/docker-compose.yml.pre-postgres"
+        cp "$SOURCE_DIR/docker-compose.yml" "$RUNTIME_DIR/docker-compose.yml"
+        print_warn "This deployment used the SQLite layout, which crash-loops in this image"
+        print_warn "(connect-sqlite3 has no working sqlite3 under it). Replaced the compose"
+        print_warn "file with the Postgres layout; the old one is kept as"
+        print_warn "    docker-compose.yml.pre-postgres"
+        print_warn "Your .env and data/ are untouched — and nothing is lost, because the"
+        print_warn "SQLite deployment never reached the point of storing anything."
+    fi
+
+    # An .env written before that change has no database credentials, and an
+    # unset POSTGRES_PASSWORD makes Compose substitute an empty string —
+    # postgres then refuses to initialise, with an error about the app.
+    if [[ -z "$(read_env_value POSTGRES_PASSWORD "$RUNTIME_DIR/.env" || true)" ]]; then
+        set_env_value POSTGRES_USER     "flowise"                 "$RUNTIME_DIR/.env"
+        set_env_value POSTGRES_PASSWORD "$(generate_secret 32)"   "$RUNTIME_DIR/.env"
+        set_env_value POSTGRES_DB       "flowise"                 "$RUNTIME_DIR/.env"
+        print_info "Generated database credentials into the existing .env."
+    fi
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$RUNTIME_DIR/"
 
@@ -81,6 +112,12 @@ else
         echo "JWT_REFRESH_TOKEN_SECRET=$(generate_secret_hex 32)"
         echo "EXPRESS_SESSION_SECRET=$(generate_secret_hex 32)"
         echo "TOKEN_HASH_SECRET=$(generate_secret_hex 32)"
+        # Postgres, because Flowise's sqlite SESSION store does not start in
+        # this image — see docker-compose.yml, note 3. Upstream's example
+        # ships DATABASE_PASSWORD=mypassword; this one is generated.
+        echo "POSTGRES_USER=flowise"
+        echo "POSTGRES_PASSWORD=$(generate_secret 32)"
+        echo "POSTGRES_DB=flowise"
     } > "$RUNTIME_DIR/.env"
     chmod 600 "$RUNTIME_DIR/.env"
     umask 022
@@ -96,8 +133,9 @@ fi
 # ── The data directory, created before Docker can ────────────────────────
 # The image runs as `node`, uid 1000. A bind-mount target that does not exist
 # is created by the daemon as ROOT, and Flowise then cannot write its own
-# database — it fails at startup with a permission error that names a path
-# inside the container, which is a poor clue to a problem out here.
+# encryption key, uploads or logs — it fails with a permission error that
+# names a path inside the container, which is a poor clue to a problem out
+# here. (The tables live in Postgres now; these files still do not.)
 #
 # Outside the first-install branch on purpose, so a deployment made before
 # this existed gets corrected on its next run rather than staying broken.
@@ -152,9 +190,14 @@ ENV_MEM_LIMIT="$(read_env_value DOCKHUB_MEM_LIMIT "$RUNTIME_DIR/.env" || true)"
         echo "    ports:"
         echo "      - \"$ENV_HOST_PORT:$CONTAINER_PORT\""
     fi
-    # This file owns network membership outright — the base compose declares
-    # none, precisely so that these lines REPLACE rather than merge with it.
+    # This file owns the APP's network membership outright — the base compose
+    # gives the flowise service no `networks:` key at all, precisely so that
+    # these lines REPLACE rather than merge with it.
     echo "    networks:"
+    # Always, regardless of the answer: this is the link to its database, not
+    # a reachability choice. The base file declares the network; only
+    # membership is written here, because membership is what merges.
+    echo "      - flowise-db-net"
     if (( ENV_ON_MAIN_NET )); then
         echo "      - main-net"
     else
@@ -209,7 +252,8 @@ else
     echo "🔒 Networks:   flowise-net only — deliberately NOT on 'main-net'"
 fi
 echo "👤 First run:  create your own account — Flowise has no default login"
-echo "📁 Data:       $RUNTIME_DIR/data   (flows, credential store, uploads)"
+echo "🗄️  Database:   postgres in 'flowise-db' — not reachable from main-net"
+echo "📁 Files:      $RUNTIME_DIR/data   (encryption key, uploads, logs)"
 echo "🔑 Secrets:    $RUNTIME_DIR/.env   (chmod 600)"
 echo "📜 Log:        $LOGFILE"
 echo "──────────────────────────────────────────────"
