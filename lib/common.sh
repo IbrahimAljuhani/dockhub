@@ -994,7 +994,22 @@ restore_service_generic() {
         for vol_archive in "$staging/volumes"/*.tar.gz; do
             [[ -f "$vol_archive" ]] || continue
             vol_name="$(basename "$vol_archive" .tar.gz)"
-            docker volume create "$vol_name" >/dev/null
+            # Labelled the way Compose labels its own volumes. Without these,
+            # every subsequent `up` prints:
+            #
+            #   WARN volume "x_data" already exists but was not created by
+            #   Docker Compose. Use `external: true` to use an existing volume
+            #
+            # on a volume this restore just legitimately recreated — noise on
+            # every restore of every service, and it reads like a fault when
+            # nothing is wrong. The project is the compose project name, which
+            # is the install directory's basename, and the volume key is the
+            # part after the "<project>_" prefix.
+            docker volume create \
+                --label com.docker.compose.project="$(basename "$install_dir")" \
+                --label com.docker.compose.volume="${vol_name#"$(basename "$install_dir")"_}" \
+                --label com.docker.compose.version="$(docker compose version --short 2>/dev/null || echo 0)" \
+                "$vol_name" >/dev/null
             docker run --rm -v "$vol_name":/data -v "$staging/volumes":/backup alpine \
                 sh -c "find /data -mindepth 1 -delete; tar xzf /backup/$(basename "$vol_archive") -C /data" \
                 || print_warn "Failed to restore volume '$vol_name'."
