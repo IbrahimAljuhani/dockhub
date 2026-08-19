@@ -265,74 +265,92 @@ else
 fi
 
 # ── The summary ─────────────────────────────────────────────────────────
-# Kept short on purpose. An earlier version of this block ran to 92 print
-# statements: every finding from every review had added its own paragraph,
-# each justified alone, together a wall nobody reads. The same thing was
-# fixed once already in NetBird (30 lines to 12).
+# House style, matched deliberately: 38 of 38 services in this repo close
+# with a rule-lined block and emoji labels. An earlier rewrite of this
+# summary stripped the noise AND the style, leaving Paperclip the only
+# service that looked foreign. Brevity and consistency are not opposites.
 #
-# The rule that decides what stays: THIS SCRIPT REPORTS FACTS ABOUT THIS
-# HOST — what is running, what was detected, what was verified. The README
-# explains. Anything that would read the same on every machine belongs
-# there, not here.
+# The rule that keeps it short: THIS SCRIPT REPORTS FACTS ABOUT THIS HOST.
+# Anything that would print identically on every machine lives in the README.
+_PC_URL="$(read_env_value PUBLIC_URL "$RUNTIME_DIR/.env")"
 echo
-print_info "$SERVICE_NAME is running."
-echo
-printf '  %-14s %s\n' "Open" "$(read_env_value PUBLIC_URL "$RUNTIME_DIR/.env")   → create the first account"
-printf '  %-14s %s\n' "Data" "$RUNTIME_DIR/state"
-printf '  %-14s %s\n' "Secrets" "$RUNTIME_DIR/.env"
+echo "──────────────────────────────────────────────"
+echo "🌐 URL:        $_PC_URL"
+echo "👤 First run:  create your own account — Paperclip has no default user"
 if (( ENV_ON_MAIN_NET )); then
-    printf '  %-14s %s\n' "Networks" "paperclip-net, ai-net, main-net"
-    printf '  %-14s %s\n' "NPM target" "paperclip-app:$CONTAINER_PORT"
+    echo "🔗 Proxy:      paperclip-app:$CONTAINER_PORT on 'main-net'"
 else
-    printf '  %-14s %s\n' "Networks" "paperclip-net, ai-net   (not main-net)"
+    echo "🔒 Networks:   paperclip-net, ai-net — deliberately NOT on 'main-net'"
 fi
+echo "📁 Data:       $RUNTIME_DIR/state"
+echo "🔑 Secrets:    $RUNTIME_DIR/.env"
+echo "📜 Log:        $LOGFILE"
+echo "──────────────────────────────────────────────"
 
-# ── Connecting an agent: only what is actionable on THIS host ───────────
-echo
-echo "  Connect an agent — Agent → Configuration → Adapter:"
-echo
-
-_HERMES_URL="http://hermes:8642"
-_hermes_ok=0
+# ── Connecting a local agent ────────────────────────────────────────────
+# Asked, not assumed — and asked ONLY when there is something to answer
+# about. `docker ps` needs nothing from Paperclip, so the presence check
+# runs before the question: no agent on the host means no question at all,
+# rather than a prompt that collects an answer and prints nothing.
+#
+# The wording matters. It offers to SHOW connection details, because that
+# is all this script can do — the adapter is configured in a web form, and
+# Paperclip publishes no schema, no env var and no CLI for it. A prompt
+# saying "connect an agent" would promise wiring that never happens, and
+# the operator would open the UI expecting a configured agent.
 if docker ps --format '{{.Names}}' | grep -qx hermes; then
-    # Two separate checks, kept because they answer different questions: is
-    # it routable, and is the key accepted. One request proving both cannot
-    # say which failed — the lesson from Hermes' own deploy.sh.
-    if docker exec paperclip-app node -e "
-        const u=new URL('$_HERMES_URL');
-        require('net').connect(u.port,u.hostname)
-          .on('connect',()=>process.exit(0)).on('error',()=>process.exit(1));
-    " >/dev/null 2>&1; then
+    echo
+    read -rp "Show Hermes connection details for Paperclip? (y/N): " _want || _want="n"
+    if [[ "${_want,,}" == "y" ]]; then
+        _HURL="http://hermes:8642"
         _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/data/.env")"
         [[ -z "$_hk" ]] && _hk="$(read_env_value API_SERVER_KEY "$HOME/docker/hermes/.env")"
-        _auth=0
-        [[ -n "$_hk" ]] && { docker exec -e HK="$_hk" paperclip-app node -e "
-            fetch('$_HERMES_URL/v1/models',{headers:{Authorization:'Bearer '+process.env.HK}})
-              .then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1));
-        " >/dev/null 2>&1 && _auth=1; }
-        _hermes_ok=1
-        echo "    Hermes Gateway      $( ((_auth)) && echo 'reachable, key verified' || echo 'reachable — KEY REJECTED, see README' )"
-        echo "      API base URL      $_HERMES_URL"
-        echo "      API key           $HOME/docker/hermes/data/.env"
-        echo "      Paperclip API URL http://paperclip-app:$CONTAINER_PORT"
-        echo "      Allow remote HTTP ON"
-    else
-        print_warn "Hermes is running but unreachable from Paperclip — are both on ai-net?"
+
+        # Verified before shown. Printing a key that Hermes rejects helps
+        # nobody and costs a confusing half-hour in the UI. Two checks, kept
+        # separate because they answer different questions — routable, and
+        # accepted. One request proving both cannot say which failed.
+        _ok=0
+        if docker exec paperclip-app node -e "
+              const u=new URL('$_HURL');
+              require('net').connect(u.port,u.hostname)
+                .on('connect',()=>process.exit(0)).on('error',()=>process.exit(1));
+           " >/dev/null 2>&1 && [[ -n "$_hk" ]]; then
+            docker exec -e HK="$_hk" paperclip-app node -e "
+                fetch('$_HURL/v1/models',{headers:{Authorization:'Bearer '+process.env.HK}})
+                  .then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1));
+            " >/dev/null 2>&1 && _ok=1
+        fi
+
+        if (( _ok )); then
+            echo
+            echo "  Paperclip → Agent → Configuration → Adapter"
+            echo "──────────────────────────────────────────────"
+            echo "🔌 Adapter type:       Hermes Gateway   (NOT plain 'Hermes')"
+            echo "🌐 API base URL:       $_HURL"
+            echo "🔑 API key:            $_hk"
+            echo "↩️  Paperclip API URL:  http://paperclip-app:$CONTAINER_PORT"
+            echo "⚠️  Allow remote HTTP:  ON"
+            echo "──────────────────────────────────────────────"
+            echo "   Key verified against Hermes just now. It is printed here"
+            echo "   because you asked — it is also in $HOME/docker/hermes/data/.env"
+        else
+            print_warn "Hermes is running, but the connection could not be verified —"
+            print_warn "either Paperclip cannot reach $_HURL, or the key was rejected."
+            print_warn "Nothing printed rather than details that would not work."
+            print_warn "Both must be on 'ai-net'. See this service's README."
+        fi
     fi
 fi
 
-echo "    Cloud key           add to $RUNTIME_DIR/.env, then rerun:"
-echo "                        ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY"
-
-detect_ai_provider
-[[ -n "$AI_PROVIDER_NAME" ]] && \
-    echo "    Local model         $AI_PROVIDER_NAME is on ai-net — use the OpenCode adapter"
-
 if docker ps --format '{{.Names}}' | grep -qx openclaw; then
-    echo "    OpenClaw Gateway    running, but the adapter is 'Coming soon' upstream"
+    echo
+    print_info "OpenClaw is running, but Paperclip lists its gateway adapter as"
+    print_info "'Coming soon' and it cannot be selected yet. Nothing to do."
 fi
 
 echo
-echo "  Which adapters work, local models, the plain-HTTP warning:"
-echo "      services/Multi-Agent/paperclip/README.md"
+echo "Which adapters work, local models via Ollama, the plain-HTTP warning:"
+echo "   services/Multi-Agent/paperclip/README.md"
+echo "To manage: cd $RUNTIME_DIR && $COMPOSE_CMD [ps|logs -f|stop|restart]"
 print_tunnel_reminder_if_relevant
