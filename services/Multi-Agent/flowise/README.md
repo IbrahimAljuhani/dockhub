@@ -74,9 +74,29 @@ No `backup.sh` here, and deliberately: there is no separate database container. 
 
 ---
 
+## 📌 Pinned to 3.1.4, and `latest` is not a synonym for it
+
+The first live deploy used `:latest` and crash-looped:
+
+```
+TypeError: this.db.exec is not a function
+  at new SQLiteStore (connect-sqlite3/lib/connect-sqlite3.js:56)
+  at initializeDBClientAndStore (enterprise/.../SessionPersistance.js:96)
+```
+
+with two module-resolution failures beside it (`@smithy/eventstream-codec`, and `@langchain/core` not exporting `./utils/uuid`). Three broken package resolutions in one image is a bad build, not a misconfiguration.
+
+Checked against the registry rather than assumed: **`3.1.4` and `latest` have different digests, and `3.1.4` was pushed fifteen minutes after `latest`.** So on this image `latest` is an *earlier* build than the newest tagged release — not a pointer to it. That is precisely the failure pinning exists to prevent, and it is why this service pins where most of the catalogue does not.
+
+`deploy.sh` also migrates an existing `.env` that still says `latest` — a value *it* wrote, not one you chose. A version you pinned yourself is left alone.
+
+To move version: edit `FLOWISE_VERSION` in `~/docker/flowise/.env` and rerun.
+
+---
+
 ## ⚠️ Known unknowns
 
-- **Not yet run on a server.** Built 2026-08-19 against upstream's compose and `.env.example`.
+- **3.1.4 has not itself been confirmed to start.** The pin is a reasoned response to a bad `latest` build, not a verified fix for the SQLite session-store crash. If 3.1.4 crashes the same way, the next thing to try is Postgres (`DATABASE_TYPE`), which takes a different session-store path — at the cost of the one-container property.
 - **Memory** — `deploy.sh` suggests a 1 GB limit, matching the category README's "runs in ~1 GB". Not a measured figure.
 
 ---

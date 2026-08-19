@@ -36,7 +36,12 @@
 
 services:
   flowise:
-    image: flowiseai/flowise:${FLOWISE_VERSION:-latest}
+    # The fallback is a real version, NOT `latest`. deploy.sh always writes
+    # FLOWISE_VERSION into .env, so this only fires if that file is missing or
+    # hand-edited — and on this image `latest` is an EARLIER build than the
+    # tagged release (different digest, pushed first) which crash-loops on
+    # startup. There should be no path in this repo that reaches it.
+    image: flowiseai/flowise:${FLOWISE_VERSION:-3.1.4}
     container_name: flowise
     restart: unless-stopped
     env_file:
