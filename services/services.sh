@@ -286,8 +286,27 @@ remove_instance() {
         # the user believes secrets are gone while .env and application
         # state are still on disk. So the claim is now checked.
         if [[ -d "$instance_dir" ]]; then
-            print_warn "Some files under $instance_dir are owned by root"
-            print_warn "(written by the container) and cannot be deleted as $(id -un)."
+            # Root-owned leftovers, written by the container. Delete them the
+            # same way they were created — from inside a container — rather
+            # than asking for sudo.
+            #
+            # This is strictly better than the password prompt it replaces:
+            # anyone who can run this script is already in the docker group,
+            # so it needs no extra privilege, no password, and it works on
+            # hosts with no sudo at all. The same realisation fixed the backup
+            # tar and the restore extraction on 2026-08-19 — a host-side
+            # command cannot touch what a root container wrote.
+            #
+            # The mount is the instance directory itself and the delete is of
+            # its CONTENTS, so a wrong path cannot reach outside it.
+            docker run --rm -v "$instance_dir":/wipe alpine \
+                sh -c 'rm -rf /wipe/* /wipe/.[!.]* /wipe/..?*' >/dev/null 2>&1 || true
+            rmdir "$instance_dir" 2>/dev/null || rm -rf "$instance_dir" 2>/dev/null || true
+        fi
+
+        # Only if the container could not finish it either.
+        if [[ -d "$instance_dir" ]]; then
+            print_warn "Some files under $instance_dir could not be deleted."
             local esc
             if command -v sudo >/dev/null 2>&1; then
                 read -rp "Finish the wipe with sudo? (y/N): " esc || esc="n"
