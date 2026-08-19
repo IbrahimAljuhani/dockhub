@@ -937,7 +937,7 @@ if [[ "$ENV_SOCK" == "1" && "$ENV_SANDBOX" == "1" ]]; then
     fi
 fi
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+SERVER_IP=$(host_lan_ip || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 # ── Reading the model back is not as simple as it looks ────────────────
 # deploy.sh writes `model: <name>` on first run, which upstream accepts —

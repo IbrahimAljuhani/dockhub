@@ -269,7 +269,7 @@ fi
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    SERVER_IP=$(host_lan_ip || true)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:           http://$SERVER_IP:$ENV_HOST_PORT"
 fi

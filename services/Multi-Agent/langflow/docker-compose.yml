@@ -246,14 +246,21 @@ networks:
   # llama.cpp / LocalAI deployed from the AI category BY CONTAINER NAME —
   # http://ollama:11434 rather than a published host port.
   #
-  # This was missing until 2026-08-19, and its absence made deploy.sh a liar:
-  # prompt_agent_network prints "Langflow will run on 'ai-net', where it can
-  # reach the model provider. That is all it needs to work." while nothing
-  # joined it. The only route left was the host's LAN address and a published
-  # Ollama port — which means exposing an API that has no authentication at
-  # all, to get a connection Docker was willing to make privately.
+  # ── WHY 'models-net' AND NOT 'ai-net' ────────────────────────────────
+  # This service reached no model provider at all until 2026-08-19, while
+  # prompt_agent_network was printing "Langflow will run on 'ai-net', where it
+  # can reach the model provider." The first fix was to join ai-net, and it
+  # lasted one day: ai-net also carries OpenHands, whose container has NO
+  # AUTHENTICATION and mounts /var/run/docker.sock. Langflow exists to run
+  # Custom Component nodes — Python a user or a model wrote — so joining that
+  # network handed arbitrary flow code a route to root on the host.
+  #
+  # 'models-net' carries the model providers and nothing else. They join both
+  # networks and act as the hub, so agents keep their access and builders keep
+  # theirs, without the two groups being able to see each other. The whole
+  # reasoning is in lib/common.sh, ensure_models_net.
   #
   # Declared external and joined from the override (membership is what
-  # merges), the same shape paperclip uses.
-  ai-net:
+  # merges), the same shape paperclip uses for ai-net.
+  models-net:
     external: true

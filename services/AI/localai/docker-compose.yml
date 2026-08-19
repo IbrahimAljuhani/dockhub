@@ -74,8 +74,17 @@ services:
       - ./configuration:/configuration
       - ./data:/data
     networks:
+      # BOTH, deliberately — this container is a hub that lets two groups of
+      # consumers share it without sharing each other. See lib/common.sh,
+      # ensure_models_net, for the whole reasoning: the Multi-Agent builders
+      # run code a user or a model wrote, and must not be able to reach
+      # OpenHands, whose container has no authentication and holds the Docker
+      # socket. LocalAI gains no reach from this — it calls nobody.
       - ai-net
+      - models-net
 
 networks:
   ai-net:
+    external: true
+  models-net:
     external: true

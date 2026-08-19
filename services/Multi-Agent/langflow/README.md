@@ -45,7 +45,7 @@ Upstream ships a two-service `docker_example/docker-compose.yml`, and this deplo
 
 **Telemetry off** via `DO_NOT_TRACK`, which upstream leaves on.
 
-**It joins `ai-net`**, so a flow can point at an [Ollama](../../AI/ollama/), [llama.cpp](../../AI/llama-cpp/) or [LocalAI](../../AI/localai/) deployed from the AI category **by container name** — `http://ollama:11434`, with no published port on either side. Upstream's compose has no equivalent, because upstream does not assume a model provider next door.
+**It joins `models-net`**, so a flow can point at an [Ollama](../../AI/ollama/), [llama.cpp](../../AI/llama-cpp/) or [LocalAI](../../AI/localai/) deployed from the AI category **by container name** — `http://ollama:11434`, with no published port on either side. Upstream's compose has no equivalent, because upstream does not assume a model provider next door. It is `models-net` and **not** `ai-net` on purpose: `ai-net` also carries [OpenHands](../../AI-Agents/openhands/), which has no authentication and holds the Docker socket — and this service exists to run code that arrived inside a flow. See [the category README](../README.md).
 
 > Verified live 2026-08-19: from inside the container, `curl http://ollama:11434/api/tags` returns the model list — no port published on either side.
 

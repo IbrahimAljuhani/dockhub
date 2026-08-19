@@ -380,7 +380,7 @@ fi
 # DockHub the provider is a container on ai-net, reached by name.
 detect_ai_provider
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+SERVER_IP=$(host_lan_ip || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 echo

@@ -45,6 +45,9 @@ ensure_single_provider "localai" || exit 0
 
 mkdir -p "$INSTALL_DIR"
 ensure_ai_net
+# This provider is the hub between the two consumer groups — see
+# lib/common.sh, ensure_models_net. Both networks must exist before it starts.
+ensure_models_net
 gpu_setup
 
 # Whether the GPU CAN be used (gpu_setup) and whether it SHOULD be
@@ -124,7 +127,14 @@ EOF
 fi
 
 if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
-    print_info "Existing docker-compose.yml found at $INSTALL_DIR — keeping it (not overwritten). Delete it yourself first if you want the latest version from this repo."
+    # OFFERED, not just announced — and here it is more than tidiness. This
+    # container is now the hub joining 'ai-net' and 'models-net' (see
+    # lib/common.sh, ensure_models_net). A kept compose from before that
+    # change is on ai-net alone, so a Flowise/Langflow/Dify that has already
+    # moved to models-net cannot reach this provider AT ALL. Declining is
+    # still fine — it just has to be a decision, not a default.
+    offer_compose_update "$INSTALL_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
+        "rm $INSTALL_DIR/docker-compose.yml && bash $0"
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 fi
@@ -251,7 +261,7 @@ if (( WAIT_RC == 1 )); then
     print_error "LocalAI did not start."
 fi
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+SERVER_IP=$(host_lan_ip || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 echo

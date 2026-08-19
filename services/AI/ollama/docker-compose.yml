@@ -105,8 +105,22 @@ services:
       # llama.cpp or LocalAI even when running the same model.
       - ${AI_MODELS_PATH:?AI_MODELS_PATH is unset — run deploy.sh, which resolves it}:/root/.ollama
     networks:
+      # BOTH, deliberately — this container is the hub that lets two groups
+      # of consumers share it without sharing each other. See lib/common.sh,
+      # ensure_models_net, for the whole reasoning.
+      #   ai-net      → the agent services (OpenHands, Hermes, OpenClaw,
+      #                 Paperclip) and Open WebUI
+      #   models-net  → the Multi-Agent builders, which run code a user or a
+      #                 model wrote and must NOT be able to reach OpenHands,
+      #                 whose container has no authentication and holds the
+      #                 Docker socket
+      # Ollama itself gains no reach from this: a network gives it members it
+      # can be called BY, and it calls nobody.
       - ai-net
+      - models-net
 
 networks:
   ai-net:
+    external: true
+  models-net:
     external: true

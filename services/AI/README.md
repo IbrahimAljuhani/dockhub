@@ -151,10 +151,29 @@ A provider's API has **no authentication of any kind**. Anyone who can reach the
 
 | | Default |
 |---|---|
-| Inside Docker | Reached by container name on `ai-net`. **No port published, nothing exposed.** |
+| Inside Docker | Reached by container name on `ai-net` **and `models-net`**. **No port published, nothing exposed.** |
 | Host port | **Offered, never assumed** — and `deploy.sh` names the missing authentication in the prompt |
 
 Consumers inside DockHub never need the host port. Publish it only when something outside Docker must reach the API, and treat that as putting an open endpoint on your LAN — because it is.
+
+### Two networks, and why a provider joins both
+
+A Docker network is **flat**: every member can reach every other. So "join the network to use a local model" also means "join the network and be reachable by everything else on it" — and `ai-net` carries [OpenHands](../AI-Agents/openhands/), which has **no authentication of its own** and mounts the Docker socket.
+
+That was acceptable while `ai-net` held only the agent services. It stopped being acceptable on **2026-08-19**, when the [Multi-Agent](../Multi-Agent/) builders — whose whole purpose is running code a user or a model wrote — were put on it to reach a local model. Code arriving inside an imported flow could then reach an unauthenticated endpoint holding root on the host.
+
+The providers are now the **hub** that keeps the two consumer groups apart:
+
+```
+  agents ──────► ai-net ──────► [ ollama · llama-cpp · localai ] ◄────── models-net ◄────── builders
+  (OpenHands, Hermes,                    joins BOTH                       (Dify, Flowise,
+   OpenClaw, Open WebUI,                                                   Langflow)
+   Paperclip)
+```
+
+Each group reaches the models; neither reaches the other. A provider gains nothing from this — a network gives it members that can call *it*, and it calls nobody.
+
+`deploy.sh` creates both networks and joins both, so this needs no thought from you. If a builder cannot see your provider, the usual cause is a provider deployed before this change whose kept `docker-compose.yml` is still on `ai-net` alone — rerun its `deploy.sh` and accept the compose update it offers.
 
 Open WebUI is different: it **does** have accounts, and **the first account registered becomes admin**. Create yours immediately after deploying, before anyone else finds the page.
 
