@@ -31,6 +31,7 @@ _seafile_db_bin() {
 backup_seafile() {
     local instance="$1" install_dir="$2"
     local dump_file="$install_dir/db.sql"
+    local _derr; _derr="$(mktemp)"
 
     local db_password dump_bin
     db_password=$(read_env_value "INIT_SEAFILE_MYSQL_ROOT_PASSWORD" "$install_dir/.env")
@@ -39,15 +40,17 @@ backup_seafile() {
     # --single-transaction snapshots consistently without locking the server;
     # Seafile's background jobs keep writing throughout a backup.
     if docker exec seafile-db "$dump_bin" -uroot -p"$db_password" \
-        --all-databases --single-transaction --routines --events > "$dump_file" 2>/dev/null; then
+        --all-databases --single-transaction --routines --events > "$dump_file" 2>"$_derr"; then
         print_info "Databases dumped to $dump_file"
     else
         print_warn "$dump_bin failed — falling back to a raw (less safe) volume copy for the db."
+        [[ -s "$_derr" ]] && sed "s/^/    /" "$_derr" >&2
         rm -f "$dump_file"
     fi
 
     # Still capture compose files, .env (which holds JWT_PRIVATE_KEY) and the
     # seafile-data volume — every uploaded file lives there.
+    rm -f "$_derr"
     backup_service_generic "seafile" "$instance" "$install_dir"
 }
 

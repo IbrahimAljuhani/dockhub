@@ -33,6 +33,7 @@ _erpnext_db_bin() {
 backup_erpnext() {
     local instance="$1" install_dir="$2"
     local dump_file="$install_dir/db.sql"
+    local _derr; _derr="$(mktemp)"
 
     local db_password dump_bin
     db_password=$(read_env_value "DB_PASSWORD" "$install_dir/.env")
@@ -43,15 +44,17 @@ backup_erpnext() {
     # queue workers keep writing throughout the backup. --events and
     # --routines are included because Frappe installs both.
     if docker exec erpnext-db "$dump_bin" -uroot -p"$db_password" \
-        --all-databases --single-transaction --events --routines > "$dump_file" 2>/dev/null; then
+        --all-databases --single-transaction --events --routines > "$dump_file" 2>"$_derr"; then
         print_info "Database dumped to $dump_file"
     else
         print_warn "$dump_bin failed — falling back to a raw (less safe) volume copy for the db."
+        [[ -s "$_derr" ]] && sed "s/^/    /" "$_derr" >&2
         rm -f "$dump_file"
     fi
 
     # Still capture the compose files, .env and the `sites` volume the normal
     # way — this only replaces how the db itself gets captured.
+    rm -f "$_derr"
     backup_service_generic "erpnext" "$instance" "$install_dir"
 }
 
