@@ -90,6 +90,33 @@ generate_secret_hex() {
     openssl rand -hex "${1:-16}"
 }
 
+# URL-safe base64 of $1 random BYTES (default 32), unpadded — the exact output
+# of Python's secrets.token_urlsafe(), which several projects specify by name.
+#
+# ── Why this exists, measured rather than assumed ────────────────────────
+# Fernet (the `cryptography` library) requires a key that decodes to EXACTLY
+# 32 bytes, and neither generator above satisfies that:
+#
+#   generate_secret_hex 32  → 64 chars → decodes to 48 bytes → REJECTED
+#   generate_secret 32      → 32 chars → decodes to 24 bytes → REJECTED
+#   this, with 32           → 43 chars → decodes to 32 bytes → valid
+#
+# The failure is not obvious from the outside: the string looks like a strong
+# random secret, and the application rejects it at runtime with "Fernet key
+# must be 32 url-safe base64-encoded bytes" — or, worse, in a project that
+# derives a key from short input, silently accepts something weaker.
+# Langflow is the first service here to need it; anything using Fernet
+# (Python's standard choice for encrypting stored credentials) will too.
+generate_secret_urlsafe() {
+    # tr -dc (delete complement) keeps ONLY the URL-safe base64 alphabet, so
+    # the '=' padding, the trailing newline and any stray carriage return are
+    # all gone by construction. Deleting a named list instead — tr -d '=\n' —
+    # looks equivalent and is not: it leaves a CR in place on any host whose
+    # openssl emits CRLF, producing a 44-character key that FAILS the
+    # alphabet check while still looking correct when printed.
+    openssl rand -base64 "${1:-32}" | tr '+/' '-_' | tr -dc 'A-Za-z0-9_-'
+}
+
 # Validates an instance name / db user / db name for multi-instance services
 # (odoo, linkstack, ...). $1 = value, $2 = label for the error message.
 validate_identifier() {
@@ -677,11 +704,21 @@ port_in_use() {
 # suggested default port. Sets HOST_PORT in the caller's shell (same
 # no-command-substitution reasoning as prompt_mem_limit above).
 HOST_PORT=""
+# $2 = "required" for the case where a host port is the ONLY way in — the
+# service declined 'main-net', so there is no NPM to serve it. Asking
+# "also publish a port? (y/N)" there is wrong twice over: "also" implies a
+# second route that does not exist, and a default of No produces a container
+# nothing can reach. Callers used to work around this by looping on the
+# helper until it returned non-empty, which re-asked the misleading question
+# each time round. In required mode the yes/no step is skipped entirely and
+# the port itself is asked directly.
 prompt_host_port() {
-    local default="$1" answer port cont
+    local default="$1" required="${2:-}" answer port cont
     HOST_PORT=""
-    read -rp "Also publish a host port for direct access without NPM (e.g. http://<server-ip>:<port>)? (y/N): " answer
-    [[ "${answer,,}" == "y" ]] || return 0
+    if [[ "$required" != "required" ]]; then
+        read -rp "Also publish a host port for direct access without NPM (e.g. http://<server-ip>:<port>)? (y/N): " answer
+        [[ "${answer,,}" == "y" ]] || return 0
+    fi
     while true; do
         read -rp "Host port (default: $default): " port
         port="${port:-$default}"

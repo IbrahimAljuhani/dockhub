@@ -14,7 +14,7 @@
 [![Platforms](https://img.shields.io/badge/Platforms-Debian%20%7C%20Ubuntu%20%7C%20RHEL%20%7C%20Arch%20%7C%20openSUSE-lightgrey)](#-supported-systems)
 [![ARM64](https://img.shields.io/badge/arch-x86__64%20%7C%20ARM64-lightgrey)](#-supported-systems)
 
-[![Services](https://img.shields.io/badge/Services-40%20built%20%2F%2041-brightgreen)](#-the-catalogue)
+[![Services](https://img.shields.io/badge/Services-41%20built%20%2F%2041-brightgreen)](#-the-catalogue)
 [![Categories](https://img.shields.io/badge/Categories-15-blue)](#-the-catalogue)
 [![NPM](https://img.shields.io/badge/NGINX%20Proxy%20Manager-latest-00A98F)](#-environment-variable-overrides)
 [![Portainer](https://img.shields.io/badge/Portainer--CE-latest-13BEF9)](#-environment-variable-overrides)
@@ -24,7 +24,7 @@
 
 </div>
 
-**Self-hosted services, deployed properly.** One script installs the Docker foundation; a menu deploys any of **40 services** on top of it — each with a reverse proxy route, a backup path, and documentation written from actually running it.
+**Self-hosted services, deployed properly.** One script installs the Docker foundation; a menu deploys any of **41 services** on top of it — each with a reverse proxy route, a backup path, and documentation written from actually running it.
 
 ```bash
 git clone https://github.com/IbrahimAljuhani/dockhub.git
@@ -117,7 +117,7 @@ Each category has its own README explaining what the services are for, how they 
 |---|---|---|
 | 🧠 [**AI**](services/AI/) | Ollama · llama.cpp · LocalAI · Open WebUI | 4/4 |
 | 🤖 [**AI-Agents**](services/AI-Agents/) | OpenClaw · Hermes · OpenHands | 3/3 |
-| 🧩 [**Multi-Agent**](services/Multi-Agent/) | **Paperclip** · **Dify** · **Flowise** · Langflow | 3/4 |
+| 🧩 [**Multi-Agent**](services/Multi-Agent/) | **Paperclip** · **Dify** · **Flowise** · **Langflow** | 4/4 |
 | ⚙️ [**Automation**](services/Automation/) | n8n | 1/1 |
 | 🌐 [**DNS**](services/DNS/) | Pi-hole · AdGuard Home | 2/2 |
 | 🏢 [**ERP**](services/ERP/) | Odoo · ERPNext · Dolibarr | 3/3 |
@@ -293,7 +293,9 @@ That produced a few habits worth knowing about as a reader:
 
 ## 📌 Status
 
-**40 of 41 services are built.** The remaining two are in [Multi-Agent](services/Multi-Agent/) — Langflow, and Flowise pending its first live run.
+**All 41 services are built** — the catalogue is complete as of 2026-08-19, with Langflow closing the [Multi-Agent](services/Multi-Agent/) category.
+
+Every one of them has been deployed on real hardware except **Langflow**, which is written but not yet live-tested; its README says so at the top of its own "known unknowns". That distinction is kept deliberately rather than rounding up to "done".
 
 Categories, conventions and the shared library (`lib/`) are stable. Service scripts are added one at a time, each verified on real hardware before it lands.
 
