@@ -82,7 +82,7 @@ ask_reachability() {
             [[ -n "$HOST_PORT" ]] || print_warn "A port is required in this mode — otherwise nothing can reach Paperclip."
         done
         local server_ip
-        server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        server_ip="$(host_lan_ip)"
         [[ -n "$server_ip" ]] || server_ip="localhost"
         PUBLIC_URL="http://${server_ip}:${HOST_PORT}"
         print_info "Public URL set to $PUBLIC_URL (direct host port)."

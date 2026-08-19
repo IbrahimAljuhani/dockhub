@@ -247,12 +247,23 @@ fi
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    echo "🌐 URL:        http://$(hostname -I 2>/dev/null | awk '{print $1}'):$ENV_HOST_PORT"
+    echo "🌐 URL:        http://$(host_lan_ip):$ENV_HOST_PORT"
 else
     echo "🔗 Proxy:      dify-nginx:80 on 'main-net'  (no host port published)"
 fi
 echo "👤 First run:  open the URL and set up the admin account"
-echo "🔑 Setup pass: INIT_PASSWORD in $RUNTIME_DIR/.env"
+# Printed in full, unlike every other secret this script generates, and the
+# distinction is real: INIT_PASSWORD is spent the moment you use it. It only
+# unlocks Dify's /install page to create the first admin, and once that
+# account exists the value is worthless — Dify closes the endpoint. You need
+# it in a browser within the next minute, so making you `cat` a second file
+# for it is friction with no security bought.
+#
+# The DB password, the Redis password, the plugin keys and the Weaviate key
+# are NOT printed, and must not be: those stay live for the deployment's
+# whole life.
+echo "🔑 Setup pass: $(read_env_value INIT_PASSWORD "$RUNTIME_DIR/.env")"
+echo "               one-time — it only unlocks first admin setup, then is spent"
 echo "📁 Data:       $RUNTIME_DIR/volumes"
 echo "🔒 Secrets:    $RUNTIME_DIR/.env   (all generated, none of upstream's defaults)"
 echo "📜 Log:        $LOGFILE"
