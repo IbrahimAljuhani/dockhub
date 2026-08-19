@@ -293,9 +293,7 @@ That produced a few habits worth knowing about as a reader:
 
 ## 📌 Status
 
-**All 41 services are built** — the catalogue is complete as of 2026-08-19, with Langflow closing the [Multi-Agent](services/Multi-Agent/) category.
-
-Every one of them has been deployed on real hardware except **Langflow**, which is written but not yet live-tested; its README says so at the top of its own "known unknowns". That distinction is kept deliberately rather than rounding up to "done".
+**All 41 services are built and deployed on real hardware** — the catalogue is complete as of 2026-08-19, with Langflow closing the [Multi-Agent](services/Multi-Agent/) category.
 
 Categories, conventions and the shared library (`lib/`) are stable. Service scripts are added one at a time, each verified on real hardware before it lands.
 
