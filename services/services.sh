@@ -102,10 +102,16 @@ declare -A SERVICE_FILES=(
     # and is regenerated each release — a hand-maintained fork of it would be
     # wrong within a version. Our entire contribution is the override.
     [dify]="docker-compose.override.yml backup.sh"
-    # Flowise needs NO backup.sh: no separate database container, and all of
-    # its state (SQLite, credential store, uploads, logs) sits under ./data
-    # inside the install tree, which the generic backup already captures.
+    # Flowise once needed NO backup.sh — all of its state sat under ./data as
+    # SQLite. That changed: the sqlite SESSION store does not start in this
+    # image, so the service moved to Postgres and gained a second container,
+    # and with it a database the generic volume backup would only copy raw.
     [flowise]="docker-compose.yml backup.sh"
+    # Langflow: same shape as paperclip — Postgres for flows and users, a
+    # bind mount for uploads. Note its ENCRYPTION KEY lives in .env, not in
+    # the data directory, which is why .env being inside the install tree
+    # matters more here than elsewhere.
+    [langflow]="docker-compose.yml backup.sh"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"

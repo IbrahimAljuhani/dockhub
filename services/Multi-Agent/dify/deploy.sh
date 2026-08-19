@@ -214,11 +214,7 @@ if [[ ! -f "$RUNTIME_DIR/.dockhub-asked" ]]; then
         # No proxy in the path, so a host port is the only way in. Offering
         # to skip it would be offering a deployment nobody can reach.
         print_info "Not on 'main-net', so a host port is the only way to reach it."
-        HOST_PORT=""
-        while [[ -z "$HOST_PORT" ]]; do
-            prompt_host_port 8088
-            [[ -n "$HOST_PORT" ]] || print_warn "A port is required in this mode — otherwise nothing can reach Dify."
-        done
+        prompt_host_port 8088 required
     fi
     ENV_HOST_PORT="${HOST_PORT:-}"
     set_env_value DOCKHUB_HOST_PORT   "$ENV_HOST_PORT"   "$RUNTIME_DIR/.env"

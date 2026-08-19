@@ -1,0 +1,193 @@
+# Langflow — visual builder for agents and flows, on LangChain/LangGraph.
+#
+# Two containers: the app and its Postgres. That is upstream's OWN reference
+# deployment, not a DockHub invention — `docker_example/docker-compose.yml`
+# in their repo ships exactly these two services. Langflow can run on SQLite
+# (its own default), but every shared or persistent deployment upstream
+# documents uses Postgres, so this follows their reference rather than their
+# default.
+#
+# ── DELIBERATE DEVIATIONS FROM UPSTREAM'S OWN COMPOSE ───────────────────
+#
+# 1. THE DATABASE PASSWORD IS NOT `langflow`.
+#    Upstream hardcodes the whole connection string:
+#      LANGFLOW_DATABASE_URL=postgresql://langflow:langflow@postgres:5432/langflow
+#    with POSTGRES_PASSWORD: langflow beside it. Not a placeholder, not a
+#    ${VAR} — a literal published credential. deploy.sh generates one and
+#    builds the URL from it.
+#
+# 2. POSTGRES IS NOT PUBLISHED ON THE HOST.
+#    Upstream maps `5432:5432`. On a machine running this catalogue that is
+#    both a collision (several services here bring their own Postgres) and an
+#    exposure: the database answers on every interface, with the password
+#    from deviation 1. Here it has no host port at all and sits on a private
+#    network the app is the only member of.
+#
+# 3. NO HOST PORT UNLESS ASKED. Upstream maps `7860:7860`. NPM reaches this
+#    by container name on main-net; deploy.sh asks, and suggests 7860 because
+#    nothing else in this catalogue uses it.
+#
+# 4. `restart`, `container_name` and a HEALTHCHECK, none of which upstream's
+#    compose has. And `depends_on` gets `condition: service_healthy` —
+#    upstream's bare `depends_on: postgres` waits for the container to be
+#    CREATED, not for Postgres to accept connections, so the app can lose its
+#    first connection attempt on a cold start.
+#
+# 5. THE HEALTHCHECK USES /health_check, NOT /health — and this one is a trap
+#    upstream documents themselves: `/health` is answered by uvicorn BEFORE
+#    Langflow finishes initialising. A probe on it reports ready while the
+#    application is still starting, which is worse than no probe, because it
+#    turns a wait into a false pass. `/health_check` reports the database and
+#    chat services. (curl is used, not wget: the image is RHEL UBI-based and
+#    installs curl — wget is not present. The opposite of Flowise's Alpine.)
+#
+# 6. postgres:17-alpine, where upstream pins postgres:16-trixie.
+#    Their comment explains that pin: a moving Debian base can update the OS
+#    under an existing data volume. The concern is real — glibc collation
+#    changes can corrupt indexes — but it argues for pinning, not for Debian
+#    specifically. This catalogue standardises on postgres:17-alpine
+#    (paperclip, flowise), which is equally pinned. What matters is not
+#    switching libc under an EXISTING volume; a fresh deployment is free to
+#    choose. Do not "upgrade" an existing langflow-db from alpine to a
+#    Debian-based tag, or the reverse.
+#
+# 7. TELEMETRY OFF via DO_NOT_TRACK, which upstream leaves on.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it (and
+# the generated .env) to ~/docker/langflow/ and runs it from there.
+
+services:
+  langflow:
+    # `latest` and the newest release agree here — checked against the
+    # registry, not assumed: `latest` and `1.11.4` carry the SAME digest, and
+    # the newer `1.12.0.devNN` tags are excluded from it. That is the correct
+    # behaviour, and the exact opposite of what Flowise's registry does.
+    # Pinned anyway so a redeploy months from now lands on the image this was
+    # tested against.
+    image: langflowai/langflow:${LANGFLOW_VERSION:-1.11.4}
+    container_name: langflow
+    restart: unless-stopped
+    env_file:
+      - .env
+
+    # ── Hardening ────────────────────────────────────────────────────────
+    # Justified the same way as Flowise, and for the same reason: Langflow's
+    # Custom Component nodes run PYTHON you (or a model acting for you) write,
+    # inside this container. Code execution is what these flags exist for.
+    #
+    # From the OpenSandbox trial (2026-08-17): of the nine capabilities that
+    # config drops, six were never in Docker's default grant. These three are
+    # the whole real difference — 11 capabilities instead of 14. Verify:
+    #   docker exec langflow grep -E '^(CapEff|NoNewPrivs)' /proc/self/status
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - MKNOD
+      - NET_RAW
+      - AUDIT_WRITE
+    pids_limit: 4096
+
+    environment:
+      # 0.0.0.0, explicitly. LANGFLOW_HOST defaults to `localhost`, which
+      # inside a container means the loopback of the container's OWN network
+      # namespace — nothing outside it, including Docker's port forwarding,
+      # could ever connect. Upstream's compose omits this and works because
+      # the image sets it; relying on an image default for the difference
+      # between "reachable" and "not reachable" is not worth the brevity.
+      LANGFLOW_HOST: 0.0.0.0
+      LANGFLOW_PORT: "7860"
+
+      # Built from the generated password rather than carrying upstream's
+      # literal one. Note the driver prefix is `postgresql://`, which is what
+      # Langflow expects — not `postgres://`.
+      LANGFLOW_DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@langflow-db:5432/${POSTGRES_DB}"
+
+      # Flows, uploaded files, component cache and — if you do not set a
+      # secret key — the generated one. Bind-mounted below.
+      LANGFLOW_CONFIG_DIR: /app/langflow
+
+      # ── Authentication, set explicitly on purpose ────────────────────
+      # LANGFLOW_AUTO_LOGIN=True means NO LOGIN AT ALL: anyone who reaches
+      # the port is the superuser. Current versions default it to False, but
+      # older ones defaulted to True, and this is not a value to inherit from
+      # whichever image tag you happen to land on.
+      LANGFLOW_AUTO_LOGIN: "False"
+      LANGFLOW_SUPERUSER: "${LANGFLOW_SUPERUSER}"
+      LANGFLOW_SUPERUSER_PASSWORD: "${LANGFLOW_SUPERUSER_PASSWORD}"
+
+      DO_NOT_TRACK: "true"
+
+    volumes:
+      # A bind mount, not a named volume — the same reasoning as every other
+      # service here: it holds work you would be sorry to lose, it rides in
+      # the install-tree backup, and a directory you can open and read is
+      # worth more than a named volume when something has gone wrong.
+      - ./data:/app/langflow
+
+    depends_on:
+      langflow-db:
+        condition: service_healthy
+
+    healthcheck:
+      # /health_check, NOT /health — see deviation 5. curl is present in this
+      # image; wget is not.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7860/health_check || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+    # ── NO `networks:` KEY HERE, AND THAT IS DELIBERATE ──────────────────
+    # docker-compose.override.yml, which deploy.sh generates, owns this
+    # service's network membership entirely, including the top-level
+    # declaration of whichever network was chosen.
+    #
+    # The Compose rule that forces this: a service's `networks:` list MERGES
+    # across files, it does not replace. If this file said `- main-net` and
+    # the override said `- langflow-net`, the result would be BOTH — and
+    # answering "no" to the main-net question would join main-net anyway.
+    # Leaving the key out entirely is the version-independent way to avoid
+    # that (Dify needed the Compose 2.24 `!override` tag for the same rule).
+    #
+    # Consequence worth knowing: this file is not runnable on its own. It is
+    # never meant to be — deploy.sh always writes the override beside it, and
+    # Compose loads that automatically.
+
+  langflow-db:
+    image: postgres:17-alpine
+    container_name: langflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_DB: "${POSTGRES_DB}"
+    volumes:
+      # A NAMED volume, unlike the app's ./data bind mount, matching
+      # paperclip-db and flowise-db. Postgres chowns its data directory to
+      # uid 999, so a bind mount would leave a tree the invoking user cannot
+      # read or delete — and backup_service_generic already walks named
+      # volumes, so the shared backup machinery needs no special case.
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h localhost tests the TCP listener the app will actually use. Bare
+      # pg_isready succeeds on the unix socket while the network listener is
+      # still coming up, which lets the app start too early and fail its
+      # first connection — exactly what deviation 4 exists to prevent.
+      test: ["CMD-SHELL", "pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Never on main-net, and never on a host port. The override gives the APP
+    # its network; this is a private link that exists whichever answer you
+    # gave to the main-net question.
+    networks:
+      - langflow-db-net
+
+volumes:
+  db-data:
+
+networks:
+  # Declared HERE rather than in the override because it is not a choice —
+  # it exists in both answers. Top-level `networks:` maps merge across files,
+  # so this coexists with whatever the override declares.
+  langflow-db-net:

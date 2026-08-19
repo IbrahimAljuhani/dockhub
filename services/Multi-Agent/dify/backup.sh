@@ -128,7 +128,7 @@ restore_dify() {
             rm -f "$file"; return 0
           }
         if docker exec -i dify-db \
-             psql -v ON_ERROR_STOP=1 --single-transaction -q -U "$pg_user" -d "$db" < "$file"; then
+             psql -v ON_ERROR_STOP=1 --single-transaction -q -o /dev/null -U "$pg_user" -d "$db" < "$file"; then
             print_info "Database '$db' restored (dropped, recreated, replayed in one transaction)."
         else
             print_warn "The dump for '$db' failed to replay and was rolled back — that database is now EMPTY."

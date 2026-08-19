@@ -118,7 +118,7 @@ restore_flowise() {
       }
 
     if docker exec -i flowise-db \
-         psql -v ON_ERROR_STOP=1 --single-transaction -q \
+         psql -v ON_ERROR_STOP=1 --single-transaction -q -o /dev/null \
               -U "$pg_user" -d "$pg_db" < "$install_dir/db.sql"; then
         print_info "Database restored from db.sql (dropped, recreated, replayed in one transaction)."
         print_info "The credential encryption key came back with ./data in the same archive."

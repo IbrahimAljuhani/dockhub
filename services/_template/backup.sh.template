@@ -145,8 +145,15 @@ restore_SERVICE_SLUG() {
 
     # ON_ERROR_STOP so a failure is a failure; --single-transaction so a
     # partial replay is rolled back rather than left half-applied.
+    #
+    # -o /dev/null, and -q is NOT enough on its own: -q silences psql's own
+    # chatter, but a pg_dump script contains real SELECTs — set_config() at
+    # the top, setval() for every sequence — whose RESULT TABLES print. A
+    # restore that succeeded would spray `setval / 55 / (1 row)` across the
+    # menu. -o redirects query output only; errors still reach stderr and the
+    # exit status is untouched, so nothing about failure detection changes.
     if docker exec -i "SERVICE_SLUG-db" \
-         psql -v ON_ERROR_STOP=1 --single-transaction -q \
+         psql -v ON_ERROR_STOP=1 --single-transaction -q -o /dev/null \
               -U "$pg_user" -d "$pg_db" < "$install_dir/db.sql"; then
         print_info "Database restored from db.sql (dropped, recreated, replayed in one transaction)."
     else

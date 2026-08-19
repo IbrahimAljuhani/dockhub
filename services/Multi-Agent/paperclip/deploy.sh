@@ -76,11 +76,7 @@ ask_reachability() {
         # Asking "do you want one?" here would be offering a deployment
         # nobody can reach.
         print_info "Not on 'main-net', so a host port is the only way to reach it."
-        HOST_PORT=""
-        while [[ -z "$HOST_PORT" ]]; do
-            prompt_host_port "$CONTAINER_PORT"
-            [[ -n "$HOST_PORT" ]] || print_warn "A port is required in this mode — otherwise nothing can reach Paperclip."
-        done
+        prompt_host_port "$CONTAINER_PORT" required
         local server_ip
         server_ip="$(host_lan_ip)"
         [[ -n "$server_ip" ]] || server_ip="localhost"

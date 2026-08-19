@@ -164,11 +164,7 @@ if [[ ! -f "$RUNTIME_DIR/.dockhub-asked" ]]; then
         prompt_host_port 3200
     else
         print_info "Not on 'main-net', so a host port is the only way to reach it."
-        HOST_PORT=""
-        while [[ -z "$HOST_PORT" ]]; do
-            prompt_host_port 3200
-            [[ -n "$HOST_PORT" ]] || print_warn "A port is required in this mode — otherwise nothing can reach Flowise."
-        done
+        prompt_host_port 3200 required
     fi
     ENV_HOST_PORT="${HOST_PORT:-}"
     set_env_value DOCKHUB_HOST_PORT   "$ENV_HOST_PORT"   "$RUNTIME_DIR/.env"
