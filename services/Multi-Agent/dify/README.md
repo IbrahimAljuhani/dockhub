@@ -1,7 +1,92 @@
-# 🚧 Dify
+# Dify
 
-**Status:** Not built yet — coming soon.
+Full-stack LLM **application platform**: visual workflow orchestration, production RAG with hybrid search, agent management, team accounts and an app-publishing layer. The heaviest service in this catalogue.
 
-Part of the **Multi-Agent** category in [DockHub](../../../README.md)'s services roadmap. It's already listed in [`services.sh`](../../services.sh)'s menu (shows "coming soon" if picked) and in [`services/README.md`](../../README.md)'s roadmap table — this folder is just a placeholder until it's actually built.
+|  |  |
+|---|---|
+| **Upstream** | [langgenius/dify](https://github.com/langgenius/dify), pinned at **1.16.1** |
+| **Licence** | Apache-2.0 with additional conditions — see upstream |
+| **Containers** | ~15 running (of 39 defined; the rest are optional vector stores) |
+| **Minimum** | 4 GB RAM, 2 CPU |
+| **Runtime dir** | `~/docker/dify/` |
 
-Want to help build this one, or need it sooner? Open an issue on the [DockHub repo](https://github.com/IbrahimAljuhani/dockhub).
+---
+
+## 🚀 Install
+
+```bash
+bash services/services.sh
+```
+
+Or directly: `bash deploy.sh`. It asks one question — whether to publish a host port — and generates everything else.
+
+**First run:** open the URL and create the admin account. The setup password is `INIT_PASSWORD` in `~/docker/dify/.env`.
+
+---
+
+## 🧭 The one service that ships no compose file of ours
+
+Every other service in DockHub comes with a `docker-compose.yml` we wrote and you can read end to end. Dify cannot work that way, for reasons that are measured rather than aesthetic:
+
+- upstream's `docker/docker-compose.yaml` is **1,345 lines** defining **39 services**
+- it mounts **relative sibling paths** — `./nginx/nginx.conf.template`, `./nginx/conf.d`, `./ssrf_proxy/`, `./startupscripts/` — so the compose file alone does not run; the whole `docker/` tree is required
+- it is **regenerated from a template every release**
+
+A hand-maintained fork of that would be wrong within a version, and a stale copy of someone else's orchestration is worse than no copy. So `deploy.sh` fetches upstream's tree **at the pinned tag**, and DockHub's entire contribution is one readable file:
+
+```
+~/docker/dify/docker-compose.override.yml
+```
+
+Read that and you have read every change DockHub makes.
+
+---
+
+## 🔐 What the override and deploy.sh actually change
+
+**Every credential is generated.** Upstream's `.env.example` ships working defaults for all of them:
+
+```
+DB_PASSWORD=difyai123456
+REDIS_PASSWORD=difyai123456
+SANDBOX_API_KEY=dify-sandbox
+PLUGIN_DAEMON_KEY=lYkiYYT6owG+71oLerGzA7GXCgOT++6ovaezWAjpCjf+Sjc3ZtU+qUEi
+PLUGIN_DIFY_INNER_API_KEY=QaHbTe77CtuXmsfyhR7+vRjI/+XbV1AaFy691iy+kGDv2Jvy0/eAh8Y1
+```
+
+Those last two are **real keys published in a public repository**. Anyone who copied the example and moved on is running a deployment whose every secret is on GitHub. `deploy.sh` replaces all of them, plus `SECRET_KEY` and `INIT_PASSWORD`, before the first start.
+
+**The port collision is removed.** Upstream publishes `80:80` and `443:443`. DockHub's NGINX Proxy Manager already owns both — deploying Dify unchanged would fight the proxy meant to serve it, and on a VPS take the host's HTTP down with it. The override drops both; a host port is added back only if you ask, and never 80.
+
+**Two containers get stable names** — `dify-nginx` (so you can point NPM at it) and `dify-db` (so `backup.sh` has a target). Upstream names only its exotic vector stores, not the database it actually ships with.
+
+> ⚠️ **Docker Compose 2.24+ is required.** The override uses the `!override` tag to *replace* upstream's ports rather than merge with them. On older Compose the merge would silently keep 80 and 443. `deploy.sh` checks the version and refuses rather than colliding.
+
+---
+
+## 💾 Backup
+
+Dify keeps everything under the install directory as **bind mounts**, not named volumes — Postgres, Redis, uploaded files, the knowledge base, the Weaviate index. So the generic install-tree backup captures the lot; `backup.sh` adds a consistent `pg_dump` on top, because a raw file copy of a running Postgres is a coin toss.
+
+> 🔑 **`SECRET_KEY` must match the backup you restore.** Dify encrypts stored model-provider API keys with it; a mismatch leaves them unreadable while everything else looks fine. Restore keeps the `.env` from the archive, so this is only a risk if you edit it by hand.
+
+---
+
+## ⚠️ Known unknowns
+
+- **Not yet run on a server.** Built 2026-08-19 against upstream's pinned tree and `.env.example`; the first live deployment has not happened.
+- **Vector store:** Weaviate, upstream's default (`COMPOSE_PROFILES` derives from `VECTOR_STORE`). The other 12 are available by editing `.env`, untested here.
+- **Resource appetite** is upstream's stated 4 GB minimum, not a figure measured on our hardware.
+
+---
+
+## 📄 Upstream
+
+- Repository — <https://github.com/langgenius/dify>
+- Docs — <https://docs.dify.ai/>
+
+Licensed by its own authors. This deployment wrapper follows the same [MIT licence](../../../LICENSE) as the rest of DockHub.
+
+---
+
+← Back to [Multi-Agent](../README.md) · [all services](../../README.md)

@@ -96,6 +96,12 @@ declare -A SERVICE_FILES=(
     # Postgres container and a bind mount. The generic volume backup covers
     # the mount but would take a raw mid-write copy of the database.
     [paperclip]="docker-compose.yml backup.sh"
+    # Dify is the ONE service here with no docker-compose.yml of its own.
+    # deploy.sh fetches upstream's 1,345-line docker/ tree at a pinned tag,
+    # because that compose file mounts a dozen sibling files by relative path
+    # and is regenerated each release — a hand-maintained fork of it would be
+    # wrong within a version. Our entire contribution is the override.
+    [dify]="docker-compose.override.yml backup.sh"
     # Security-Lab: no backup.sh by design — these hold no data of yours.
     [juice-shop]="docker-compose.yml"
     [webgoat]="docker-compose.yml"
@@ -226,16 +232,26 @@ compose_cmd() {
 # n8n) have their compose file directly in that folder; multi-instance ones
 # (odoo) have it one level down, in named subfolders — detected generically,
 # not hardcoded to odoo specifically.
+# Compose accepts BOTH docker-compose.yml and docker-compose.yaml, so this
+# detector must too. Every DockHub-authored service uses .yml, but Dify does
+# not ship one of ours at all — deploy.sh fetches upstream's tree, which
+# spells it .yaml. Without this, Dify reports "not deployed" forever and
+# Remove, Backup and Restore all refuse to see an installation that is
+# plainly there.
+has_compose() {
+    [[ -f "$1/docker-compose.yml" || -f "$1/docker-compose.yaml" ]]
+}
+
 find_instances() {
     local svc_dir="$1"
     [[ -d "$svc_dir" ]] || return 0
-    if [[ -f "$svc_dir/docker-compose.yml" ]]; then
+    if has_compose "$svc_dir"; then
         echo "$svc_dir"
         return 0
     fi
     local d
     for d in "$svc_dir"/*/; do
-        [[ -f "${d}docker-compose.yml" ]] && echo "${d%/}"
+        has_compose "${d%/}" && echo "${d%/}"
     done
 }
 
@@ -450,7 +466,7 @@ restore_menu() {
 
     local cc
     cc="$(compose_cmd)"
-    if [[ -n "$cc" && -f "$install_dir/docker-compose.yml" ]]; then
+    if [[ -n "$cc" ]] && has_compose "$install_dir"; then
         (cd "$install_dir" && $cc down) || true
     fi
 
@@ -460,11 +476,11 @@ restore_menu() {
         restore_service_generic "$name" "$instance" "$install_dir" "$chosen_archive"
     fi
 
-    if [[ -n "$cc" && -f "$install_dir/docker-compose.yml" ]]; then
+    if [[ -n "$cc" ]] && has_compose "$install_dir"; then
         (cd "$install_dir" && $cc up -d) && print_info "Service restarted after restore." \
             || print_warn "Restore finished, but failed to start containers — check manually."
     else
-        print_warn "Restore finished, but no docker-compose.yml found to start — run 'Deploy / manage' next."
+        print_warn "Restore finished, but no compose file found to start — run 'Deploy / manage' next."
     fi
 }
 

@@ -6,7 +6,7 @@ Optional services that run on top of the core infrastructure ([`install_dockhub.
 
 ## 📋 Services Roadmap
 
-![Progress](https://img.shields.io/badge/built-38%20%2F%2041%20services-46a049?style=for-the-badge)
+![Progress](https://img.shields.io/badge/built-39%20%2F%2041%20services-46a049?style=for-the-badge)
 
 [`services.sh`](services.sh) presents these grouped by category. ✅ = deployable now, 🚧 = listed in the menu already (shows "coming soon" if picked) but not built yet.
 

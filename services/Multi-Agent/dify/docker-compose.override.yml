@@ -1,0 +1,69 @@
+# Dify — DockHub's layer over upstream's compose file.
+#
+# ── WHY THIS IS AN OVERRIDE AND NOT A COMPOSE FILE OF OUR OWN ───────────
+# Every other service in this catalogue ships a docker-compose.yml we wrote
+# and you can read end to end. Dify cannot work that way, and the reason is
+# measured, not aesthetic:
+#
+#   · upstream's docker/docker-compose.yaml is 1,345 lines and declares 39
+#     services, most behind optional profiles
+#   · it mounts RELATIVE PATHS that live beside it — ./nginx/nginx.conf.template,
+#     ./nginx/conf.d, ./ssrf_proxy/, ./startupscripts/ — so the compose file
+#     alone is useless; the whole docker/ tree is required
+#   · it is regenerated from a template every release
+#
+# Re-implementing that by hand would be a fork we could not keep correct, and
+# a stale copy of someone else's orchestration is worse than no copy. So
+# deploy.sh fetches upstream's docker/ tree at a PINNED TAG, and this file is
+# the only thing DockHub adds. Everything below is a deliberate decision;
+# read it as the diff between "what Dify ships" and "what DockHub deploys".
+#
+# The pin lives in deploy.sh (DIFY_VERSION). Upstream's own compose hardcodes
+# the same version in its image tags, so the two move together by design.
+
+services:
+  nginx:
+    # ── 1. A NAME NPM CAN FIND ───────────────────────────────────────────
+    # Upstream sets no container_name, so the container ends up called
+    # something like dify-nginx-1 or docker-nginx-1 depending on the compose
+    # project name — a moving target for a reverse-proxy entry you type once.
+    container_name: dify-nginx
+
+    # ── 2. THE PORT COLLISION THAT WOULD HAVE BROKEN THE HOST ────────────
+    # Upstream publishes  ${EXPOSE_NGINX_PORT:-80}:80  and  443:443.
+    # DockHub's NGINX Proxy Manager already owns 80 and 443 on this host, so
+    # deploying Dify unchanged would fight the very proxy that is supposed to
+    # serve it — and on a VPS that means taking the whole host's HTTP down.
+    #
+    # Emptying the list removes BOTH published ports. Dify is then reached
+    # only through main-net, by name, which is how every other service in
+    # this catalogue is reached. deploy.sh offers an optional host port and
+    # writes it back into this list when you ask for one.
+    ports: !override []
+
+    networks:
+      # Upstream's default network, so nginx can still reach api/web. Named
+      # explicitly because declaring `networks:` at all replaces the implicit
+      # default membership — omitting it here would cut nginx off from the
+      # application it proxies.
+      - default
+      - main-net
+
+  db_postgres:
+    # ── 3. A NAME backup.sh CAN REACH ────────────────────────────────────
+    # Upstream names only the exotic vector stores; the database it actually
+    # ships with is left to compose's automatic naming. backup.sh needs a
+    # fixed target for `docker exec … pg_dump`, and a name that changes with
+    # the project directory is not one.
+    #
+    # Worth knowing where this data lives: ./volumes/db/data — a BIND MOUNT
+    # inside the install directory, not a named volume. So it travels with
+    # the install tree in a DockHub backup, and it is written by postgres as
+    # its own uid. Before 2026-08-19 that combination silently produced
+    # archives with no database in them at all; see lib/common.sh's
+    # backup_service_generic for what was wrong and why it is fixed.
+    container_name: dify-db
+
+networks:
+  main-net:
+    external: true
