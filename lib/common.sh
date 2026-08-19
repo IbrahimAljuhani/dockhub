@@ -321,6 +321,54 @@ ensure_ai_net() {
     fi
 }
 
+# ── 'models-net': reach the models WITHOUT reaching the agents ──────────
+# A Docker network is FLAT. Every member can reach every other member, so
+# "join ai-net to use a local model" also means "join ai-net and be able to
+# reach everything else on it". On 2026-08-19 that stopped being acceptable:
+# Flowise, Langflow and Dify were put on ai-net so their nodes could call a
+# local model by name — and all three exist to run code that a user or a
+# model wrote. On the same network sits:
+#
+#     AI-Agents/openhands  →  container_name: openhands, port 3000
+#                             mounts /var/run/docker.sock
+#                             its own README: "It has no authentication."
+#
+# So an imported flow containing a Custom Tool could reach an unauthenticated
+# endpoint that holds the Docker socket, which is root on the host. That is
+# the exact chain the Multi-Agent threat model warns about for main-net and
+# Portainer — reproduced on ai-net while fixing something else.
+#
+# ── The shape of the fix: the providers are the HUB ─────────────────────
+# Adding authentication to somebody else's application is not available to
+# us, and neither is asking a flat network to be less flat. What IS available
+# is partitioning the CONSUMERS so that two groups share the providers
+# without sharing each other:
+#
+#   ollama / llama-cpp / localai  join BOTH ai-net and models-net
+#   Flowise / Langflow / Dify     join models-net only
+#   OpenHands / Hermes / OpenClaw join ai-net only
+#
+#   builder  → ollama     ✔  (both on models-net)
+#   builder  → openhands  ✘  (openhands is not on models-net)
+#   openhands→ ollama     ✔  (both on ai-net)
+#
+# Nothing loses a capability it had a reason for, and the fatal edge is gone.
+#
+# Paperclip deliberately stays on ai-net: it is an agent MANAGER whose proven
+# integration is calling Hermes at hermes:8642. It therefore remains the one
+# code-running service that can still reach OpenHands, which is a trade this
+# project accepts and documents rather than a case it missed.
+ensure_models_net() {
+    if ! docker network ls --format '{{.Name}}' | grep -qx "models-net"; then
+        docker network create models-net >/dev/null || true
+        if docker network ls --format '{{.Name}}' | grep -qx "models-net"; then
+            print_info "Created docker network 'models-net'."
+        else
+            print_error "Failed to create docker network 'models-net'."
+        fi
+    fi
+}
+
 # ── Stop an accidental one-way upgrade ──────────────────────────────────
 # $1 = container name, $2 = the image:tag this run is about to start,
 # $3 = human label for the messages.
@@ -487,11 +535,19 @@ ensure_single_in_group() {
 #
 # $1 = service name, used in the messages.
 AGENT_ON_MAIN_NET=0
+# $2 = the model-provider network this service actually joins, defaulting to
+# 'ai-net'. It is a parameter because the answer is no longer the same for
+# every caller: the agent services sit on 'ai-net', while the Multi-Agent
+# builders sit on 'models-net' so that code from an imported flow cannot reach
+# OpenHands (no authentication, holds the Docker socket). See ensure_models_net.
+#
+# Hardcoding it here is how this function spent a day telling three services
+# they were on a network none of them had joined.
 prompt_agent_network() {
-    local name="$1" answer
+    local name="$1" netname="${2:-ai-net}" answer
     AGENT_ON_MAIN_NET=0
     echo >&2
-    print_info "$name will run on 'ai-net', where it can reach the model provider."
+    print_info "$name will run on '$netname', where it can reach the model provider."
     print_info "That is all it needs to work."
     echo >&2
     print_warn "Joining 'main-net' as well would let NGINX Proxy Manager serve it on"
@@ -505,7 +561,7 @@ prompt_agent_network() {
         ensure_main_net
         print_warn "On 'main-net'. Give it its own credentials, never your primary ones."
     else
-        print_info "'ai-net' only. Reach it on a host port from your LAN — no domain."
+        print_info "'$netname' only. Reach it on a host port from your LAN — no domain."
     fi
     return 0
 }
