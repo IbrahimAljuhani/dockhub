@@ -367,30 +367,48 @@ confirm_version_change() {
     return 0
 }
 
-# ── Tell the operator when their kept compose file is behind ────────────
+# ── Offer the operator a compose file that is behind this repo ──────────
 # $1 = deployed compose, $2 = the version in this repo, $3 = the command to
-# take the update.
+# take it by hand if they decline.
 #
 # Every service here keeps an existing docker-compose.yml rather than
 # overwriting it, which is the right default — it may carry edits somebody
-# made on purpose. The cost is that our own later fixes never arrive, and the
-# deployment looks healthy while missing them. OpenHands already solved this
-# for one specific key; this is the same idea without needing to know in
-# advance which key will matter.
+# made on purpose. The cost is that our own later fixes never arrive while
+# the deployment looks perfectly healthy.
 #
-# It only ever prints. Deciding is the operator's.
-notify_compose_drift() {
-    local deployed="$1" source_file="$2" take_cmd="$3"
+# ── WHY THIS ASKS INSTEAD OF ONLY TELLING ────────────────────────────────
+# The first version of this function printed the command and stopped. It was
+# proved insufficient the day it shipped: 2026-08-20, database hardening was
+# added to flowise-db and langflow-db, the operator reran deploy.sh, this
+# warning printed, Compose saw no change to the file it had, left both
+# containers Running — and `/proc/self/status` showed NoNewPrivs: 0 on both.
+# Meanwhile paperclip, which happened to be a fresh install that run, picked
+# the same change up correctly. A notice that has to be acted on separately
+# is a notice most of the time nobody acts on.
+#
+# Declining is still free, and the manual command is still printed. Nothing
+# is overwritten without a yes, and the previous file is kept regardless.
+offer_compose_update() {
+    local deployed="$1" source_file="$2" take_cmd="$3" answer backup
     [[ -f "$deployed" && -f "$source_file" ]] || return 0
     cmp -s "$deployed" "$source_file" && return 0
 
     echo >&2
     print_warn "Your deployed docker-compose.yml differs from the one in this repo."
-    print_warn "That is expected if you edited it yourself — in which case ignore this."
-    print_warn "Otherwise it predates fixes made since you deployed. To take them:"
-    print_warn "    $take_cmd"
-    print_warn "Your .env, data directory and volumes are not touched by that."
+    print_warn "If you edited it yourself, keep yours. Otherwise it predates fixes"
+    print_warn "made since you deployed, and Compose will not apply what it cannot see."
+    print_warn "Your .env, data directory and volumes are NOT touched either way."
     echo >&2
+    read -rp "Take the updated compose file now? (y/N): " answer
+    if [[ "${answer,,}" == "y" ]]; then
+        backup="${deployed}.bak-$(date '+%Y%m%d-%H%M%S')"
+        cp "$deployed" "$backup" || { print_warn "Could not save a backup — leaving your file alone."; return 0; }
+        cp "$source_file" "$deployed"
+        print_info "Updated. Your previous file: $(basename "$backup")"
+    else
+        print_info "Kept your file. To take the update later:"
+        print_info "    $take_cmd"
+    fi
     return 0
 }
 
@@ -1252,10 +1270,28 @@ pull_with_progress() {
     # not a terminal, or /dev/tty is not writable (a container without a
     # controlling terminal, some CI runners), fall through to the plain wall
     # — which is the correct output there, not a degraded one.
+    # ── set -e MUST BE OFF ACROSS THE PIPELINE BELOW ─────────────────────
+    # Every deploy.sh runs `set -euo pipefail`. A pull that fails therefore
+    # makes the PIPELINE fail, and `set -e` kills the whole script THERE —
+    # before `rc="${PIPESTATUS[0]}"` is even assigned, and long before the
+    # error-reporting block at the end of this function.
+    #
+    # That block was dead code. It carries a careful comment about calling
+    # print_error last so the captured output actually prints, and it had
+    # never once executed: a failed pull ended the deploy in silence, with
+    # the last line on screen being awk's "images already present".
+    # Found 2026-08-20 by pointing LANGFLOW_VERSION at a tag that does not
+    # exist — the deploy stopped dead with no error, on any of the 41
+    # services this helper serves.
+    local _restore_e=0
+    [[ $- == *e* ]] && { _restore_e=1; set +e; }
+
     if [[ ! -t 1 || "${DOCKHUB_VERBOSE:-0}" == "1" ]] || ! : > /dev/tty 2>/dev/null; then
         (cd "$dir" && ${COMPOSE_CMD:-docker compose} pull "$@") 2>&1 | tee -a "$_pwp_log"
         rc="${PIPESTATUS[0]}"
+        (( _restore_e )) && set -e
         rm -f "$raw"
+        [[ "$rc" -eq 0 ]] || print_error "Could not pull the images for this service (exit $rc). See above."
         return "$rc"
     fi
 
@@ -1303,15 +1339,21 @@ pull_with_progress() {
                                         if (++tick % 12 == 0) render(); next }
         /Pulled|Downloaded newer|up to date/ { render(); next }
         { next }
-        # Trailing spaces erase whatever the longer bar left on the line.
+        # ── NO VERDICT HERE. awk cannot know whether the pull SUCCEEDED ──
+        # This used to print "images already present — nothing to download"
+        # whenever no layer events appeared. But a pull that FAILS produces
+        # no layer events either, so every failure — a tag that does not
+        # exist, no network, a login required — was announced as a success.
+        # awk sees the output stream; only the shell sees the exit status,
+        # so only the shell may draw a conclusion. Here we just clear the
+        # line; the trailing spaces erase whatever the longer bar left.
         END {
-            if (total == 0)
-                printf "\r  images already present — nothing to download%20s\n", "" > "/dev/tty"
-            else
-                printf "\n" > "/dev/tty"
+            if (total > 0) printf "\n" > "/dev/tty"
+            else           printf "\r%60s\r", "" > "/dev/tty"
         }
     '
     rc="${PIPESTATUS[0]}"
+    (( _restore_e )) && set -e
 
     # The wall still exists — it goes to the log, where it belongs. What
     # changed is that it no longer buries the deploy's own messages.
@@ -1329,6 +1371,12 @@ pull_with_progress() {
         rm -f "$raw"
         print_error "Could not pull the images for this service."
     fi
+
+    # Success, and nothing was downloaded — said HERE, where the exit status
+    # is known, rather than inside awk where it is not.
+    grep -q 'Pulling fs layer' "$raw" 2>/dev/null \
+        || printf '  images already present — nothing to download\n'
+
     rm -f "$raw"
     return "$rc"
 }
