@@ -1,6 +1,6 @@
 # Flowise
 
-Drag-and-drop builder for LLM apps and agent flows, on LangChain. The fastest thing in this category to get moving with, and still the lightest — **two containers**, against Dify's nine.
+Drag-and-drop builder for LLM apps and agent flows, on LangChain. The fastest thing in this category to get moving with, and still the lightest — **two containers**, against Dify's fifteen.
 
 |  |  |
 |---|---|

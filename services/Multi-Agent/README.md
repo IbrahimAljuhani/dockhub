@@ -15,7 +15,7 @@ And both differ from [AI](../AI/), which is the model layer underneath: the prov
 
 | | What it is | Weight |
 |---|---|---|
-| [**Dify**](dify/) | Full-stack LLM app platform — workflow orchestration, production RAG with hybrid search, agent management, team accounts | Heaviest: ~15 containers, 4 GB minimum |
+| [**Dify**](dify/) | Full-stack LLM app platform — workflow orchestration, production RAG with hybrid search, agent management, team accounts | Heaviest: **15 containers**, 4 GB minimum |
 | [**Langflow**](langflow/) | The most powerful builder — LangGraph multi-agent support, custom **Python** nodes inside the visual surface, MIT licensed | Medium: 2 containers |
 | [**Flowise**](flowise/) | The fastest to get moving — drag-and-drop builder on LangChain | Lightest: 2 containers |
 | [**Paperclip**](paperclip/) | "The open-source app everyone uses to manage agents at work" — org hierarchy, goals, budgets, tickets | Light: 2 containers |
@@ -45,6 +45,38 @@ And both differ from [AI](../AI/), which is the model layer underneath: the prov
 
 ---
 
+## 🧮 Running more than one of them
+
+They coexist. Nothing here is one-of-a-group the way the [model providers](../AI/) are — those compete for the same GPU memory, these do not.
+
+| | containers | suggested host port | app memory prompt |
+|---|---|---|---|
+| Paperclip | 2 | `3100` | 2 GB |
+| Dify | **15** (16 created) | `8088` | not prompted — see below |
+| Flowise | 2 | `3200` | 1 GB |
+| Langflow | 2 | `7860` | 2 GB |
+| **all four** | **21 running** | no collisions | — |
+
+**The ports do not collide**, deliberately: each was checked against the whole catalogue before it was chosen, which is why Flowise is on 3200 rather than its native 3000 (taken by Open WebUI, Redmine and Juice Shop) and Langflow keeps 7860 (used by nothing else here).
+
+**Dify is the whole memory question.** Its own requirement is 4 GB minimum, and it is fifteen containers against everyone else's two. The other three together weigh less than it does alone. `deploy.sh` does not prompt for a memory limit on Dify at all — tuning fifteen containers is an exercise, not a deploy question, and on a dedicated host no limits is the right answer.
+
+> The per-app numbers above are what the prompts *suggest*, not measurements. Treat them as starting points; the only figure here that comes from its authors is Dify's 4 GB.
+
+**If you are choosing rather than collecting**, the [table at the top](#-whats-here) is the honest answer: Flowise to move fastest, Langflow when you want Python inside the canvas, Dify when you need RAG and team accounts, Paperclip when you are managing agents rather than building flows.
+
+---
+
+## 🏷️ One naming inconsistency, kept on purpose
+
+The app containers are `flowise`, `langflow`, `dify-api` — and **`paperclip-app`**, not `paperclip`. So `docker logs flowise` works and `docker logs paperclip` does not.
+
+It is inconsistent and it stays. Renaming it would break something no migration could repair: `http://paperclip-app:3100` is the **callback URL you type into Paperclip's own Hermes Gateway adapter**, and it is stored in Paperclip's database, not in any file this project controls. A rename would leave a working integration silently pointing at a host that no longer resolves, with nothing in DockHub able to notice or fix it.
+
+A small wart is cheaper than a silent breakage in somebody's running setup.
+
+---
+
 ## 🛡️ Threat model — read this before deploying any of them
 
 [AI-Agents](../AI-Agents/) has had one of these since it was created. This category needed one too, and the reason is sharper than it looks.
@@ -53,34 +85,49 @@ And both differ from [AI](../AI/), which is the model layer underneath: the prov
 
 **These platforms execute code you did not write, on behalf of a model reading text you did not write.**
 
-That is not a flaw — it is the product. Paperclip ships four agent harnesses *inside its own image* (`claude-code`, `codex`, `opencode`, `gemini-cli`) and runs them as **processes in the application container**. There is no sandbox in a plain Docker deployment; the sandbox providers upstream ships are for Kubernetes.
+That is not a flaw — it is the product. What differs between the four is only *what* runs and *where*:
 
-So the blast radius of an agent is exactly **the container's own reach**. Not less.
+| | what executes | where |
+|---|---|---|
+| **Paperclip** | four agent harnesses shipped inside its own image (`claude-code`, `codex`, `opencode`, `gemini-cli`) | **processes in the app container.** No sandbox in a plain Docker deployment — upstream's sandbox providers are for Kubernetes |
+| **Langflow** | Custom Component nodes — **Python** | in the app container |
+| **Flowise** | Custom Tool nodes — **JavaScript**, with `require('fs')` permitted by upstream's own default | in the app container |
+| **Dify** | generated code, and agent skills | in `sandbox` / `agent_backend`, **isolated by upstream on purpose** — the one of the four with a real boundary |
+
+So for three of them the blast radius of an agent is exactly **the container's own reach**. Not less. Dify is the exception, and its exposure is its web front end rather than its sandbox.
+
+And "a flow you imported" is the same category of thing as "a repository an agent cloned". **A shared flow is a program.** It arrives as JSON, it looks like configuration, and it runs.
 
 ### What that container can touch
 
 | | Reachable from inside the app container |
 |---|---|
-| Its own state | `/paperclip` — instance config, agent definitions, and anything the agents write |
-| Its database | `paperclip-db`, with `DATABASE_URL` sitting in the environment |
-| Its API keys | every `*_API_KEY` you added, readable by any process |
+| Its own state | the mounted data directory — instance config, flows, agent definitions, and anything they write |
+| Its database | its own Postgres, with the credentials sitting in the environment |
+| Its API keys | every provider key you added, readable by any process in that container |
+| **`models-net`** *(Dify · Flowise · Langflow)* | the model providers — Ollama, llama.cpp, LocalAI. Each has **no authentication**, so this is "use my models, read my prompts". Nothing else is on this network. |
+| **`ai-net`** *(Paperclip)* | the model providers **and the agent services** — including **`openhands:3000`**, which has no authentication and mounts `/var/run/docker.sock` |
 | **`main-net`, if joined** | **every proxied service on the host** |
 
-That last row is the one that matters, and it is why DockHub does not join `main-net` unless it must:
+**A Docker network is flat.** Every member reaches every other, so joining one to reach a model is also joining it to reach everything else on it. That is the whole reason `models-net` exists, and why the three code-running builders are on it rather than on `ai-net` — see the network table near the top of this page.
 
-- **`portainer:9000`** — Portainer mounts `/var/run/docker.sock`. Anything that reaches its API and authenticates can start a privileged container. That is root on the host.
+The last two rows are the ones that matter:
+
+- **`openhands:3000`** — OpenHands mounts `/var/run/docker.sock` and, in its own README's words, *"has no authentication. This is the decisive fact."* Its host port is bound to `127.0.0.1`, which protects it from your LAN and does nothing about a container on the same Docker network. **Paperclip can reach it; the other three deliberately cannot.**
+- **`portainer:9000`** — Portainer mounts the socket too. Anything that reaches its API and authenticates can start a privileged container. That is root on the host.
 - **NGINX Proxy Manager's admin interface** — whose first-login credentials *this project's own README prints*: `admin@example.com` / `changeme`.
 
-An agent does not have to be malicious for this to matter. It has to be *persuaded* — by a web page it fetched, a repository it cloned, an issue it was asked to read.
+An agent does not have to be malicious for this to matter. It has to be *persuaded* — by a web page it fetched, a repository it cloned, an issue it was asked to read, a flow somebody shared.
 
 ### What DockHub does about it
 
 | | |
 |---|---|
-| **No Docker socket** | Never mounted for these services. Paperclip does not need it, so it does not get it. |
+| **No Docker socket** | Never mounted for any of these four. None of them needs it, so none of them gets it. |
+| **Code-runners are off `ai-net`** | Dify, Flowise and Langflow reach the model providers over **`models-net`**, which carries nothing else. The providers join both networks and act as a hub, so nobody loses model access and the builders never share a network with OpenHands. |
 | **`main-net` only when the proxy needs it** | Choose a direct host port and the app never joins it — NPM is not in the path, so the network buys nothing and costs reach. `deploy.sh` decides this from the answer you already gave. |
-| **Database off the shared network** | `paperclip-db` sits on a private network only the app can see. |
-| **Capabilities dropped** | `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit`. Real containment here, because there is no socket to make it decorative. |
+| **Databases off every shared network** | Each service's Postgres sits on a private network only its own app can see, with no host port. |
+| **Capabilities dropped** | `no-new-privileges`, `cap_drop: [MKNOD, NET_RAW, AUDIT_WRITE]`, `pids_limit` — on the apps *and* their databases. Real containment here, because there is no socket to make it decorative. |
 
 ### What is left to you
 
@@ -89,6 +136,10 @@ An agent does not have to be malicious for this to matter. It has to be *persuad
 **Prefer a direct host port plus a firewall or VPN**, and reach it over that, if the deployment does not need a public domain. It is the shape with the least reach.
 
 **Give agents the narrowest credentials that work.** A key scoped to one project beats an organisation-wide one, and revoking it is a single action.
+
+**Read a flow before you run it**, the way you would read a script before running it. Every one of these four can import somebody else's work in a single click, and in three of them that work executes with the container's full reach.
+
+**If you run Paperclip and OpenHands together, understand what that means.** Paperclip runs agent CLIs *and* stays on `ai-net`, because its proven integration is calling Hermes at `hermes:8642`. It is therefore the one service here that can still reach an unauthenticated OpenHands. That is a deliberate trade, stated rather than hidden — but it is yours to accept.
 
 ---
 

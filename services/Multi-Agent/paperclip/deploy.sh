@@ -215,6 +215,23 @@ ENV_ON_MAIN_NET="$(read_env_value ON_MAIN_NET "$RUNTIME_DIR/.env" || true)"
     fi
 } > "$RUNTIME_DIR/docker-compose.override.yml"
 
+# ── Validate the MERGED project before anything depends on it ────────────
+# The other three services in this category have had this gate since Dify
+# died silently on a duplicate top-level key; paperclip was the one without
+# it. That mattered more the moment its compose gained a healthcheck whose
+# command is a nested-quoted JavaScript one-liner — precisely the shape that
+# parses in a shell and not in YAML. Better a refusal that names the problem
+# than a `up -d` that fails halfway with the containers half-created.
+_dupes="$(grep -oE '^[a-z_]+:' "$RUNTIME_DIR/docker-compose.override.yml" | sort | uniq -d)"
+[[ -z "$_dupes" ]] || print_error "Generated an invalid override (duplicate top-level key: $_dupes). Bug in deploy.sh."
+if ! (cd "$RUNTIME_DIR" && $COMPOSE_CMD config -q 2>/tmp/paperclip-cfg.err); then
+    print_warn "Compose rejected the merged configuration:"
+    sed 's/^/    /' /tmp/paperclip-cfg.err >&2
+    rm -f /tmp/paperclip-cfg.err
+    print_error "Refusing to continue with a configuration Compose cannot read."
+fi
+rm -f /tmp/paperclip-cfg.err
+
 [[ -n "$ENV_MEM_LIMIT" ]] && print_info "Memory limit $ENV_MEM_LIMIT applied to paperclip-app (db stays unbounded)."
 [[ -n "$ENV_HOST_PORT" ]] && print_info "Host port $ENV_HOST_PORT published for direct access."
 if (( ENV_ON_MAIN_NET )); then
@@ -226,6 +243,12 @@ else
     print_info "Networks: paperclip-net, ai-net. Deliberately NOT main-net — the agents"
     print_info "in this container cannot reach the other services on it."
 fi
+
+# Is the kept compose behind this repo? Only informs, then offers. Added when
+# the app gained a healthcheck and the database gained the hardening block —
+# neither of which a deployment can pick up while Compose reads an older file.
+offer_compose_update "$RUNTIME_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
+    "rm $RUNTIME_DIR/docker-compose.yml && bash $0"
 
 pull_with_progress "$RUNTIME_DIR"
 

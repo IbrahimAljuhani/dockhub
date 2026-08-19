@@ -273,7 +273,9 @@ rm -f /tmp/dify-cfg.err
 
 pull_with_progress "$RUNTIME_DIR"
 
-print_info "Starting $SERVICE_NAME (this brings up ~15 containers)..."
+# 16 are created; `init_permissions` is a one-shot that chowns the volumes and
+# exits, so 15 keep running. Counted from a live deploy, not estimated.
+print_info "Starting $SERVICE_NAME (16 containers; 15 stay running)..."
 (cd "$RUNTIME_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start $SERVICE_NAME. Check log: $LOGFILE"
 

@@ -6,9 +6,19 @@ Full-stack LLM **application platform**: visual workflow orchestration, producti
 |---|---|
 | **Upstream** | [langgenius/dify](https://github.com/langgenius/dify), pinned at **1.16.1** |
 | **Licence** | Apache-2.0 with additional conditions — see upstream |
-| **Containers** | ~15 running (of 39 defined; the rest are optional vector stores) |
+| **Containers** | **15 running**, 16 created (of 39 defined; the rest are optional vector stores) — [counted, not estimated](#-how-many-containers-exactly) |
 | **Minimum** | 4 GB RAM, 2 CPU |
 | **Runtime dir** | `~/docker/dify/` |
+
+---
+
+## 🔢 How many containers, exactly
+
+**16 are created; 15 keep running.** `init_permissions` is a one-shot that fixes volume ownership and exits — it shows as `Exited` in `docker ps -a` and that is correct, not a failure.
+
+Counted from a live deploy rather than estimated: `init_permissions`, `sandbox`, `local_sandbox`, `ssrf_proxy`, `agent_ssrf_proxy`, `weaviate`, `redis`, `web`, `db`, `worker_beat`, `api_websocket`, `plugin_daemon`, `agent_backend`, `worker`, `api`, `nginx`.
+
+That number moves with upstream's release — `agent_backend` arrived in 1.16 — and with `COMPOSE_PROFILES`, since choosing a different vector store swaps `weaviate` for something else.
 
 ---
 

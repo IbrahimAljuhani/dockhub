@@ -71,6 +71,36 @@ services:
       - NET_RAW
       - AUDIT_WRITE
     pids_limit: 4096
+
+    # ── Healthcheck: a TCP connect, not an HTTP path ─────────────────────
+    # The image ships no HEALTHCHECK, which left this the only app in the
+    # Multi-Agent category without one — so `restart: unless-stopped` could
+    # not see a process that was hung but still running. Docker only restarts
+    # what it can observe.
+    #
+    # It is a bare TCP connect on purpose, and that is the whole design. This
+    # deployment runs in `authenticated` mode, so every route worth naming
+    # answers 401 or 302 until you have an account; treating that as failure
+    # would report a healthy service as broken. That mistake was already made
+    # once on Hermes, and it is why the assertion here is narrow and true:
+    # THE SERVER IS LISTENING. Whether you can log in is a different question
+    # with a different answer.
+    #
+    # `node` is the probe because this image is Node and ships neither curl
+    # nor wget — checked, not assumed, the same way Flowise turned out to have
+    # wget and Langflow curl. The identical one-liner already runs in
+    # deploy.sh's readiness wait; this is that probe, made continuous.
+    #
+    # start_period is generous: the first boot applied 210 database
+    # migrations on a live run, and a container killed for being unhealthy
+    # mid-migration is a far worse outcome than a slow start.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e 'require(\"net\").connect(3100,\"127.0.0.1\").on(\"connect\",()=>process.exit(0)).on(\"error\",()=>process.exit(1))'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
     environment:
       # Names taken verbatim from upstream's docker/docker-compose.yml. Do not
       # "tidy" them — PAPERCLIP_PUBLIC_URL and BETTER_AUTH_SECRET in
