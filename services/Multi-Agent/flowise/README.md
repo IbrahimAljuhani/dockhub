@@ -94,6 +94,14 @@ Flowise's **main** SQLite database works fine. Only the session store is broken,
 
 The `postgres` branch of the same function uses `connect-pg-simple`, which the image *does* carry. So this deployment costs a second container. The "one container" claim was corrected rather than the deployment being left broken to protect it.
 
+**Confirmed on a live server (2026-08-19).** The line that used to be the crash is now just a log entry:
+
+```
+🔑 [server]: Encryption key initialized successfully
+🔐 [server]: Auth initialized successfully
+⚡️ [server]: Flowise Server is listening at :3000
+```
+
 ---
 
 ## 💾 Backup
@@ -114,9 +122,9 @@ TypeError: this.db.exec is not a function
   at initializeDBClientAndStore (enterprise/.../SessionPersistance.js:96)
 ```
 
-with two module-resolution failures beside it (`@smithy/eventstream-codec`, and `@langchain/core` not exporting `./utils/uuid`). Three broken package resolutions in one image is a bad build, not a misconfiguration.
+**Pinning did not fix that**, and this section used to imply it would. 3.1.4 crashed identically, and the module-resolution errors that came with it are in *both* images. The crash was the SQLite session store, and only Postgres fixed it. Recorded rather than quietly rewritten, because "pin it and see" was a reasonable move that turned out not to be the answer.
 
-Checked against the registry rather than assumed: **`3.1.4` and `latest` have different digests, and `3.1.4` was pushed fifteen minutes after `latest`.** So on this image `latest` is an *earlier* build than the newest tagged release — not a pointer to it. That is precisely the failure pinning exists to prevent, and it is why this service pins where most of the catalogue does not.
+The pin is kept anyway, for a reason that survives independently. Checked against the registry rather than assumed: **`3.1.4` and `latest` have different digests, and `3.1.4` was pushed fifteen minutes after `latest`.** So on this image `latest` is an *earlier* build than the newest tagged release — not a pointer to it. Deploying `latest` here means deploying something older than the release you think you asked for, and a redeploy months from now silently lands on a different image than the one this catalogue was tested against.
 
 `deploy.sh` also migrates an existing `.env` that still says `latest` — a value *it* wrote, not one you chose. A version you pinned yourself is left alone.
 
@@ -126,7 +134,7 @@ To move version: edit `FLOWISE_VERSION` in `~/docker/flowise/.env` and rerun.
 
 ## ⚠️ Known unknowns
 
-- **The Postgres path has not yet been confirmed to start either.** It is the reasoned next move — `connect-pg-simple` is present in the image where `connect-sqlite3` is unusable — but "the other branch of that function" is an argument, not a green log line. This note comes down when a live deploy answers on `/api/v1/ping`.
+- **The AWS Bedrock node does not load, on this image, in both database modes.** Startup logs a `Cannot find module '@smithy/eventstream-codec'` stack trace from `@langchain/community/dist/llms/bedrock`. It is **not** fatal — `Nodes pool initialized successfully` follows it, and the server starts normally — but that one node is unavailable. It is a packaging fault inside the published image, not something this deployment configures; every other provider node loads. Left as-is rather than papered over, so the stack trace in your logs has an explanation.
 - **Memory** — `deploy.sh` suggests a 1 GB limit for the app, matching the category README's figure. Postgres adds its own footprint on top, and neither number is measured.
 - **Upgrading from the SQLite layout** is handled: `deploy.sh` detects a compose file with no `flowise-db`, keeps it as `docker-compose.yml.pre-postgres`, replaces it, and generates the database credentials into your existing `.env`. Nothing is lost, because the SQLite deployment never reached the point of storing anything.
 

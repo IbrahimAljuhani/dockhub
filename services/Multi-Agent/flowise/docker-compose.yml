@@ -30,7 +30,9 @@
 #        at new SQLiteStore (connect-sqlite3/lib/connect-sqlite3.js:56)
 #        at initializeDBClientAndStore (enterprise/.../SessionPersistance.js:96)
 #
-#    Reading the failing function settled it. Flowise picks its SESSION store
+#    Pinning did not fix it — that was tried first, and 3.1.4 crashed in
+#    exactly the same place. Reading the failing function settled it.
+#    Flowise picks its SESSION store
 #    from DATABASE_TYPE, defaulting to sqlite, and the sqlite branch uses
 #    `connect-sqlite3`. The image ships that package without a working
 #    `sqlite3` under it — so `this.db` is not a database handle.
@@ -45,6 +47,9 @@
 #    carry. So this service costs a second container — and stops being the
 #    "one container" the category promised. That claim was corrected rather
 #    than the deployment being left broken to protect it.
+#
+#    Verified live 2026-08-19: "Auth initialized successfully", then
+#    "Flowise Server is listening at :3000". Both containers healthy.
 #
 # 4. TELEMETRY OFF, and upstream already agrees — their own example ships
 #    DISABLE_FLOWISE_TELEMETRY=true. Kept explicit so an image default cannot

@@ -14,14 +14,17 @@ SERVICE_NAME="flowise"
 #     at new SQLiteStore (connect-sqlite3/lib/connect-sqlite3.js:56)
 #     at initializeDBClientAndStore (enterprise/.../SessionPersistance.js:96)
 #
-# alongside two module-resolution failures (@smithy/eventstream-codec, and
-# @langchain/core not exporting ./utils/uuid). Three broken package
-# resolutions in one image is a bad build, not a misconfiguration.
+# alongside module-resolution failures, which read like a bad build.
 #
-# Checked against the registry rather than assumed: `3.1.4` and `latest` have
-# DIFFERENT digests, and 3.1.4 was pushed FIFTEEN MINUTES AFTER latest — so
-# `latest` here is an earlier build than the newest tagged release, not a
-# pointer to it. That is exactly the failure mode pinning exists to prevent.
+# THE PIN DID NOT FIX THAT. 3.1.4 crashed identically, and the module errors
+# are in both images (the @smithy/eventstream-codec one is still in the log
+# today — non-fatal, see README). The crash was the SQLite session store, and
+# only Postgres fixed it. Kept here so nobody re-derives the wrong lesson.
+#
+# The pin stays for a reason that stands on its own. Checked against the
+# registry rather than assumed: `3.1.4` and `latest` have DIFFERENT digests,
+# and 3.1.4 was pushed FIFTEEN MINUTES AFTER latest — so `latest` here is an
+# earlier build than the newest tagged release, not a pointer to it.
 FLOWISE_VERSION_PIN="3.1.4"
 SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNTIME_DIR="$HOME/docker/$SERVICE_NAME"
