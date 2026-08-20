@@ -68,7 +68,7 @@ backup_dolibarr() {
     # --single-transaction snapshots consistently without locking the server,
     # which matters because Dolibarr's cron jobs keep writing during a
     # backup. --routines/--events are included because Dolibarr installs both.
-    if docker exec dolibarr-db "$dump_bin" -uroot -p"$db_password" \
+    if docker exec -e MYSQL_PWD="$db_password" dolibarr-db "$dump_bin" -uroot \
         --single-transaction --routines --events "$db_name" > "$dump_file" 2>"$_derr"; then
         print_info "Database '$db_name' dumped to $dump_file"
     else
@@ -99,12 +99,12 @@ restore_dolibarr() {
         client_bin=$(_dolibarr_db_bin mariadb mysql)
         local waited=0
         while (( waited < 60 )); do
-            docker exec dolibarr-db "$client_bin" -uroot -p"$db_password" -e 'SELECT 1' >/dev/null 2>&1 && break
+            docker exec -e MYSQL_PWD="$db_password" dolibarr-db "$client_bin" -uroot -e 'SELECT 1' >/dev/null 2>&1 && break
             sleep 3
             waited=$(( waited + 3 ))
         done
 
-        if docker exec -i dolibarr-db "$client_bin" -uroot -p"$db_password" "$db_name" < "$install_dir/db.sql"; then
+        if docker exec -i -e MYSQL_PWD="$db_password" dolibarr-db "$client_bin" -uroot "$db_name" < "$install_dir/db.sql"; then
             print_info "Database restored from db.sql"
             rm -f "$install_dir/db.sql"
         else

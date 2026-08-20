@@ -277,7 +277,7 @@ echo "🔌 VPN endpoint:  $ENV_VPN_HOST:1194/udp  ← for the OpenVPN client app
 [[ -n "$ENV_TCP_PORT" ]] && echo "🔌 TCP fallback:  $ENV_VPN_HOST:$ENV_TCP_PORT/tcp   ← also the client app, NOT a web address"
 echo "🌐 Web UI:        https://<your-NPM-domain>/       (admin panel: /admin)"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 Web UI direct: https://$SERVER_IP:$ENV_HOST_PORT/  (self-signed cert — browser warning is expected here)"
 fi

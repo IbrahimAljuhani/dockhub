@@ -123,6 +123,18 @@ cd ~/docker/openproject
 
 ---
 
+## 💾 Backup and restore
+
+Run from the menu: `bash services/services.sh` → this service → **4) Backup** / **5) Restore**.
+
+This service ships a `backup.sh` because its state is split in two: **Postgres** holds the data, and the install tree holds the rest. The generic archive captures the second and would take a raw, mid-write copy of the first — a `pg_dump` is a consistent snapshot; a file copy of a running database is a coin toss.
+
+**What restore actually does, because it is not obvious.** `restore_service_generic` puts the *volumes* back first, so by the time the dump replays, the database is already a complete copy of itself. Replaying into that gives "relation already exists" on every statement — and `psql < file` **exits 0 even when every statement failed**, so it would report success. So the restore instead: stops the app, `dropdb --force`, `createdb`, then replays with `ON_ERROR_STOP=1 --single-transaction`. If the drop or create fails, the replay is **skipped** rather than half-applied, and the restored volume is left coherent.
+
+> ⚠️ **Restore replaces the current data.** It is not a merge. Take a fresh backup first if the running deployment holds anything you have not archived.
+
+---
+
 ## 📜 License
 
-OpenProject itself is licensed separately by the OpenProject GmbH — see the [official repository](https://github.com/opf/openproject) for terms. This deployment wrapper follows the same [MIT license](../../LICENSE) as the rest of this repo.
+OpenProject itself is licensed separately by the OpenProject GmbH — see the [official repository](https://github.com/opf/openproject) for terms. This deployment wrapper follows the same [MIT license](../../../LICENSE) as the rest of this repo.

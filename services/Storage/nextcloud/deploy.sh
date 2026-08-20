@@ -66,7 +66,7 @@ else
     # (edit .env and rerun deploy.sh).
     if [[ -n "$HOST_PORT" ]]; then
         OVERWRITEPROTOCOL_VALUE="http"
-        SERVER_IP_FOR_DOMAIN=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_DOMAIN=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_DOMAIN:-}" ]] && SERVER_IP_FOR_DOMAIN="localhost"
         TRUSTED_DOMAIN="$SERVER_IP_FOR_DOMAIN:$HOST_PORT"
         print_info "Using '$TRUSTED_DOMAIN' as NEXTCLOUD_TRUSTED_DOMAINS (must match how you access it). Once you switch to NPM, edit this to your real domain in .env."
@@ -144,7 +144,7 @@ print_info "Nextcloud is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:          http://$SERVER_IP:$ENV_HOST_PORT"
 fi

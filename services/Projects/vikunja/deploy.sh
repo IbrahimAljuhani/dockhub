@@ -60,7 +60,7 @@ else
     # Same reasoning as OpenProject/Nextcloud/n8n's domain handling: derive
     # it from the host port when chosen, otherwise ask for the real domain.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_URL=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         PUBLIC_URL_VALUE="http://$SERVER_IP_FOR_URL:$HOST_PORT/"
         print_info "Using '$PUBLIC_URL_VALUE' as VIKUNJA_SERVICE_PUBLICURL (must match how you access it). Once you switch to NPM, edit this to your real domain in .env."
@@ -148,7 +148,7 @@ print_info "Vikunja is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:          http://$SERVER_IP:$ENV_HOST_PORT"
 fi

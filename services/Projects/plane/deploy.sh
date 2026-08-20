@@ -69,7 +69,7 @@ else
     # domain handling: derive it from the host port when chosen, otherwise
     # ask for the real domain.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_DOMAIN=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_DOMAIN=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_DOMAIN:-}" ]] && SERVER_IP_FOR_DOMAIN="localhost"
         APP_DOMAIN_VALUE="$SERVER_IP_FOR_DOMAIN:$HOST_PORT"
         WEB_URL_VALUE="http://$APP_DOMAIN_VALUE"
@@ -156,7 +156,7 @@ print_info "Plane is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:          http://$SERVER_IP:$ENV_HOST_PORT"
 fi

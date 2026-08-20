@@ -60,7 +60,7 @@ prompt_host_port "8095"
 # chosen, otherwise ask for the real domain — same pattern as this repo's
 # other services.
 if [[ -n "$HOST_PORT" ]]; then
-    SERVER_IP_FOR_NAME=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP_FOR_NAME=$(host_lan_ip)
     [[ -z "${SERVER_IP_FOR_NAME:-}" ]] && SERVER_IP_FOR_NAME="localhost"
     SERVER_NAME_VALUE="$SERVER_IP_FOR_NAME"
     print_info "Using '$SERVER_NAME_VALUE' as the server name. Once you switch to NPM, edit SERVER_NAME in .env to your real domain."
@@ -121,7 +121,7 @@ print_info "LinkStack instance '$INSTANCE_NAME' is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:          http://$SERVER_IP:$HOST_PORT"
 fi

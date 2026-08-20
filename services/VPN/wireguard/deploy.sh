@@ -139,7 +139,7 @@ echo
 echo "──────────────────────────────────────────────"
 echo "🔌 VPN endpoint: $INIT_HOST_SHOWN:51820 (UDP — always on)"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 Web UI:       http://$SERVER_IP:$ENV_HOST_PORT"
 fi

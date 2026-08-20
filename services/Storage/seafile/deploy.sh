@@ -64,7 +64,7 @@ else
     # doesn't fail at deploy time — it shows up later as "CSRF verification
     # failed" the moment you try to log in.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        SERVER_IP_FOR_URL=$(host_lan_ip || true)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         # Seafile wants host:port here when the port isn't the default —
         # the value is used to build absolute URLs, so the port has to

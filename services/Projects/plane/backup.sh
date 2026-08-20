@@ -53,7 +53,7 @@ restore_plane() {
           || { print_warn "Could not recreate plane: ${_e:-unknown}"
                print_warn "SKIPPING the replay — the restored volume is intact and usable."
                rm -f "$install_dir/db.sql"; return 0; }
-        if docker exec -i "plane-db" psql -v ON_ERROR_STOP=1 --single-transaction -q \
+        if docker exec -i "plane-db" psql -v ON_ERROR_STOP=1 --single-transaction -q -o /dev/null \
                -U "plane" -d "plane" < "$install_dir/db.sql"; then
             print_info "Database restored from db.sql (dropped, recreated, replayed in one transaction)."
         else

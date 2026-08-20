@@ -61,7 +61,7 @@ else
     # browser reaches oCIS exactly. The two paths also differ in who
     # terminates TLS, which is what PROXY_TLS switches.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        SERVER_IP_FOR_URL=$(host_lan_ip || true)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         # https, not http, even for a direct port: oCIS's web UI is an OIDC
         # client, and browsers only expose the crypto APIs it needs in a

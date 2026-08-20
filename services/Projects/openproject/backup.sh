@@ -51,7 +51,7 @@ restore_openproject() {
           || { print_warn "Could not recreate openproject: ${_e:-unknown}"
                print_warn "SKIPPING the replay — the restored volume is intact and usable."
                rm -f "$install_dir/db.sql"; return 0; }
-        if docker exec -i "openproject-db" psql -v ON_ERROR_STOP=1 --single-transaction -q \
+        if docker exec -i "openproject-db" psql -v ON_ERROR_STOP=1 --single-transaction -q -o /dev/null \
                -U "postgres" -d "openproject" < "$install_dir/db.sql"; then
             print_info "Database restored from db.sql (dropped, recreated, replayed in one transaction)."
         else

@@ -67,7 +67,7 @@ else
     # once NPM/SSL is set up (edit .env and rerun deploy.sh).
     if [[ -n "$HOST_PORT" ]]; then
         OPENPROJECT_HTTPS_VALUE="false"
-        SERVER_IP_FOR_HOST=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_HOST=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_HOST:-}" ]] && SERVER_IP_FOR_HOST="localhost"
         HOST_NAME="$SERVER_IP_FOR_HOST:$HOST_PORT"
         print_info "Using '$HOST_NAME' as OPENPROJECT_HOST__NAME (must match how you access it). Once you switch to NPM, edit this to your real domain in .env."
@@ -163,7 +163,7 @@ print_info "OpenProject is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:                     http://$SERVER_IP:$ENV_HOST_PORT"
 fi

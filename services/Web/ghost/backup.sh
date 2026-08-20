@@ -50,7 +50,7 @@ backup_ghost() {
 
     # --single-transaction snapshots consistently without locking the server.
     # Ghost keeps writing (scheduled posts, member events) during a backup.
-    if docker exec ghost-db mysqldump -uroot -p"$db_password" \
+    if docker exec -e MYSQL_PWD="$db_password" ghost-db mysqldump -uroot \
         --single-transaction --routines --events "$db_name" > "$dump_file" 2>"$_derr"; then
         print_info "Database '$db_name' dumped to $dump_file"
     else
@@ -80,12 +80,12 @@ restore_ghost() {
         (cd "$install_dir" && $(compose_cmd) up -d ghost-db) || true
         local waited=0
         while (( waited < 60 )); do
-            docker exec ghost-db mysql -uroot -p"$db_password" -e 'SELECT 1' >/dev/null 2>&1 && break
+            docker exec -e MYSQL_PWD="$db_password" ghost-db mysql -uroot -e 'SELECT 1' >/dev/null 2>&1 && break
             sleep 3
             waited=$(( waited + 3 ))
         done
 
-        if docker exec -i ghost-db mysql -uroot -p"$db_password" "$db_name" < "$install_dir/db.sql"; then
+        if docker exec -i -e MYSQL_PWD="$db_password" ghost-db mysql -uroot "$db_name" < "$install_dir/db.sql"; then
             print_info "Database restored from db.sql"
             rm -f "$install_dir/db.sql"
         else

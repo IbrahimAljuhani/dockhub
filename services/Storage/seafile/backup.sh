@@ -28,6 +28,24 @@ _seafile_db_bin() {
     fi
 }
 
+# ─────────────────────────────────────────────────────────────────────
+# WHY THIS FILE HAS NO dropdb/createdb, UNLIKE THE POSTGRES ONES
+#
+# The Postgres services here were fixed on 2026-08-19: their dump replayed
+# onto a database restore_service_generic had ALREADY replaced, every
+# statement failed with "already exists", and psql exited 0 regardless.
+#
+# THAT FIX MUST NOT BE COPIED HERE. This service dumps ALL databases, and a
+# mysqldump/mariadb-dump of that shape emits CREATE DATABASE IF NOT EXISTS
+# plus, from the default --opt/--add-drop-table, a DROP TABLE IF EXISTS
+# before every CREATE TABLE. Replaying onto a populated server is therefore
+# already correct and idempotent. Confirm on a real dump with:
+#     head -40 db.sql | grep -iE "drop table|create database"
+#
+# The client also stops at the first error and returns non-zero by DEFAULT,
+# so unlike psql its exit status is trustworthy as written — which is why
+# the restore below can rely on a plain if/else.
+# ─────────────────────────────────────────────────────────────────────
 backup_seafile() {
     local instance="$1" install_dir="$2"
     local dump_file="$install_dir/db.sql"
@@ -39,7 +57,7 @@ backup_seafile() {
 
     # --single-transaction snapshots consistently without locking the server;
     # Seafile's background jobs keep writing throughout a backup.
-    if docker exec seafile-db "$dump_bin" -uroot -p"$db_password" \
+    if docker exec -e MYSQL_PWD="$db_password" seafile-db "$dump_bin" -uroot \
         --all-databases --single-transaction --routines --events > "$dump_file" 2>"$_derr"; then
         print_info "Databases dumped to $dump_file"
     else
@@ -69,12 +87,12 @@ restore_seafile() {
         client_bin=$(_seafile_db_bin mariadb mysql)
         local waited=0
         while (( waited < 90 )); do
-            docker exec seafile-db "$client_bin" -uroot -p"$db_password" -e 'SELECT 1' >/dev/null 2>&1 && break
+            docker exec -e MYSQL_PWD="$db_password" seafile-db "$client_bin" -uroot -e 'SELECT 1' >/dev/null 2>&1 && break
             sleep 3
             waited=$(( waited + 3 ))
         done
 
-        if docker exec -i seafile-db "$client_bin" -uroot -p"$db_password" < "$install_dir/db.sql"; then
+        if docker exec -i -e MYSQL_PWD="$db_password" seafile-db "$client_bin" -uroot < "$install_dir/db.sql"; then
             print_info "Databases restored from db.sql"
             rm -f "$install_dir/db.sql"
         else
@@ -85,7 +103,7 @@ restore_seafile() {
         # the server is still serving the pre-restore grant tables until it
         # is told otherwise. Without this the `seafile` user appears not to
         # exist and the app can't connect.
-        docker exec seafile-db "$client_bin" -uroot -p"$db_password" -e 'FLUSH PRIVILEGES' >/dev/null 2>&1 \
+        docker exec -e MYSQL_PWD="$db_password" seafile-db "$client_bin" -uroot -e 'FLUSH PRIVILEGES' >/dev/null 2>&1 \
             || print_warn "Could not flush privileges — restart the seafile-db container before starting the app."
     fi
 

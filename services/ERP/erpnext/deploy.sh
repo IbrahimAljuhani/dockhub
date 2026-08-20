@@ -62,9 +62,9 @@ else
     # Host header resolves here (see the summary at the end of this script).
     # The value is required — Frappe cannot create a nameless site. The
     # QUESTION is not: this host's own address is right here, and a live run
-    # made the operator type back the same 10.0.0.27 the summary prints four
+    # made the operator type back the very address the summary prints four
     # times. So it is offered as a default, not demanded as an answer.
-    ERP_SITE_DEFAULT=$(hostname -I 2>/dev/null | awk '{print $1}')
+    ERP_SITE_DEFAULT=$(host_lan_ip)
     # Asking for a "name" and then rejecting a name is the script's fault,
     # not the operator's: a live run typed 'test' — a perfectly valid Frappe
     # site name — and got a domain-shaped error. Frappe would accept it; we
@@ -243,7 +243,7 @@ if [[ -n "$ENV_HOST_PORT" ]]; then
         # (it doesn't exist on busybox, for one) makes the whole assignment
         # fail and `set -e` kills the script — defeating the fallback on the
         # very next line, which exists precisely to handle not knowing the IP.
-        DIRECT_HOST=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        DIRECT_HOST=$(host_lan_ip || true)
         [[ -z "${DIRECT_HOST:-}" ]] && DIRECT_HOST="<your-server-ip>"
     fi
     echo "🌐 URL (direct):  http://$DIRECT_HOST:$ENV_HOST_PORT"

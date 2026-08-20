@@ -122,7 +122,7 @@ print_info "Starting Pi-hole..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Pi-hole. Check log: $LOGFILE"
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+SERVER_IP=$(host_lan_ip)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 print_info "Pi-hole is starting."

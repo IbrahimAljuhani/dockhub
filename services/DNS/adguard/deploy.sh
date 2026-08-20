@@ -168,7 +168,7 @@ print_info "Starting AdGuard Home..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start AdGuard Home. Check log: $LOGFILE"
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+SERVER_IP=$(host_lan_ip)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 print_info "AdGuard Home is starting."

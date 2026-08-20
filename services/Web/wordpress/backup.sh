@@ -45,7 +45,7 @@ backup_wordpress() {
     db_password="$(read_env_value WORDPRESS_DB_PASSWORD "$install_dir/.env")"
     db_name="$(read_env_value WORDPRESS_DB_NAME "$install_dir/.env")"
 
-    if docker exec wordpress-db mysqldump -u"$db_user" -p"$db_password" "$db_name" > "$dump_file" 2>"$_derr"; then
+    if docker exec -e MYSQL_PWD="$db_password" wordpress-db mysqldump -u"$db_user" "$db_name" > "$dump_file" 2>"$_derr"; then
         print_info "Database dumped to $dump_file"
     else
         print_warn "mysqldump failed — falling back to a raw (less safe) volume copy for the db."
@@ -81,13 +81,13 @@ restore_wordpress() {
         # ghost already waited properly; this one did not.
         local _w=0
         while (( _w < 60 )); do
-            docker exec wordpress-db mysql -u"$db_user" -p"$db_password" -e 'SELECT 1' >/dev/null 2>&1 && break
+            docker exec -e MYSQL_PWD="$db_password" wordpress-db mysql -u"$db_user" -e 'SELECT 1' >/dev/null 2>&1 && break
             sleep 3; _w=$(( _w + 3 ))
         done
 
         # mysql stops at the first error and returns non-zero by default, so
         # unlike psql this exit status can be trusted as written.
-        if docker exec -i wordpress-db mysql -u"$db_user" -p"$db_password" "$db_name" < "$install_dir/db.sql"; then
+        if docker exec -i -e MYSQL_PWD="$db_password" wordpress-db mysql -u"$db_user" "$db_name" < "$install_dir/db.sql"; then
             print_info "Database restored from db.sql"
             rm -f "$install_dir/db.sql"
         else

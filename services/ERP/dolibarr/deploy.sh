@@ -66,7 +66,7 @@ else
     # OpenProject's OPENPROJECT_HOST__NAME. Only one of the two paths is
     # asked for, matching the host-port choice just made.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        SERVER_IP_FOR_URL=$(host_lan_ip || true)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         URL_ROOT_VALUE="http://$SERVER_IP_FOR_URL:$HOST_PORT"
         print_info "Using '$URL_ROOT_VALUE' as DOLI_URL_ROOT. Once you switch to NPM, edit it in .env to your https:// domain and rerun."

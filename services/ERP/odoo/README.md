@@ -26,7 +26,7 @@ Perfect for developers, agencies, and businesses running **multiple isolated Odo
 - [Management Commands](#️-management-commands)
 - [Reverse Proxy & SSL](#-reverse-proxy--ssl-recommended)
 - [Complete Cleanup](#-complete-cleanup)
-- [Monitoring](#-monitoring)
+- [Backup & Restore](#-backup-and-restore)
 - [Troubleshooting](#-troubleshooting)
 - [Odoo Version Notes](#-odoo-version-notes)
 - [Changelog](#-changelog)
@@ -89,7 +89,7 @@ Key design decisions baked into the script:
 - **`POSTGRES_DB` is set to `postgres`, not the instance's database name.** Odoo creates and initializes its own database the first time you open the database manager. Pre-creating an empty database with the instance's name would make Odoo think it's already initialized and crash with `ir_module_module does not exist`.
 - **The Odoo filestore (`/var/lib/odoo`) is a named Docker volume**, not a bind-mounted host folder — this avoids the classic `Permission denied: /var/lib/odoo/sessions` error caused by UID mismatches between the host and the container.
 - **`config/` and `addons/`** stay as bind mounts (you need to edit them from the host), but the script chowns them to the *actual* UID/GID of the `odoo` user inside the image you picked — detected dynamically, not hardcoded.
-- **The `odoo` app container also joins the shared `main-net` network** (the same one created by [`install_dockhub.sh`](../../install_dockhub.sh)), so NGINX Proxy Manager can reach it directly by container name (`odoo-<instance>:8069`) — no host port needs to stay published just for the proxy. `db` stays off `main-net` and is only reachable from `odoo` over the private, per-instance `odoo-net` network.
+- **The `odoo` app container also joins the shared `main-net` network** (the same one created by [`install_dockhub.sh`](../../../install_dockhub.sh)), so NGINX Proxy Manager can reach it directly by container name (`odoo-<instance>:8069`) — no host port needs to stay published just for the proxy. `db` stays off `main-net` and is only reachable from `odoo` over the private, per-instance `odoo-net` network.
 - **`docker-compose.yml` is a tracked template** (`services/ERP/odoo/docker-compose.yml`), copied once per instance and never overwritten on top of an existing one — same convention as every other service in this repo, instead of being generated inline.
 
 ---
@@ -349,6 +349,26 @@ docker exec odoo-your-instance-name-db \
 - Host ports are now **optional** (default: no, main-net/NPM-only) instead of always asked and always published — matches every other service in this repo
 - Optional memory cap on the `odoo` container (was previously hardcoded to `2g` with no way to change it without hand-editing the generated compose file)
 - `docker-compose.yml` is now a tracked template file, copied per instance, instead of generated inline
+
+---
+
+## 💾 Backup and restore
+
+Run from the menu: `bash services/services.sh` → **odoo** → pick the instance → **4) Backup** / **5) Restore**.
+
+Odoo's `backup.sh` is the **only one in this catalogue with its own design**, and the reason is `pg_dumpall`. Odoo's business database is named by you inside Odoo's own web interface, so it is unknowable at deploy time — the whole cluster has to be dumped. That rules out everything the other services do:
+
+| | why not |
+|---|---|
+| `--single-transaction` | **impossible** — a cluster dump contains `CREATE DATABASE`, which PostgreSQL forbids inside a transaction block |
+| `ON_ERROR_STOP=1` | **impossible** — roles are cluster-wide and survive dropping databases, so `CREATE ROLE odoo` always errors. Stopping there would abort a restore that was about to succeed |
+| `dropdb` on the cluster | **does not exist** — you cannot drop what you are connected to, so the unit of work is each database *inside* it |
+
+So the restore enumerates the real databases (`datistemplate = false AND datname <> 'postgres'`), drops each with `--force`, replays, and then **judges the output instead of the exit status** — treating `role "…" already exists` as benign and anything else as a real failure. It also refuses to proceed on an empty dump, which would otherwise drop every database and load nothing.
+
+> ⚠️ **Restore replaces the whole cluster for that instance**, not one database. It is not a merge. Take a fresh backup first if the running deployment holds anything you have not archived.
+
+Verified live on 2026-08-19: two consecutive restores, every instance back and Odoo able to read its own config afterwards — which is the specific thing that used to break, because a host-side `tar` cannot restore file ownership.
 
 ---
 

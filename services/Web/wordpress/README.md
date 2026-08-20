@@ -89,6 +89,18 @@ WordPress also has its own **in-app one-click updater** (Dashboard → Updates) 
 
 ---
 
+## 💾 Backup and restore
+
+Run from the menu: `bash services/services.sh` → this service → **4) Backup** / **5) Restore**.
+
+This service ships a `backup.sh` because its state is split in two: **MySQL** holds the data, and the install tree holds the rest. The generic archive captures the second and would take a raw, mid-write copy of the first.
+
+**Why the restore looks simpler here than in the Postgres services, and correctly so.** `mysqldump` enables `--opt` by default, which includes `--add-drop-table`, so the dump already drops each table before recreating it — replaying onto restored data is idempotent without a drop-and-recreate step. And `mysql` stops at the first error and returns non-zero by default, so its exit status can be trusted, unlike `psql`. **Do not "fix" this to match the Postgres services**: this deployment has no root credentials at all (`MYSQL_RANDOM_ROOT_PASSWORD`), so dropping the database with the application user and then failing to recreate it would destroy the data with no way back.
+
+> ⚠️ **Restore replaces the current data.** It is not a merge. Take a fresh backup first if the running deployment holds anything you have not archived.
+
+---
+
 ## 📜 License
 
 WordPress itself is licensed separately (GPLv2+ — see the [official repository](https://github.com/WordPress/WordPress) for terms). This deployment wrapper follows the same [MIT license](../../../LICENSE) as the rest of this repo.

@@ -59,7 +59,7 @@ else
     # how the site is actually reached, so only one of the two paths is
     # asked for, matching the host-port choice just made.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+        SERVER_IP_FOR_URL=$(host_lan_ip || true)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         GHOST_URL_VALUE="http://$SERVER_IP_FOR_URL:$HOST_PORT"
         print_info "Using '$GHOST_URL_VALUE' as Ghost's url. Once you switch to NPM, edit GHOST_URL in .env to your https:// domain and rerun."
