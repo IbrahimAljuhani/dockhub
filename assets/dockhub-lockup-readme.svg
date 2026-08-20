@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 442 295" width="442" height="295"
+     class="x-mk x-pulse run" role="img"
+     aria-label="DockHub — your self-hosted server, simplified">
+  <title>DockHub — your self-hosted server, simplified</title>
+
+  <!--
+    THE README VARIANT. Same geometry as dockhub-lockup.svg, one difference
+    that matters: it paints its own ground.
+
+    Why a separate file rather than a flag on the other one:
+
+    A README image is loaded through an <img> tag. In that mode an SVG is
+    still rendered as a document, so its own CSS applies — but
+    "prefers-color-scheme" inside it follows the viewer's OPERATING SYSTEM,
+    not the theme they chose on the site showing it. Someone reading GitHub
+    in dark mode on a light-mode laptop gets the light artwork on a dark
+    page, and the wordmark all but disappears. The reverse happens just as
+    often. GitHub's own workaround is a <picture> element with two sources,
+    which keys off exactly the same OS setting and so does not fix it either.
+
+    A panel removes the question instead of answering it. This file never
+    asks what is behind it, because nothing of it is behind it: the ground is
+    part of the artwork. It looks identical on a light README, a dark README,
+    a rendered PDF, or a social preview card.
+
+    So there is no media query here at all, and no two-level var() fallback —
+    this file is never inlined into a page whose tokens it should inherit.
+    That is the OTHER file's job, and mixing the two roles into one asset is
+    how a lockup ends up with colours nobody can predict.
+
+    Colours are the site's dark palette, and they are AA against this ground:
+      text  #DEE7E7   the wordmark and hull
+      faint #748A8D   the tagline           5.1 : 1
+      sig   #F0714A   "hub" and the cargo   6.4 : 1
+    (Logotypes are exempt from WCAG contrast minimums. Meeting it anyway
+    costs nothing and means the tagline stays readable when this is scaled
+    down to a social card.)
+
+    Note for future edits: this is XML. A comment may not contain two
+    hyphens in a row.
+  -->
+  <style>
+    .x-mk{ overflow:visible }
+    .hl{ fill:#DEE7E7 }
+    .sp{ stroke:#DEE7E7; stroke-width:2.5; stroke-linecap:round; fill:none; opacity:.4 }
+    .nd{ fill:#DEE7E7; opacity:.55 }
+    .sg{ fill:#F0714A }
+
+    /* Resting state is the finished state. Motion is added by .run and is
+       never what makes the mark arrive — a still render of this file, which
+       is what a PDF or a preview card produces, shows the finished lockup. */
+    .lv{ fill:#F0714A; opacity:0 }
+    .tv{ stroke:#F0714A; stroke-width:3.4; stroke-linecap:round;
+         fill:none; stroke-dasharray:5 60; stroke-dashoffset:0; opacity:0 }
+
+    @keyframes x-flash{ 0%{opacity:0} 6%{opacity:1} 34%{opacity:1} 52%{opacity:0} 100%{opacity:0} }
+    @keyframes x-travel{ 0%{opacity:0;stroke-dashoffset:0} 8%{opacity:1}
+      46%{opacity:1;stroke-dashoffset:-15} 56%{opacity:0;stroke-dashoffset:-15}
+      100%{opacity:0;stroke-dashoffset:-15} }
+    @keyframes x-ack{ 0%{transform:scaleY(1)} 18%{transform:scaleY(1.5)}
+      55%{transform:scaleY(1)} 100%{transform:scaleY(1)} }
+
+    .x-pulse.run .lv{ animation:x-flash  4.5s linear infinite }
+    .x-pulse.run .tv{ animation:x-travel 4.5s linear infinite }
+    .x-pulse.run .k1{ animation-delay:0s }    .x-pulse.run .k2{ animation-delay:.75s }
+    .x-pulse.run .k3{ animation-delay:1.5s }  .x-pulse.run .k4{ animation-delay:2.25s }
+    .x-pulse.run .k5{ animation-delay:3s }    .x-pulse.run .k6{ animation-delay:3.75s }
+    .x-pulse.run .sg{ transform-box:fill-box; transform-origin:50% 100%;
+      animation:x-ack .75s ease-out .255s infinite }
+
+    @media (prefers-reduced-motion: reduce){
+      /* A full stop, not a slowdown. Someone who asked for less motion did
+         not ask for faster motion. */
+      .x-pulse.run *{ animation:none !important }
+    }
+
+    .wm, .tag{
+      font-family:ui-monospace, "Cascadia Mono", "SF Mono", "JetBrains Mono",
+                  Menlo, Consolas, monospace;
+    }
+    .wm { font-size:58px; font-weight:600; letter-spacing:-2.03px }
+    .wm-dock{ fill:#DEE7E7 }
+    .wm-hub { fill:#F0714A }
+    .tag{ font-size:12px; font-weight:400; letter-spacing:4.2px; fill:#748A8D }
+  </style>
+
+  <!-- The ground. Full bleed rather than inset: the artwork already sits 24
+       units clear of every edge, so the panel needs no padding of its own,
+       and an inset panel would leave a transparent border that picks up the
+       host background again — reintroducing the exact problem this file
+       exists to remove. rx is 16: enough to read as a panel at README width,
+       not so much that it reads as a button. -->
+  <rect width="442" height="295" rx="16" fill="#0B1417"/>
+
+  <mask id="x-cargo-rm">
+    <path fill="#fff" d="M50 26 L72 38 L72 62 L50 74 L28 62 L28 38 Z"/>
+    <rect fill="#000" x="36"   y="57.5" width="28" height="7"/>
+    <rect fill="#000" x="39.5" y="46.5" width="21" height="7"/>
+    <rect fill="#000" x="43"   y="35.5" width="14" height="7"/>
+  </mask>
+
+  <!-- Geometry copied verbatim from dockhub-lockup.svg. The mask id differs
+       (x-cargo-rm) so that if both files are ever inlined into one document
+       they cannot collide; two elements sharing an id is a coin toss. -->
+  <g transform="translate(141 9.6) scale(1.6)">
+    <path class="sp" d="M50 26 L50 14"/><path class="sp" d="M72 38 L84 31"/>
+    <path class="sp" d="M72 62 L84 69"/><path class="sp" d="M50 74 L50 86"/>
+    <path class="sp" d="M28 62 L16 69"/><path class="sp" d="M28 38 L16 31"/>
+    <path class="tv k1" d="M50 14 L50 26"/><path class="tv k2" d="M84 31 L72 38"/>
+    <path class="tv k3" d="M84 69 L72 62"/><path class="tv k4" d="M50 86 L50 74"/>
+    <path class="tv k5" d="M16 69 L28 62"/><path class="tv k6" d="M16 31 L28 38"/>
+    <circle class="nd" cx="50" cy="14" r="5"/><circle class="nd" cx="84" cy="31" r="5"/>
+    <circle class="nd" cx="84" cy="69" r="5"/><circle class="nd" cx="50" cy="86" r="5"/>
+    <circle class="nd" cx="16" cy="69" r="5"/><circle class="nd" cx="16" cy="31" r="5"/>
+    <circle class="lv k1" cx="50" cy="14" r="5"/><circle class="lv k2" cx="84" cy="31" r="5"/>
+    <circle class="lv k3" cx="84" cy="69" r="5"/><circle class="lv k4" cx="50" cy="86" r="5"/>
+    <circle class="lv k5" cx="16" cy="69" r="5"/><circle class="lv k6" cx="16" cy="31" r="5"/>
+    <path class="hl" d="M50 26 L72 38 L72 62 L50 74 L28 62 L28 38 Z" mask="url(#x-cargo-rm)"/>
+    <rect class="sg" x="43" y="35.5" width="14" height="7"/>
+  </g>
+
+  <text class="wm" x="221" y="239" text-anchor="middle"
+    ><tspan class="wm-dock">dock</tspan><tspan class="wm-hub">hub</tspan></text>
+  <!-- textLength pins the tagline to the 393 units it measures with the fonts
+       named above. This renders on machines that have none of them, falling
+       back to whatever `monospace` means there — and mono advance widths run
+       from about .55em to .65em, which at 34 characters plus 4.2 of
+       letter-spacing is enough drift to push the line past the panel and get
+       it clipped. lengthAdjust="spacing" absorbs the difference between the
+       letters rather than stretching them, so the glyphs keep their shape. -->
+  <text class="tag" x="221" y="267" text-anchor="middle"
+        textLength="393" lengthAdjust="spacing">your self-hosted server, simplified</text>
+</svg>
