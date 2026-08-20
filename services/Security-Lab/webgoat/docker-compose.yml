@@ -206,8 +206,20 @@ services:
       - seclab-net
 
 volumes:
+  # ── NO `name:` HERE, and that omission is load-bearing ────────────────
+  # Compose names this `webgoat_webgoat-data` — project prefix, underscore.
+  # That prefix is not cosmetic: backup_service_generic finds a service's
+  # volumes with
+  #     docker volume ls | grep -E "^${project_name}_"
+  # so a volume named anything else is INVISIBLE to the menu's Backup.
+  #
+  # An earlier version set `name: webgoat-data-<version>` back when the path
+  # carried the version. The version coupling is gone, the explicit name was
+  # left behind, and the result was a README promising that Backup captured
+  # your lesson history while `webgoat-data` silently failed to match
+  # `^webgoat_`. Caught by re-reading the category README against the code
+  # rather than by anything failing.
   webgoat-data:
-    name: webgoat-data
 
 networks:
   # Shared with the other lab services, not private to this one. See

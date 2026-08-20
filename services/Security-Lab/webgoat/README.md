@@ -126,7 +126,7 @@ This deployment ships **`2026`**, and it is worth knowing exactly what you are r
 
 Both are defensible. `2026` gets you whatever upstream has merged since; `v2025.3` gets you something you can point at a changelog for. **Set `WEBGOAT_VERSION` in `~/docker/webgoat/.env` and rerun `deploy.sh` to move between them** — your progress follows, because the data path no longer depends on the version.
 
-> ⚠️ Moving to `2026` does **not** fix the broken healthcheck described below. `master`'s Dockerfile still calls `curl`, which the image still lacks; the `wget` override in this deployment is what handles it on either tag.
+> ⚠️ Moving to `2026` does **not** fix the broken healthcheck described below. `master`'s Dockerfile still calls `curl`, which the image still lacks; the healthcheck override in this deployment is what handles it on either tag.
 
 ---
 
@@ -140,7 +140,7 @@ The distinction matters because [Juice Shop](../juice-shop/) really *does* reset
 
 | | |
 |---|---|
-| **Volume** | `webgoat-data`, mounted at `/home/webgoat/data` — a **fixed** path, pinned with `WEBGOAT_SERVER_DIRECTORY` |
+| **Volume** | `webgoat_webgoat-data`, mounted at `/home/webgoat/data` — a **fixed** path, pinned with `WEBGOAT_SERVER_DIRECTORY`. The `webgoat_` prefix is Compose's and is what makes the backup find it. |
 | **Backed up by** | the menu's ordinary **4) Backup** — the generic path archives named volumes |
 | **On a version bump** | your progress **carries over**, because the path no longer contains the version. WebGoat’s own default does (`~/.webgoat-<build version>/`), and following it would silently lose data the first time an image tag and the jar’s internal version disagree — so the path is pinned instead of predicted. |
 
@@ -191,7 +191,9 @@ HEALTHCHECK --interval=5s --timeout=3s
 
 Meanwhile the very same endpoint answers `200` with `{"status":"UP"}`. The probe was never testing the application; it was failing to start.
 
-This deployment overrides it with `wget`, which *is* in the image, against the same endpoint — plus a 90-second `start_period`, because the JVM needs about eighteen seconds to boot and upstream sets no start period either.
+This deployment replaces it with a probe that uses **no external tool at all** — `bash` and its `/dev/tcp` builtin — plus a 90-second `start_period`, because the JVM needs about eighteen seconds to boot and upstream sets no start period either.
+
+**It took three attempts, and the repeated mistake was not the tool — it was depending on a tool.** First `curl` with a longer start period (curl is absent: that would only have delayed the same failure). Then `wget`, verified present in `v2025.3` — and the `2026` image ships **neither curl nor wget**. The tool inventory is not stable between upstream's own builds, so the probe now speaks HTTP over a bash builtin and reads the status line. It still asserts that WebGoat *answers*, not merely that a port is open — which matters, because the two apps share one JVM and the real failure seen here was WebWolf alive on 9090 while WebGoat had died on 8080.
 
 > This is an upstream packaging bug, not something DockHub causes. It affects every `webgoat/webgoat` container, however it is run.
 

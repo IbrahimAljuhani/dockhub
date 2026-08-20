@@ -271,7 +271,7 @@ if ! (cd "$RUNTIME_DIR" && $COMPOSE_CMD config -q 2>/tmp/dify-cfg.err); then
 fi
 rm -f /tmp/dify-cfg.err
 
-pull_with_progress "$RUNTIME_DIR"
+pull_with_progress "$RUNTIME_DIR" \n    || print_error "Could not pull the images for this service. See the output above."
 
 # 16 are created; `init_permissions` is a one-shot that chowns the volumes and
 # exits, so 15 keep running. Counted from a live deploy, not estimated.

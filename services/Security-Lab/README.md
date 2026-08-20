@@ -29,9 +29,11 @@ We *want* the SQL injection to work — that's the lesson. We do *not* want a su
 | `cap_drop: ALL` | Linux capabilities used to escalate inside the container |
 | `security_opt: no-new-privileges:true` | setuid binaries as an escalation path |
 | `pids_limit` | Fork bombs — a genuine risk when you run payloads you found online |
-| `mem_limit`, `cpus` | Taking the host down by exhaustion; crypto-miner payloads. **Both always apply** — 512 MiB / 1.5 CPU for Juice Shop, 1 GiB / 2 CPU for WebGoat, which the deploy prompt can raise but not remove |
+| `mem_limit`, `cpus` | Taking the host down by exhaustion; crypto-miner payloads. **Both always apply** — 512 MiB / 1.5 CPU for Juice Shop, 1 GiB / 2 CPU for WebGoat. The deploy prompt can change the memory figure; neither limit can be removed. |
 | No `privileged`, no `docker.sock` | The direct, well-known routes to host root |
 | `restart: "no"` | A lab you forgot about coming back after a reboot |
+
+> 📌 **One container in this category is an exception, and it is named here rather than glossed over.** WebGoat's `webgoat-init` runs **as root and without `cap_drop`**, because its entire job is to `chown` a volume that Docker created owned by root — and it cannot fix ownership without the privilege to do so. It runs one command, exits, and is never listening on anything. It is not `privileged` and never touches the Docker socket. Everything that stays running in this category carries the full set above.
 
 None of this blunts the lessons, because the lessons live in the application layer.
 
@@ -151,7 +153,15 @@ This is worth knowing before you spend an evening on a lesson, and the honest an
 
 > ⚠️ **WebGoat's progress did not persist before 2026-08-20**, and its own README described that as intentional — *"there is nothing of yours to lose"*. It was not intentional; the compose file simply mounted nothing at the path WebGoat writes to, so every container recreate discarded completed lessons without saying so. If you worked through lessons before that date, that progress is gone. Recorded here rather than quietly corrected, because a doc that once told you your data was disposable owes you the correction.
 
-The menu's **4) Backup** captures what exists: the install tree and any named volumes. For WebGoat that now includes your lesson history.
+The menu's **4) Backup** captures the install tree and the service's named volumes — for WebGoat, that includes your lesson history.
+
+> ⚠️ **That last sentence was false for several hours on 2026-08-20, and the reason is worth knowing if you ever add a volume here.** `backup_service_generic` finds a service's volumes by the prefix Compose gives them:
+>
+> ```bash
+> docker volume ls | grep -E "^${project_name}_"
+> ```
+>
+> WebGoat's volume had been given an explicit `name: webgoat-data` — a hyphen where the convention needs `webgoat_`. It did not match, so Backup silently skipped it while this page promised the opposite. **Never set `name:` on a volume in this project**; let Compose apply the project prefix, or the backup cannot see it.
 
 ---
 

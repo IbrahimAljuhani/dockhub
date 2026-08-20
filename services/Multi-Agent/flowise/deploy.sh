@@ -281,7 +281,7 @@ confirm_version_change "flowise" \
 offer_compose_update "$RUNTIME_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
     "rm $RUNTIME_DIR/docker-compose.yml && bash $0"
 
-pull_with_progress "$RUNTIME_DIR"
+pull_with_progress "$RUNTIME_DIR" \n    || print_error "Could not pull the images for this service. See the output above."
 
 print_info "Starting $SERVICE_NAME..."
 (cd "$RUNTIME_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
