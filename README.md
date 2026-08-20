@@ -5,15 +5,11 @@
      still badges — centred, because they inherit the div's alignment. -->
 <div align="center">
 
-<!-- The README variant, not assets/dockhub-lockup.svg. It carries its own
-     ground panel, because a README image is loaded through <img> and the
-     prefers-color-scheme inside such an SVG follows the reader's OPERATING
-     SYSTEM, not the theme they picked on GitHub. Dark GitHub on a light
-     laptop rendered the light artwork on a dark page and the wordmark all
-     but vanished. The panel removes the question rather than answering it.
-     The other file stays as it is — it is the one the website inlines, and
-     inlining is exactly where inheriting the page's tokens is correct. -->
-<img src="assets/dockhub-lockup-readme.svg" alt="DockHub — your self-hosted server, simplified" width="420">
+<!-- The transparent, theme-adaptive lockup — chosen on sight over the
+     panelled variant, which sat as a dark block on a light README. The
+     panelled one is kept as assets/dockhub-lockup-readme.svg for places
+     that need their own ground: social cards, video, slides. -->
+<img src="assets/dockhub-lockup.svg" alt="DockHub — your self-hosted server, simplified" width="420">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![ShellCheck](https://github.com/IbrahimAljuhani/dockhub/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/IbrahimAljuhani/dockhub/actions/workflows/shellcheck.yml)
