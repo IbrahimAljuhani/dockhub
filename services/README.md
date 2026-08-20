@@ -8,7 +8,7 @@ Optional services that run on top of the core infrastructure ([`install_dockhub.
 
 ![Progress](https://img.shields.io/badge/built-41%20%2F%2041%20services-46a049?style=for-the-badge)
 
-[`services.sh`](services.sh) presents these grouped by category. ✅ = deployable now, 🚧 = listed in the menu already (shows "coming soon" if picked) but not built yet.
+[`services.sh`](services.sh) presents these grouped by category. **Every entry below is ✅ — the catalogue is complete.** The 🚧 marker is kept in the legend because the mechanism still exists for whatever gets added next: a service listed in the menu but not yet built shows "coming soon" if picked, and flips to ✅ automatically the moment its `deploy.sh` lands.
 
 > 💡 A few services have no badge available — those show a plain icon instead. **Hover it to see its name**, or click through to its README.
 
@@ -98,9 +98,9 @@ Pick **`1) Install / manage core infrastructure`** from the menu it shows.
 
 ### 2. Pick and deploy a service
 
-Pick **`2) Install a service`** from that same menu — it launches [`services.sh`](services.sh) right there. It's a two-level menu: pick a **category** (AI, Automation, ERP, Projects, ...), then a **service** within it. Services not built yet are shown too, marked `(coming soon)` — picking one just prints a notice and drops you back in that category's list instead of failing.
+Pick **`2) Install a service`** from that same menu — it launches [`services.sh`](services.sh) right there. It's a two-level menu: pick a **category** (AI, Automation, ERP, Projects, ...), then a **service** within it. Every service currently in the menu is built and deployable; if one ever isn't, it still appears — marked `(coming soon)` — and picking it prints a notice and drops you back in that category's list instead of failing.
 
-Pick an available (✅) service and you get:
+Pick a service and you get:
 
 ```
 1) Deploy / manage (runs deploy.sh — safe for new or existing deployments)

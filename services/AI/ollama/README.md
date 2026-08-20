@@ -32,7 +32,7 @@ bash deploy.sh
 
 1. **Check the GPU** — in three layers (see below) and offer to fix the one it can.
 2. Ask about a **memory limit** and an optional **host port**.
-3. Start Ollama on the shared `ai-net` network.
+3. Start Ollama on the shared `ai-net` **and `models-net`** networks.
 4. **Offer to pull a first model**, with sizes and a disk check.
 
 ---
@@ -108,7 +108,7 @@ Reasons to choose CPU on a machine that has a working GPU are covered in the [ca
 http://ollama:11434
 ```
 
-Over the shared `ai-net` network, by container name. Every AI consumer in DockHub uses that address, and none of them needs a published port.
+Over the shared networks, by container name. Every AI consumer in DockHub uses that address, and none of them needs a published port. Ollama sits on **both** `ai-net` and `models-net`, which is what lets the agent services and the [Multi-Agent](../../Multi-Agent/) builders share it without sharing each other — see [the category README](../README.md#two-networks-and-why-a-provider-joins-both).
 
 **Ollama also speaks the OpenAI-compatible API** at `http://ollama:11434/v1`, which is what most third-party tools expect.
 
@@ -159,7 +159,7 @@ docker exec -it ollama ollama list      # what you'd need to re-pull
 
 - **`OLLAMA_HOST=0.0.0.0:11434` is set explicitly.** Without it Ollama binds `127.0.0.1` inside the container and no other container can reach it — which looks exactly like a broken network. The same class of trap as Mosquitto's local-only default.
 - **The GPU block isn't in `docker-compose.yml`.** It's written into `docker-compose.override.yml` only after a test container proves the GPU is reachable. Baking it in unconditionally would make the service fail to start on every CPU-only machine.
-- **`ai-net`, not `main-net`.** There's no web UI for NPM to serve, and an unauthenticated API doesn't belong on the network with everything else.
+- **`ai-net` and `models-net`, never `main-net`.** There is no web UI for NPM to serve, and an unauthenticated API does not belong on the network with everything else. The two provider networks are a deliberate split, not redundancy — see the category README.
 - **No secrets file**, unlike most services here — Ollama generates no credentials, because it has none.
 - **Models can't be shared with llama.cpp or LocalAI.** Ollama repacks weights into its own content-addressed store (blobs + manifests) rather than keeping plain `.gguf` files, so a shared model volume across providers isn't possible even though they can run the same weights.
 

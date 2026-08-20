@@ -103,7 +103,9 @@ http://llama-cpp:8080/v1
 
 An OpenAI-compatible endpoint, so [Open WebUI](../open-webui/) and the agents find it without any llama.cpp-specific code — `detect_ai_provider()` in `lib/common.sh` handles the mapping.
 
-> ⚠️ **The API has no authentication**, exactly like Ollama's. It joins `ai-net` only, never `main-net`, and never goes behind NGINX Proxy Manager. A host port is offered but defaults to no — anything that can reach it can use your models and read your prompts.
+> ⚠️ **The API has no authentication**, exactly like Ollama's. It joins `ai-net` and `models-net` — never `main-net`, and never goes behind NGINX Proxy Manager. A host port is **offered and defaults to no**, suggesting `8081` → the container's `8080` if you want one; anything that can reach it can use your models and read your prompts.
+>
+> Two networks because this container is the **hub** that lets the agent services and the [Multi-Agent](../../Multi-Agent/) builders share it without sharing each other — see [the AI category README](../README.md#two-networks-and-why-a-provider-joins-both). It gains no reach from either: a network gives it callers, and it calls nobody.
 
 ---
 

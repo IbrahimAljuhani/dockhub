@@ -211,7 +211,7 @@ print_info "Starting $SELECTED (first run may build or pull images)..."
 
 echo "$SELECTED" > "$STATE_FILE"
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+SERVER_IP=$(host_lan_ip || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<this-host>"
 
 echo

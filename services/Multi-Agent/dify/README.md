@@ -28,7 +28,12 @@ That number moves with upstream's release — `agent_backend` arrived in 1.16 �
 bash services/services.sh
 ```
 
-Or directly: `bash deploy.sh`. It asks one question — whether to publish a host port — and generates everything else.
+Or directly: `bash deploy.sh`. It asks **two** things and generates everything else:
+
+1. **Should Dify join `main-net`**, so NGINX Proxy Manager can serve it on a domain? Asked first because it is the security question, not the convenience one — see [the category threat model](../README.md). Decline and a host port becomes the only way in, so the next question stops being optional.
+2. **A host port**, suggesting `8088` → the nginx container's `80`. Upstream publishes `80` and `443` unconditionally; both are removed here.
+
+Everything else — every credential, the vector-store key, the one-time setup password — is generated without asking.
 
 **First run:** open the URL and create the admin account. The setup password is `INIT_PASSWORD` in `~/docker/dify/.env`.
 

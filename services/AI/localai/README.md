@@ -93,7 +93,9 @@ http://localai:8080/v1
 
 OpenAI-compatible, so [Open WebUI](../open-webui/) and the agents find it with no LocalAI-specific code — `detect_ai_provider()` in `lib/common.sh` handles the mapping.
 
-> ⚠️ **No authentication on the API.** `ai-net` only, never `main-net`, never a public domain. A host port is offered but defaults to no.
+> ⚠️ **No authentication on the API.** `ai-net` and `models-net` — never `main-net`, never a public domain. A host port is offered and defaults to no (`8082` → the container's `8080` if you want one).
+>
+> Two networks because this container is the **hub** that lets the agent services and the [Multi-Agent](../../Multi-Agent/) builders share it without sharing each other — see [the AI category README](../README.md#two-networks-and-why-a-provider-joins-both). It gains no reach from either: a network gives it callers, and it calls nobody.
 
 ---
 
