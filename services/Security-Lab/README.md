@@ -29,7 +29,7 @@ We *want* the SQL injection to work — that's the lesson. We do *not* want a su
 | `cap_drop: ALL` | Linux capabilities used to escalate inside the container |
 | `security_opt: no-new-privileges:true` | setuid binaries as an escalation path |
 | `pids_limit` | Fork bombs — a genuine risk when you run payloads you found online |
-| `mem_limit`, `cpus` | Taking the host down by exhaustion; crypto-miner payloads. **Both always apply** — 512 MB / 1.5 CPU for Juice Shop, 1 GB / 2 CPU for WebGoat, which the deploy prompt can raise but not remove |
+| `mem_limit`, `cpus` | Taking the host down by exhaustion; crypto-miner payloads. **Both always apply** — 512 MiB / 1.5 CPU for Juice Shop, 1 GiB / 2 CPU for WebGoat, which the deploy prompt can raise but not remove |
 | No `privileged`, no `docker.sock` | The direct, well-known routes to host root |
 | `restart: "no"` | A lab you forgot about coming back after a reboot |
 
@@ -48,20 +48,24 @@ The lab services share **one** Docker network — `seclab-net` — and none of t
 **But network isolation does not stop a lab container reaching the host itself, and through it, your LAN.**
 
 ```
-   ┌─ seclab-net ──────────┐
-   │  juice-shop           │
-   └───────────┬───────────┘
-               │  ✗ blocked by Docker isolation
-               │     (main-net containers)
-               │
-               ✓  NOT blocked: the host's own address
-               │
-   ┌───────────▼──────────────────────────────────┐
+   ┌─ seclab-net ──────────────────────────────────┐
+   │  juice-shop          webgoat                  │
+   │                                               │
+   │  these two CAN reach each other, deliberately │
+   │  - pivoting between targets is an exercise    │
+   └──────────────────────┬────────────────────────┘
+                          |
+                          |  BLOCKED by Docker isolation:
+                          |  containers on main-net
+                          |
+                          |  NOT blocked: the host's own address
+                          v
+   ┌───────────────────────────────────────────────┐
    │  Docker host                                  │
    │   :81   NGINX Proxy Manager admin             │
-   │   :9000 Portainer  ← mounts docker.sock       │
-   │   :8085 :8086 :8087 :9200 … published ports   │
-   │   → and onward to your router and laptop      │
+   │   :9000 Portainer  - mounts docker.sock       │
+   │   :8085 :8086 :8087 :9200 ... published ports │
+   │   and onward to your router and your laptop   │
    └───────────────────────────────────────────────┘
 ```
 
@@ -124,6 +128,30 @@ That's a deliberate choice. You'll be pointing tools like Burp Suite and sqlmap 
 **Never** put a Security-Lab service behind NGINX Proxy Manager, never give it a public domain, and never forward a port to it on your router.
 
 > 💡 Want the stricter posture instead? Change the bind address to `127.0.0.1` in `~/docker/<service>/.env` and rerun `deploy.sh`, then reach it with `ssh -L 3000:localhost:3000 user@your-server`.
+
+### That binding is enforced, not just recommended
+
+`deploy.sh` refuses to start if `SECLAB_BIND` is empty, is `0.0.0.0`, or is anything that is not an IPv4 address. **If a deploy stops with a message about `SECLAB_BIND`, this is why** — it is the check working, not a fault.
+
+The reason it exists: every other value in the compose files has a default, and this one deliberately has none, because there is no safe default for *"which address should deliberately vulnerable software listen on"*. The consequence is that an **empty** value would produce `":3000:3000"` — and to Docker an empty host IP is not an error, it is every interface. The value is checked on every run rather than only at first install, because a reused `.env` can be hand-edited, truncated, or predate the key.
+
+`0.0.0.0` is refused by name for the same reason: it reaches the identical outcome by a different route, and a check that catches only the empty case catches half the problem.
+
+---
+
+## 💾 Does your work survive? The two answers differ
+
+This is worth knowing before you spend an evening on a lesson, and the honest answer is not the same for both targets.
+
+| | What happens to your progress |
+|---|---|
+| [**Juice Shop**](juice-shop/) | **Resets on every start**, by design. Its database is in memory and it rebuilds it as part of its own self-healing. That is upstream's choice and usually the right one for repeat practice — but do not expect a scoreboard to survive `docker compose restart`. |
+| [**WebGoat**](webgoat/) | **Persists**, in a named volume. It writes a real database to disk, so unlike Juice Shop it has something to keep. |
+| [**Vulhub**](vulhub/) | Nothing to keep. Each environment is a target you stand up, exploit, and tear down. |
+
+> ⚠️ **WebGoat's progress did not persist before 2026-08-20**, and its own README described that as intentional — *"there is nothing of yours to lose"*. It was not intentional; the compose file simply mounted nothing at the path WebGoat writes to, so every container recreate discarded completed lessons without saying so. If you worked through lessons before that date, that progress is gone. Recorded here rather than quietly corrected, because a doc that once told you your data was disposable owes you the correction.
+
+The menu's **4) Backup** captures what exists: the install tree and any named volumes. For WebGoat that now includes your lesson history.
 
 ---
 

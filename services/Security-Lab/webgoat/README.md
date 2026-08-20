@@ -120,7 +120,19 @@ To move to a newer release, bump `WEBGOAT_VERSION` in `.env` and rerun `deploy.s
 
 ## 💾 Backups
 
-**Deliberately none.** Your lesson progress lives in the container and is meant to be disposable; there is nothing of yours to lose. Backup isn't wired up for this service, and that's intentional.
+**Your lesson progress now persists**, in a named volume — and it did not until 2026-08-20.
+
+That earlier behaviour was a bug this README described as a decision. It used to say *"there is nothing of yours to lose"*, and that was wrong: WebGoat writes its HSQLDB **to disk**, at `/home/webgoat/.webgoat-<version>/`, and the compose file mounted nothing there. Every `docker compose down` — and every container recreate, including the ones `deploy.sh` performs when it updates the compose file — silently took your completed lessons with it.
+
+The distinction matters because [Juice Shop](../juice-shop/) really *does* reset by design: its database is in memory and it wipes it on every start as part of its self-healing. WebGoat never chose that. It simply had nowhere to write.
+
+| | |
+|---|---|
+| **Volume** | `webgoat-data-<version>`, mounted at `/home/webgoat/.webgoat-<version>` |
+| **Backed up by** | the menu's ordinary **4) Backup** — the generic path archives named volumes |
+| **On a version bump** | a **clean** database. The mount path contains the version, so the new volume is new. Your old progress stays in the old volume and comes back if you return to that tag. |
+
+> ⚠️ **Do not "simplify" this to `/home/webgoat`.** `webgoat.jar` lives in that directory, and a volume over it hides the application from its own `ENTRYPOINT` — the container would stop starting at all.
 
 ---
 

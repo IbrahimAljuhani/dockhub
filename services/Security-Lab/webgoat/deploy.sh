@@ -138,6 +138,19 @@ ENV_TZ=$(read_env_value "WEBGOAT_TZ" "$INSTALL_DIR/.env")
 # empty, so the links between the two apps break too. Fails closed.
 assert_seclab_bind "$ENV_BIND" "WebGoat"
 
+# ── The data directory's name is derived, never typed twice ──────────────
+# WebGoat keeps its database at /home/webgoat/.webgoat-<version-without-v>,
+# so the volume mount in docker-compose.yml has to track WEBGOAT_VERSION. It
+# is computed here rather than written by hand in two places, because two
+# hand-maintained copies of the same version string drift the first time one
+# of them is bumped — and the failure is silent: WebGoat would create a fresh
+# database at the un-mounted path and every completed lesson would appear to
+# have vanished.
+_wg_ver="$(read_env_value "WEBGOAT_VERSION" "$INSTALL_DIR/.env")"
+_wg_ver="${_wg_ver:-v2025.3}"
+set_env_value WEBGOAT_DATA_SUFFIX "${_wg_ver#v}" "$INSTALL_DIR/.env"
+unset _wg_ver
+
 # The compose file now carries a memory limit that always applies; this only
 # RAISES it when you asked for something else. `cpus` is set there too.
 if [[ -n "$ENV_MEM_LIMIT" ]]; then

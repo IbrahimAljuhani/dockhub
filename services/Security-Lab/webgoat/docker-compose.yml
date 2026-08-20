@@ -110,8 +110,33 @@ services:
     # memory limit — it looks like a lesson that randomly fails.
     mem_limit: ${SECLAB_MEM:-1g}
     cpus: ${SECLAB_CPUS:-2}
+    # ── Lesson progress, which used to vanish silently ───────────────────
+    # WebGoat writes its HSQLDB to disk INSIDE the container:
+    #   jdbc:hsqldb:file:/home/webgoat/.webgoat-2025.3//webgoat
+    # With no volume, every `docker compose down` or container recreate took
+    # your completed lessons with it — and this service's README used to say
+    # "there is nothing of yours to lose", which was simply wrong. Juice Shop
+    # genuinely does reset by design (in-memory, self-healing); WebGoat does
+    # not, it just had nowhere to keep anything.
+    #
+    # ⚠️ THE PATH CARRIES THE VERSION NUMBER, and that shapes both lines
+    # below. Mounting /home/webgoat instead would be simpler and would break
+    # the service outright: webgoat.jar lives there, and a volume over it
+    # hides the application from its own ENTRYPOINT.
+    #
+    # The volume NAME carries the version too, so a version bump starts a
+    # clean database rather than handing new code an old schema at a path it
+    # expects to own. Your previous progress stays in the previous volume,
+    # and going back to the old tag finds it again.
+    volumes:
+      - webgoat-data:/home/webgoat/.webgoat-${WEBGOAT_DATA_SUFFIX:-2025.3}
+
     networks:
       - seclab-net
+
+volumes:
+  webgoat-data:
+    name: webgoat-data-${WEBGOAT_DATA_SUFFIX:-2025.3}
 
 networks:
   # Shared with the other lab services, not private to this one. See
