@@ -28,7 +28,7 @@ bash deploy.sh
 
 > ⚠️ **Do not run as root.** Your user must be in the `docker` group.
 
-`deploy.sh` looks for a running provider on `ai-net` and configures itself accordingly:
+`deploy.sh` looks for a running provider and configures itself accordingly:
 
 | What it finds | What it does |
 |---|---|
@@ -90,7 +90,7 @@ docker exec -it ollama ollama list
 docker exec -it ollama ollama pull llama3.2:3b
 ```
 
-**2. Open WebUI can't reach the provider.** The deploy tests this from *inside* the container and says so — the host reaching Ollama proves nothing if the container can't. Both must be on `ai-net`:
+**2. Open WebUI can't reach the provider.** The deploy tests this from *inside* the container and says so — the host reaching Ollama proves nothing if the container can't. Both must be on `models-net`:
 
 ```bash
 docker inspect open-webui --format '{{json .NetworkSettings.Networks}}'
@@ -141,7 +141,7 @@ The generic **Backup** in `services.sh` covers this properly: accounts, chat his
 
 - **`:main`, never `:ollama`** — see above.
 - **No GPU check.** `lib/gpu.sh` isn't called: GPU handling belongs to providers, and this container never loads a model. The `cuda` tag exists for local embeddings only, which this deployment doesn't enable.
-- **Two shared networks** — the first DockHub service on both. `main-net` for NPM, `ai-net` to reach the provider. The provider stays off `main-net` deliberately: no web interface, and an unauthenticated API.
+- **Two shared networks** — `main-net` for NPM, `models-net` to reach the provider. **Not `ai-net`**, and that is deliberate: this container runs arbitrary Python from its own Workspace Tools — upstream calls importing a Tool *"equivalent to giving them shell access to the server"* — while `ai-net` carries [OpenHands](../../AI-Agents/openhands/), which has no authentication and mounts the Docker socket. The provider stays off `main-net`: no web interface, and an unauthenticated API.
 - **Provider detection is generic**, not Ollama-specific. The same code finds llama.cpp or LocalAI later and picks the right environment variable for each.
 - **The self-test has two parts** — the interface answering, and the provider being reachable *from inside the container*. They fail independently, and the second is what decides whether the model dropdown has anything in it.
 

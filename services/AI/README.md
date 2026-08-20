@@ -35,21 +35,26 @@ This is one of three categories that split what people loosely call "AI", along 
 This is the one thing worth understanding before deploying anything:
 
 ```
-        ┌── Ollama ────┐
-        │  llama.cpp   │  ← a provider RUNS the model.  Complete on its own.
-        │  LocalAI     │     Nothing else is required for it to work.
-        └──────┬───────┘
-               │  ai-net
-        ┌──────┴───────────────────────┐
-        │                              │
-   Open WebUI                    Agents (../AI-Agents/)
-   an interface —                 they act; the provider
-   needs a source                 only answers them
+           ┌── Ollama ────┐
+           │  llama.cpp   │   a provider RUNS the model. Complete on its own.
+           │  LocalAI     │   Nothing else is required for it to work.
+           └───┬─────┬────┘
+               │     │       the providers join BOTH networks, so the two
+    models-net │     │ ai-net groups of consumers share them without
+               │     │       ever sharing each other
+      ┌────────┘     └────────┐
+      │                       │
+ Open WebUI              OpenHands / Hermes / OpenClaw / Paperclip
+ Dify / Flowise          they act on text they did not write
+ Langflow
+
+ these RUN CODE          ai-net carries OpenHands: no authentication
+ you did not write       of its own, and it mounts the Docker socket
 ```
 
 **A provider is useful alone.** Deploy Ollama and you have a working model API immediately — DockHub's own agents talk to it, and so can your scripts.
 
-**Open WebUI is not.** It is a face, not an engine. On first deploy it looks for a running provider on `ai-net`, and if it finds none it asks whether you want to point it at a cloud endpoint instead or add a connection later in the web interface. Either way, **an interface with no model source has an empty dropdown** and nothing to say.
+**Open WebUI is not.** It is a face, not an engine. On first deploy it looks for a running provider, and if it finds none it asks whether you want to point it at a cloud endpoint instead or add a connection later in the web interface. Either way, **an interface with no model source has an empty dropdown** and nothing to say.
 
 > It is **not** tied to Ollama. `deploy.sh` wires whichever provider it finds: Ollama through its native API (`OLLAMA_BASE_URL`), llama.cpp and LocalAI through their OpenAI-compatible `/v1` path (`OPENAI_API_BASE_URL`, plus a placeholder key the protocol demands and local servers ignore). Swap providers later and rerunning `deploy.sh` offers to re-point it for you.
 

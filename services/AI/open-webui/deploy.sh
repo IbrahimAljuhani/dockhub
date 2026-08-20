@@ -12,7 +12,7 @@ if [[ $# -gt 0 ]]; then
     case "$1" in
         --help|-h)
             echo "Usage: $0 [OPTIONS]"
-            echo "Deploy Open WebUI behind 'main-net', talking to a provider on 'ai-net'."
+            echo "Deploy Open WebUI behind 'main-net', talking to a model provider on 'models-net'."
             exit 0
             ;;
     esac
@@ -44,9 +44,11 @@ check_prerequisites
 
 mkdir -p "$INSTALL_DIR"
 
-# Both: main-net so NPM can serve it, ai-net so it can reach the provider.
+# Both: main-net so NPM can serve it, models-net so it can reach the provider.
+# NOT ai-net — this container runs arbitrary Python from its Workspace Tools,
+# and ai-net carries OpenHands. See docker-compose.yml.
 ensure_main_net
-ensure_ai_net
+ensure_models_net
 
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
@@ -100,7 +102,7 @@ else
     echo
     detect_ai_provider
     if [[ -n "$AI_PROVIDER_NAME" ]]; then
-        print_info "Found a model provider on 'ai-net': $AI_PROVIDER_NAME"
+        print_info "Found a model provider running: $AI_PROVIDER_NAME"
 
         # Ollama can be asked what it has. Showing it here turns "is this
         # wired up?" into something you can see before the deploy finishes,
@@ -122,7 +124,7 @@ else
             OPENAI_KEY_VALUE="local"
         fi
     else
-        print_warn "No model provider is running on 'ai-net'."
+        print_warn "No model provider is running."
         echo
         echo "Where should Open WebUI get its models from?"
         echo "   1) OpenAI — or any OpenAI-compatible endpoint  (needs a key)"
@@ -187,7 +189,11 @@ EOF
 fi
 
 if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
-    print_info "Existing docker-compose.yml found at $INSTALL_DIR — keeping it (not overwritten). Delete it yourself first if you want the latest version from this repo."
+    # OFFERED, not merely announced: a kept compose from before 2026-08-21
+    # still joins ai-net, which carries OpenHands — and this container runs
+    # arbitrary Python from its own Workspace Tools.
+    offer_compose_update "$INSTALL_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
+        "rm $INSTALL_DIR/docker-compose.yml && bash $0"
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 fi
@@ -240,7 +246,7 @@ done
 
 # Checked from INSIDE the container, because that's the only place the
 # answer matters — the host may reach Ollama fine while the container
-# can't, if something is wrong with ai-net.
+# can't, if something is wrong with models-net.
 PROVIDER_REACHABLE=-1
 PROVIDER_URL="${ENV_OLLAMA_URL:-$ENV_OPENAI_BASE}"
 if (( UI_OK )) && [[ -n "$PROVIDER_URL" ]] && [[ "$PROVIDER_URL" == http://* ]]; then
@@ -292,7 +298,7 @@ if (( UI_OK )); then
         print_info "Self-test passed — the interface answered, and it can reach the provider."
     elif (( PROVIDER_REACHABLE == 0 )); then
         print_warn "The interface answered, but it could NOT reach $PROVIDER_URL."
-        print_warn "The model list will be empty. Check both are on 'ai-net':"
+        print_warn "The model list will be empty. Check both are on 'models-net':"
         print_warn "  docker inspect open-webui --format '{{json .NetworkSettings.Networks}}'"
     else
         print_info "Self-test passed — the interface answered."

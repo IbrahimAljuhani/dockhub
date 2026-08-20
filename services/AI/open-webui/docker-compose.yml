@@ -16,11 +16,14 @@
 #           leaves you with TWO Ollamas holding two separate model stores —
 #           you download the same model twice and neither UI explains why.
 #
-# ── TWO SHARED NETWORKS ─────────────────────────────────────────────────
-# The first DockHub service on both. It needs main-net so NGINX Proxy
-# Manager can serve it, and ai-net so it can reach the model provider by
-# container name. The provider itself stays off main-net — it has no web
-# interface and an unauthenticated API.
+# ── TWO SHARED NETWORKS: main-net AND models-net ────────────────────────
+# main-net so NGINX Proxy Manager can serve it; models-net so it can reach
+# the model provider by container name. The provider itself stays off
+# main-net — it has no web interface and an unauthenticated API.
+#
+# It was on 'ai-net' until 2026-08-21. See the note beside the networks
+# list below for why it moved: this container runs arbitrary Python from
+# its own Workspace Tools, and ai-net carries OpenHands.
 #
 # ── NO GPU CHECK HERE, DELIBERATELY ─────────────────────────────────────
 # GPU handling belongs to providers. This container never loads a model, so
@@ -53,7 +56,27 @@ services:
       - open-webui-data:/app/backend/data
     networks:
       - main-net
-      - ai-net
+      # ── 'models-net', NOT 'ai-net', and upstream's own words decide it ──
+      # Open WebUI's Workspace Tools and Functions run ARBITRARY PYTHON on
+      # this server, in this process. Their documentation is unusually blunt
+      # about what that means:
+      #
+      #   "Granting a user the ability to create or import Tools is
+      #    equivalent to giving them shell access to the server."
+      #
+      # That makes this a code-runner in exactly the sense Dify, Flowise and
+      # Langflow are — and arguably the most exposed of the four, because it
+      # is the one people actually put on a public domain through NPM.
+      #
+      # 'ai-net' carries OpenHands, which has no authentication of its own
+      # and mounts the Docker socket. A tool someone imported into the chat
+      # interface would have had a clear path to it. 'models-net' carries the
+      # model providers and nothing else.
+      #
+      # Nothing is lost: this container only ever calls OUT to a provider,
+      # and the providers sit on both networks. The only thing that reaches
+      # IN to it is NGINX Proxy Manager, over main-net, which is unchanged.
+      - models-net
 
 volumes:
   open-webui-data:
@@ -61,5 +84,5 @@ volumes:
 networks:
   main-net:
     external: true
-  ai-net:
+  models-net:
     external: true
