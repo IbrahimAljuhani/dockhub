@@ -886,6 +886,89 @@ prompt_host_port() {
 # Used ONLY by services/Security-Lab/*, which deploy software that is
 # deliberately vulnerable. Nothing else in this repo should call these.
 
+# ── 'seclab-net': one network for the lab, and why sharing is correct here ─
+# Each lab service used to get a private network of its own. That is stricter
+# on paper and buys almost nothing in practice, because this category's own
+# threat model already says where the risk is: container → HOST → LAN, not
+# container → container. Both lab containers are things you are deliberately
+# breaking; neither holds anything worth stealing from the other.
+#
+# What the shared network does buy:
+#   · lateral movement between two targets is a real exercise, and the point
+#     of this category is learning
+#   · one network to name, reason about and firewall, instead of one per
+#     service that has to be rediscovered each time
+#   · `docker network inspect seclab-net` answers "what is in my lab" in one
+#     command
+#
+# It still never joins main-net, and it is still never proxied.
+#
+# ⚠️ NOT `internal: true` — and that absence is deliberate, not an oversight.
+# An internal network would block the container → host → LAN path, which is
+# exactly the risk this category names as the real one. It is not set because
+# whether published ports still work on an internal network is UNVERIFIED
+# here: the Compose documentation says only "lets you create an externally
+# isolated network" and does not say what happens to `ports:`. Shipping an
+# unverified security claim into a security category is worse than shipping
+# none. services/Security-Lab/README.md carries the one-command test; when it
+# is confirmed on a real host, this is where the switch goes.
+ensure_seclab_net() {
+    if ! docker network ls --format '{{.Name}}' | grep -qx "seclab-net"; then
+        docker network create seclab-net >/dev/null || true
+        if docker network ls --format '{{.Name}}' | grep -qx "seclab-net"; then
+            print_info "Created docker network 'seclab-net'."
+        else
+            print_error "Failed to create docker network 'seclab-net'."
+        fi
+    fi
+}
+
+# ── The one control that keeps a vulnerable app off every interface ────────
+# $1 = the value read from .env, $2 = service name for the message.
+#
+# The compose files bind "${SECLAB_BIND}:<port>:<port>". Every OTHER value in
+# those files has a default; this one deliberately does not, because there is
+# no safe default for "which address should deliberately vulnerable software
+# listen on". The consequence is that an EMPTY value produces ":3000:3000",
+# and an empty host IP is not an error to Docker — it is every interface.
+#
+# detect_seclab_bind() is fail-safe (it falls back to 127.0.0.1), but it only
+# runs on a first install. A reused .env that was hand-edited, truncated, or
+# written before this key existed reaches the compose file unchecked. So the
+# value is asserted at the point of use, every run.
+#
+# Fails closed: refuses to start rather than guessing.
+assert_seclab_bind() {
+    local bind="$1" name="${2:-this lab service}"
+    if [[ -z "$bind" ]]; then
+        print_error "SECLAB_BIND is empty in this deployment's .env.
+    $name would then be published on EVERY interface — including a public one.
+    Set it to this host's LAN address (or 127.0.0.1) and rerun:
+        SECLAB_BIND=<address>"
+    fi
+    # An IPv4 literal or the loopback name. Deliberately narrow: a hostname
+    # here would resolve at container-create time to something nobody checked.
+    if [[ ! "$bind" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] && [[ "$bind" != "localhost" ]]; then
+        print_error "SECLAB_BIND is '$bind', which is not an IPv4 address.
+    Refusing to publish $name against a value that was not verified.
+    Set it to this host's LAN address (or 127.0.0.1) and rerun."
+    fi
+    # ── The wildcard has to be refused BY NAME ───────────────────────────
+    # An empty value and 0.0.0.0 reach the identical outcome — every
+    # interface — so a check that catches only the empty one catches half the
+    # problem. This was found by testing the assertion rather than by reading
+    # it: the first version accepted 0.0.0.0 without a word, which is the
+    # exact configuration this whole function exists to prevent.
+    if [[ "$bind" == "0.0.0.0" || "$bind" == "::" || "$bind" == "*" ]]; then
+        print_error "SECLAB_BIND is '$bind' — every interface.
+    $name is DELIBERATELY VULNERABLE software; publishing it on every
+    interface is the one binding this category rules out, and on a VPS that
+    means the public internet.
+    Use this host's LAN address, or 127.0.0.1 with an SSH tunnel."
+    fi
+    return 0
+}
+
 # A typed-confirmation gate. Not theatre: services.sh presents Security-Lab
 # in the same menu as everything else, so a user tabbing through and pressing
 # Enter could otherwise stand up an exploitable app without registering what
@@ -1347,7 +1430,6 @@ pull_with_progress() {
         rc="${PIPESTATUS[0]}"
         (( _restore_e )) && set -e
         rm -f "$raw"
-        [[ "$rc" -eq 0 ]] || print_error "Could not pull the images for this service (exit $rc). See above."
         return "$rc"
     fi
 
@@ -1415,17 +1497,26 @@ pull_with_progress() {
     # changed is that it no longer buries the deploy's own messages.
     cat "$raw" >> "$_pwp_log" 2>/dev/null || true
 
+    # ── REPORTS, THEN RETURNS. It does not exit. ─────────────────────────
+    # The failure output is printed here because only here is it available.
+    # The DECISION is the caller's, and that is not a style preference — 36
+    # of the 40 call sites in this catalogue end with:
+    #
+    #     || print_warn "Pull failed — the start below will report the real error."
+    #
+    # which is a deliberate design: a pull failure must not stop a redeploy
+    # whose images are already on disk. Making this function exit turned all
+    # 36 of those lines into dead code and broke offline redeploys of
+    # already-working services — a real regression, introduced 2026-08-20
+    # while fixing something else, found by the Security-Lab review the next
+    # day. A shared helper must not overrule its callers' contract.
+    #
+    # Callers that genuinely cannot continue add `|| print_error "…"`.
     if [[ "$rc" -ne 0 ]]; then
-        # ORDER MATTERS. print_error exits, so it must come LAST — the
-        # previous version called it first and then tried to print the
-        # captured output, which therefore never printed at all. A failure
-        # that announces "Full output:" and then dies before showing it is
-        # worse than one that says nothing, because it sends the reader
-        # looking for output that was never written.
         print_warn "Image pull failed (exit $rc). Full output:"
         sed 's/^/    /' "$raw" >&2
         rm -f "$raw"
-        print_error "Could not pull the images for this service."
+        return "$rc"
     fi
 
     # Success, and nothing was downloaded — said HERE, where the exit status
