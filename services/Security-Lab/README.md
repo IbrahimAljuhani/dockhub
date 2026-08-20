@@ -69,21 +69,22 @@ That path — container to host to LAN — is the real risk, not container-to-co
 
 This is why the answer for Vulhub is a separate machine, and why the habit below matters more than any single setting.
 
-### The setting that would close that path, and why it is not set
+### `internal: true` would close that path — and it cannot be used here. Measured.
 
-Docker networks take `internal: true`, which the Compose reference describes only as letting you *"create an externally isolated network"*. If that isolation blocks the container → host path while still allowing published ports, it would close the exact hole drawn above — and `seclab-net` would be the natural place for it.
+Docker networks take `internal: true`, which the Compose reference describes only as letting you *"create an externally isolated network"*. It never says what happens to published ports. That question was open in this project for twelve days; it is now answered, on a real host:
 
-**It is not enabled, because whether published ports survive it is unverified.** The documentation does not say, and a security page should not ship a protection its author has not watched work. Test it on your own host and the question is settled in about a minute:
+| | result |
+|---|---|
+| Container reaching the internet | **blocked** — the isolation is real |
+| nginx answering *inside* the container | up, so no startup race |
+| The published port, from the host | **HTTP 000** — unreachable |
+| DNAT rules installed for that port | **zero** |
 
-```bash
-docker network create --internal seclab-test
-docker run -d --rm --name seclab-probe --network seclab-test -p 127.0.0.1:8099:80 nginx:alpine
-sleep 2; curl -sS -o /dev/null -w 'published port answers: HTTP %{http_code}\n' http://127.0.0.1:8099/
-docker exec seclab-probe wget -q -T3 -O /dev/null http://1.1.1.1 && echo "outbound: REACHABLE (not isolated)" || echo "outbound: blocked (isolated)"
-docker rm -f seclab-probe >/dev/null; docker network rm seclab-test >/dev/null
-```
+That last row is the mechanism, and it is what makes this final rather than circumstantial: Docker does not install the forwarding rule at all for a container on an internal network. The port is not slow, or racing, or firewalled — **it was never wired up.**
 
-Wanting **`HTTP 200`** *and* **`outbound: blocked`**. If you get both, add `internal: true` under `seclab-net` in `~/docker/<service>/docker-compose.yml` and you have the strictest posture available without a firewall rule.
+So `internal: true` and `ports:` are mutually exclusive. A lab you cannot reach from your laptop is not a lab, and `seclab-net` is therefore an ordinary bridge network.
+
+**What remains, if you want the container → host path closed anyway:** host firewall rules, not a Docker setting. Done properly that needs *two* chains — `DOCKER-USER` for traffic the host forwards on to your LAN, and `INPUT` for traffic aimed at the host's own address, which never reaches `DOCKER-USER` at all. It also does not survive a reboot without `iptables-persistent`. **No recipe is given here because none has been tested on this project's hardware**, and a firewall rule that looks right and silently does not match is worse than knowing you have none. The habit below — stop the lab when you finish — remains the control that actually works.
 
 ---
 

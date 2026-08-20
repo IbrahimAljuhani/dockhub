@@ -135,6 +135,30 @@ To move to a newer release, bump `WEBGOAT_VERSION` in `.env` and rerun `deploy.s
 
 ---
 
+## 🩺 The image's healthcheck is broken upstream, and this deployment replaces it
+
+If you have run WebGoat in Docker before and wondered why the container always shows **unhealthy** while the application works perfectly — this is why. The image ships:
+
+```
+HEALTHCHECK --interval=5s --timeout=3s
+  CMD curl --fail http://localhost:8080/WebGoat/actuator/health
+```
+
+**and the image does not contain `curl`.** Measured on a running container:
+
+```
+"FailingStreak": 203
+"Output": "/bin/sh: 1: curl: not found\n"
+```
+
+Meanwhile the very same endpoint answers `200` with `{"status":"UP"}`. The probe was never testing the application; it was failing to start.
+
+This deployment overrides it with `wget`, which *is* in the image, against the same endpoint — plus a 90-second `start_period`, because the JVM needs about eighteen seconds to boot and upstream sets no start period either.
+
+> This is an upstream packaging bug, not something DockHub causes. It affects every `webgoat/webgoat` container, however it is run.
+
+---
+
 ## 📜 License
 
 WebGoat is licensed separately (GPL-2.0 — see the [official repository](https://github.com/WebGoat/WebGoat)). This deployment wrapper follows the same [MIT license](../../../LICENSE) as the rest of DockHub.

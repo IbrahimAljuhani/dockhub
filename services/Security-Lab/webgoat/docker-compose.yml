@@ -61,6 +61,44 @@ services:
     # compiler some lessons invoke will blow past a low cap, and the failures
     # look like random lesson errors rather than a resource limit.
     pids_limit: 512
+
+    # ── The image's own healthcheck is BROKEN. This replaces it. ─────────
+    # Upstream ships:
+    #   HEALTHCHECK --interval=5s --timeout=3s
+    #     CMD curl --fail http://localhost:8080/WebGoat/actuator/health
+    #
+    # and the image does not contain curl. Measured on a live container:
+    #
+    #   "FailingStreak": 203
+    #   "Output": "/bin/sh: 1: curl: not found\n"
+    #
+    # So every WebGoat container ever started from this image reports
+    # `unhealthy` for its entire life, while the application is perfectly
+    # fine — the same endpoint answers 200 with {"status":"UP"} from the
+    # host. Portainer paints that amber and it reads as a fault.
+    #
+    # ⚠️ THE FIRST FIX WRITTEN HERE WAS WRONG, and is recorded because the
+    # mistake is instructive. The symptom looked like a startup race — the
+    # image sets no --start-period while this JVM needs ~18s to boot — so
+    # the first version kept curl and merely added `start_period: 90s`.
+    # That would have delayed the identical failure by ninety seconds and
+    # called it a repair. The probe's own output is what settled it, not
+    # the plausible story.
+    #
+    # wget, because it is actually IN the image (checked, along with bash,
+    # openssl and a working /dev/tcp; nc and python3 are absent). It is GNU
+    # wget on Ubuntu 24.04, which exits non-zero on an HTTP error response,
+    # so a 404 or 503 fails the check as it should.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://localhost:8080/WebGoat/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # The start period is still correct and still needed — it just was
+      # never the whole problem. A cold JVM on a loaded host is slower than
+      # a warm one, and a false "unhealthy" costs somebody an afternoon
+      # debugging a service that works.
+      start_period: 90s
     # ── Resource limits, and they are NOT optional ───────────────────────
     # See juice-shop's compose for the full reasoning: the category README
     # promised `mem_limit` and `cpus`, the prompt made memory optional, and
