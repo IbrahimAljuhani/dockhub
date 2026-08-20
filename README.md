@@ -18,7 +18,7 @@
 [![Categories](https://img.shields.io/badge/Categories-15-blue)](#-the-catalogue)
 [![NPM](https://img.shields.io/badge/NGINX%20Proxy%20Manager-latest-00A98F)](#-environment-variable-overrides)
 [![Portainer](https://img.shields.io/badge/Portainer--CE-latest-13BEF9)](#-environment-variable-overrides)
-[![TLS](https://img.shields.io/badge/TLS-Let's%20Encrypt-003A70)](#-two-networks-and-why)
+[![TLS](https://img.shields.io/badge/TLS-Let's%20Encrypt-003A70)](#-three-networks-and-why)
 [![Backups](https://img.shields.io/badge/Backup%20%26%20Restore-built--in-6E4AFF)](#-backups)
 [![GPU](https://img.shields.io/badge/GPU-optional-76B900?logo=nvidia&logoColor=white)](services/AI/)
 
@@ -41,7 +41,7 @@ sudo bash install_dockhub.sh
 - [The core](#-the-core-what-install_dockhubsh-gives-you)
 - [The catalogue](#-the-catalogue)
 - [How every service behaves](#-how-every-service-behaves)
-- [Networks](#-two-networks-and-why)
+- [Networks](#-three-networks-and-why)
 - [Where everything lives](#-where-everything-lives)
 - [Backups](#-backups)
 - [Environment variable overrides](#-environment-variable-overrides)
@@ -153,14 +153,19 @@ Deployment is always a real Compose stack. Nothing is generated behind your back
 
 ---
 
-## 🌐 Two networks, and why
+## 🌐 Three networks, and why
 
 | Network | Who is on it | Purpose |
 |---|---|---|
 | **`main-net`** | NGINX Proxy Manager, Portainer, and any service you want proxied | Lets the proxy reach a container **by name** — no IPs, no published ports |
-| **`ai-net`** | Model providers and the services that use them | Keeps model traffic on its own bridge |
+| **`ai-net`** | Model providers, the [AI-Agents](services/AI-Agents/) services, Open WebUI, Paperclip | Keeps model traffic on its own bridge |
+| **`models-net`** | Model providers, and the [Multi-Agent](services/Multi-Agent/) builders (Dify · Flowise · Langflow) | The same models, reachable **without** reaching the agent services |
 
 A service on `main-net` can be given a domain and a certificate. A service **not** on it is reachable only through an optional host port on your LAN — which is exactly right for anything without a login of its own, and is why several services here default to no proxy at all.
+
+**Why the models have two networks rather than one.** A Docker network is **flat**: every member can reach every other. So joining one to reach a model is also joining it to reach everything else on it — and `ai-net` carries [OpenHands](services/AI-Agents/openhands/), which has no authentication of its own and mounts the Docker socket. That was fine while only agent services shared it. It stopped being fine when builders whose whole purpose is *running code somebody else wrote* needed a local model too.
+
+So the three providers (Ollama, llama.cpp, LocalAI) join **both** networks and act as a hub: each consumer group reaches the models, neither reaches the other. The providers gain nothing from it — a network gives a container callers, and they call nobody. `deploy.sh` creates and joins both, so this needs no thought from you.
 
 > In NGINX Proxy Manager, always point a Proxy Host at the **container name** (`jellyfin-app`), never at the server's own IP — the container and the proxy share a network, and an IP would loop back through the proxy itself.
 
