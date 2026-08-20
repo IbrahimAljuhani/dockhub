@@ -196,7 +196,7 @@ print_info "Starting Mosquitto..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Mosquitto. Check log: $LOGFILE"
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+SERVER_IP=$(host_lan_ip || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 # ── Self-test ───────────────────────────────────────────────────────────

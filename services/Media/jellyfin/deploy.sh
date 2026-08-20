@@ -132,7 +132,7 @@ else
     # unlike Vikunja/Plane, Jellyfin has no CORS/host-header check, so this
     # is optional, not required for NPM access to work.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_URL=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         PUBLISHED_URL_VALUE="http://$SERVER_IP_FOR_URL:$HOST_PORT"
     else
@@ -204,7 +204,7 @@ print_info "Jellyfin is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:          http://$SERVER_IP:$ENV_HOST_PORT"
 fi

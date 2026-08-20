@@ -65,7 +65,7 @@ else
     if [[ -n "$HOST_PORT" ]]; then
         N8N_PROTOCOL_VALUE="http"
         N8N_SECURE_COOKIE_VALUE="false"
-        SERVER_IP_FOR_WEBHOOK=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_WEBHOOK=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_WEBHOOK:-}" ]] && SERVER_IP_FOR_WEBHOOK="localhost"
         N8N_HOST_NAME="$SERVER_IP_FOR_WEBHOOK:$HOST_PORT"
         N8N_WEBHOOK_URL_VALUE="http://$SERVER_IP_FOR_WEBHOOK:$HOST_PORT/"
@@ -155,7 +155,7 @@ print_info "n8n is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:          http://$SERVER_IP:$ENV_HOST_PORT"
 fi

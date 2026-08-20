@@ -94,7 +94,7 @@ print_info "Starting Home Assistant (first run can take a minute or two)..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Home Assistant. Check log: $LOGFILE"
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+SERVER_IP=$(host_lan_ip)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 print_info "Home Assistant is starting."

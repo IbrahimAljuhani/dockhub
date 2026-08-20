@@ -42,7 +42,7 @@ backup_photoprism() {
 
     # User/database names are fixed in docker-compose.yml (both "photoprism")
     # rather than being configurable, so they're not read from .env here.
-    if docker exec photoprism-db mariadb-dump -uphotoprism -p"$db_password" photoprism > "$dump_file" 2>"$_derr"; then
+    if docker exec -e MYSQL_PWD="$db_password" photoprism-db mariadb-dump -uphotoprism photoprism > "$dump_file" 2>"$_derr"; then
         print_info "Database dumped to $dump_file"
     else
         print_warn "mariadb-dump failed — falling back to a raw (less safe) volume copy for the db."
@@ -75,10 +75,10 @@ restore_photoprism() {
         # is lost silently, surfacing as a restore that "just failed".
         local _w=0
         while (( _w < 60 )); do
-            docker exec photoprism-db mariadb -uphotoprism -p"$db_password" -e 'SELECT 1' >/dev/null 2>&1 && break
+            docker exec -e MYSQL_PWD="$db_password" photoprism-db mariadb -uphotoprism -e 'SELECT 1' >/dev/null 2>&1 && break
             sleep 3; _w=$(( _w + 3 ))
         done
-        docker exec -i photoprism-db mariadb -uphotoprism -p"$db_password" photoprism < "$install_dir/db.sql" \
+        docker exec -i -e MYSQL_PWD="$db_password" photoprism-db mariadb -uphotoprism photoprism < "$install_dir/db.sql" \
             && print_info "Database restored from db.sql" \
             || print_warn "Failed to restore db.sql — restore the volume backup manually if needed."
         rm -f "$install_dir/db.sql"

@@ -127,7 +127,7 @@ else
     # PHOTOPRISM_SITE_URL must match how you actually reach it (scheme, host,
     # and trailing slash all matter) — same pattern as this repo's Vikunja.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_URL=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         SITE_URL_VALUE="http://$SERVER_IP_FOR_URL:$HOST_PORT/"
         print_info "Using '$SITE_URL_VALUE' as PHOTOPRISM_SITE_URL. Once you switch to NPM, edit this to your real https:// domain in .env and rerun deploy.sh."
@@ -206,7 +206,7 @@ print_info "PhotoPrism is starting."
 echo
 echo "──────────────────────────────────────────────"
 if [[ -n "$ENV_HOST_PORT" ]]; then
-    SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+    SERVER_IP=$(host_lan_ip)
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:           http://$SERVER_IP:$ENV_HOST_PORT"
 fi

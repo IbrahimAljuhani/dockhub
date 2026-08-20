@@ -138,7 +138,7 @@ else
     # clients talk to the server directly on its own port rather than through
     # NPM, so this is derived from the direct host port when you publish one.
     if [[ -n "$HOST_PORT" ]]; then
-        SERVER_IP_FOR_URL=$(hostname -I 2>/dev/null | awk '{print $1}')
+        SERVER_IP_FOR_URL=$(host_lan_ip)
         [[ -z "${SERVER_IP_FOR_URL:-}" ]] && SERVER_IP_FOR_URL="localhost"
         ADVERTISE_IP_VALUE="http://$SERVER_IP_FOR_URL:$HOST_PORT/"
     else
@@ -223,7 +223,7 @@ print_info "Starting Plex..."
 (cd "$INSTALL_DIR" && $COMPOSE_CMD up -d 2>&1 | tee -a "$LOGFILE") \
     || print_error "Failed to start Plex. Check log: $LOGFILE"
 
-SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+SERVER_IP=$(host_lan_ip)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 CLAIMED=$(grep -a '^PLEX_CLAIM=' "$INSTALL_DIR/.env" | cut -d= -f2-)
 
