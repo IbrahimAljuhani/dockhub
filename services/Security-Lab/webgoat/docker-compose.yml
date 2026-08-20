@@ -33,7 +33,44 @@
 # (and the generated .env) to ~/docker/webgoat/ and runs it from there.
 
 services:
+  # ── A one-shot that fixes the volume's ownership, then exits ──────────
+  # WITHOUT THIS THE APP DOES NOT START. Learned the hard way on
+  # 2026-08-20: adding the named volume below broke a working deployment
+  # with
+  #   /home/webgoat/.webgoat-2025.3/webgoat.lck (Permission denied)
+  #
+  # Docker creates a named volume's mount point owned by ROOT when the path
+  # does not already exist inside the image — and this one does not, because
+  # WebGoat derives it at runtime from user.home and its own version. The
+  # image then runs as the non-root `webgoat` user, which cannot write into
+  # a root-owned directory. The database never opens and Spring dies during
+  # startup.
+  #
+  # Exactly the same class of bug this project already handles for Flowise
+  # and Langflow, where deploy.sh checks for uid 1000 before starting. The
+  # lesson did not get carried across the first time.
+  #
+  # Same image, so nothing extra is downloaded, and `webgoat:webgoat`
+  # resolves because the user exists in it. It runs as root, does one
+  # chown, and exits — `service_completed_successfully` below is what makes
+  # the app wait for it.
+  webgoat-init:
+    image: webgoat/webgoat:${WEBGOAT_VERSION:-v2025.3}
+    container_name: webgoat-init
+    user: root
+    restart: "no"
+    labels:
+      dockhub.security-lab: "true"
+    entrypoint: ["sh", "-c", "chown -R webgoat:webgoat /home/webgoat/.webgoat-${WEBGOAT_DATA_SUFFIX:-2025.3}"]
+    volumes:
+      - webgoat-data:/home/webgoat/.webgoat-${WEBGOAT_DATA_SUFFIX:-2025.3}
+    networks:
+      - seclab-net
+
   webgoat:
+    depends_on:
+      webgoat-init:
+        condition: service_completed_successfully
     image: webgoat/webgoat:${WEBGOAT_VERSION:-v2025.3}
     container_name: webgoat
     # NOT unless-stopped — a forgotten lab must not return after a reboot.

@@ -14,7 +14,7 @@ WebGoat ships with a second application called **WebWolf**, and this is the thin
 
 WebWolf is the **attacker-side** half. Lessons where you have to receive a request, catch exfiltrated data, host a malicious file, or read an email land there. Without it those lessons have nowhere to send anything.
 
-Both run inside **one container** (`webgoat/webgoat`) and need **a port each**. This deployment publishes both and, more importantly, **checks both answered** before reporting success.
+Both run inside **one container** (`webgoat/webgoat`) and need **a port each**. (A second short-lived container, `webgoat-init`, fixes the data volume's ownership and exits — see below.) This deployment publishes both and, more importantly, **checks both answered** before reporting success.
 
 > 📌 The old two-image `webgoat/goatandwolf` split you'll find in older tutorials was last built in **2021**. Don't use it.
 
@@ -133,6 +133,20 @@ The distinction matters because [Juice Shop](../juice-shop/) really *does* reset
 | **On a version bump** | a **clean** database. The mount path contains the version, so the new volume is new. Your old progress stays in the old volume and comes back if you return to that tag. |
 
 > ⚠️ **Do not "simplify" this to `/home/webgoat`.** `webgoat.jar` lives in that directory, and a volume over it hides the application from its own `ENTRYPOINT` — the container would stop starting at all.
+
+### Why there is a second container called `webgoat-init`
+
+Adding the volume broke the service the first time, and the reason is worth knowing before anyone "tidies" the init container away:
+
+```
+/home/webgoat/.webgoat-2025.3/webgoat.lck (Permission denied)
+```
+
+Docker creates a named volume's mount point owned by **root** when that path does not already exist inside the image — and this one does not, because WebGoat builds it at runtime from `user.home` plus its own version. The image then runs as the non-root `webgoat` user, which cannot write into a root-owned directory, so HSQLDB never opens its lock file and Spring dies during startup.
+
+`webgoat-init` is a one-shot using the same image: it starts as root, runs a single `chown`, and exits. The app waits for it with `condition: service_completed_successfully`. It shows as `Exited` in `docker ps -a`, and that is correct, not a failure.
+
+Two containers are created; **one** stays running.
 
 ---
 

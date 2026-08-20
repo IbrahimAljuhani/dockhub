@@ -168,7 +168,7 @@ It isn't theatre. `services.sh` lists Security-Lab in the same menu as Nextcloud
 | | What it is | Shape |
 |---|---|---|
 | [**OWASP Juice Shop**](juice-shop/) | The modern OWASP flagship — a deliberately broken shop with a built-in scoreboard and ~100 challenges | One container |
-| [**WebGoat**](webgoat/) | OWASP's guided lesson-based trainer, each lesson explaining the flaw before you exploit it | **One** container, **two apps** — WebGoat + WebWolf, a port each |
+| [**WebGoat**](webgoat/) | OWASP's guided lesson-based trainer, each lesson explaining the flaw before you exploit it | **One** running container, **two apps** — WebGoat + WebWolf, a port each. A second one-shot fixes volume ownership and exits. |
 | [**Vulhub**](vulhub/) | Reproductions of real infrastructure CVEs (Log4Shell, Struts RCE, …) | **Not a service** — a launcher, and it wants its own machine |
 
 **Juice Shop and WebGoat are application-layer targets.** You attack them through a browser; the flaws are in the app's logic. Combined with the hardening above, running them on your server is a defensible risk.
