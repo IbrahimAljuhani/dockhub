@@ -903,15 +903,24 @@ prompt_host_port() {
 #
 # It still never joins main-net, and it is still never proxied.
 #
-# ⚠️ NOT `internal: true` — and that absence is deliberate, not an oversight.
-# An internal network would block the container → host → LAN path, which is
-# exactly the risk this category names as the real one. It is not set because
-# whether published ports still work on an internal network is UNVERIFIED
-# here: the Compose documentation says only "lets you create an externally
-# isolated network" and does not say what happens to `ports:`. Shipping an
-# unverified security claim into a security category is worse than shipping
-# none. services/Security-Lab/README.md carries the one-command test; when it
-# is confirmed on a real host, this is where the switch goes.
+# ⚠️ NOT `internal: true`, and this is now a MEASURED result rather than an
+# open question. Tested on a real host 2026-08-20:
+#
+#   outbound from the container      → blocked (the isolation is real)
+#   nginx answering inside it        → up (so not a startup race)
+#   the published port from the host → HTTP 000
+#   DNAT rules installed for it      → ZERO
+#
+# The last line is the mechanism: Docker never installs the port-forwarding
+# rule for a container on an internal network. So `internal: true` and
+# `ports:` are mutually exclusive, and a lab nobody can reach from a laptop
+# is not a lab. Do not "improve" this by adding the flag — it was tried, and
+# the result is recorded in services/Security-Lab/README.md.
+#
+# Closing the container → host path therefore needs host firewall rules in
+# BOTH the DOCKER-USER chain (forwarded traffic to the LAN) and INPUT
+# (traffic aimed at the host's own address, which never reaches
+# DOCKER-USER). None is shipped, because none has been tested here.
 ensure_seclab_net() {
     if ! docker network ls --format '{{.Name}}' | grep -qx "seclab-net"; then
         docker network create seclab-net >/dev/null || true
