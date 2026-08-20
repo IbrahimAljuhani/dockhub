@@ -232,16 +232,30 @@ print_info "Starting Open WebUI (first run initialises its database)..."
 # "The page loads" and "it can reach the model provider" are different
 # claims, and the second is the one that decides whether the model dropdown
 # has anything in it.
-print_info "Waiting for the interface to answer..."
+# ── The ceiling is 5 minutes, not 1, and the reason is measured ─────────
+# This used to wait 30 × 2s = 60s and then warn. On a genuine first run
+# that warning is a FALSE ALARM: the image is ~1.8 GB, the database is
+# created on first start, and Open WebUI fetches an embedding model before
+# it serves anything. A live first deploy exceeded the minute and came up
+# fine seconds later — so the script reported a problem that did not exist,
+# on the one run where the operator has least context to judge it.
+#
+# Compare the siblings: llama.cpp waits 1200s, LocalAI the same. Ollama's
+# 40s is fine because it starts instantly. Open WebUI was the outlier.
+#
+# A generous ceiling costs nothing when things are healthy — a rerun answers
+# in seconds and exits the loop immediately. It only spends time in the case
+# where spending it is right.
+print_info "Waiting for the interface to answer (a first run initialises its database)..."
 UI_OK=0
-for _ in $(seq 1 30); do
+for _ in $(seq 1 60); do
     if docker exec open-webui python -c "
 import urllib.request
 urllib.request.urlopen('http://localhost:8080/health', timeout=3)" >/dev/null 2>&1; then
         UI_OK=1
         break
     fi
-    sleep 2
+    sleep 5
 done
 
 # Checked from INSIDE the container, because that's the only place the
@@ -304,7 +318,7 @@ if (( UI_OK )); then
         print_info "Self-test passed — the interface answered."
     fi
 else
-    print_warn "The interface did not answer within a minute. Check:"
+    print_warn "The interface did not answer within five minutes. Check:"
     print_warn "  cd $INSTALL_DIR && $COMPOSE_CMD logs -f open-webui"
 fi
 echo
