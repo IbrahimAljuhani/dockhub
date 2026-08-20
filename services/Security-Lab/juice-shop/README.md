@@ -109,7 +109,7 @@ To move to a newer release, bump `JUICE_SHOP_VERSION` in `.env` and rerun `deplo
 ## 📌 Notes & Deviations
 
 - **`restart: "no"`**, where every other DockHub service uses `unless-stopped`. A forgotten lab must not come back after a reboot.
-- **Never joins `main-net`**, never gets a domain, never goes behind NGINX Proxy Manager. It has its own private network and one LAN-bound port.
+- **Never joins `main-net`**, never gets a domain, never goes behind NGINX Proxy Manager. It sits on the shared `seclab-net` with the other lab targets, and publishes one LAN-bound port.
 - **Hardened beyond the rest of the repo** — `cap_drop: ALL`, `no-new-privileges`, `pids_limit: 200`. The app is meant to be exploitable; the container is not meant to be escapable.
 - **`read_only` is deliberately not set.** Juice Shop writes to its own working directories during file-upload and FTP challenges and rewrites its database on every restart. A read-only rootfs would need tmpfs mounts over exactly the paths the challenges target, and getting that subtly wrong breaks lessons in ways that look like bugs.
 - **The image already runs as uid 65532 (nonroot)** — unusually good hygiene for a deliberately vulnerable app, and left intact.

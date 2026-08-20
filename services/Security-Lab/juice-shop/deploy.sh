@@ -49,6 +49,8 @@ confirm_vulnerable_deploy "OWASP Juice Shop"
 mkdir -p "$INSTALL_DIR"
 
 # Deliberately NOT ensure_main_net. This service must never join it.
+# The lab's own shared network instead — see lib/common.sh.
+ensure_seclab_net
 
 if [[ -f "$INSTALL_DIR/.env" ]]; then
     print_info "Existing deployment found at $INSTALL_DIR — reusing its .env (not regenerated)."
@@ -100,7 +102,13 @@ EOF
 fi
 
 if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
-    print_info "Existing docker-compose.yml found at $INSTALL_DIR — keeping it (not overwritten). Delete it yourself first if you want the latest version from this repo."
+    # OFFERED, not merely announced. A kept compose from before 2026-08-20
+    # still declares a PER-SERVICE network and carries no cpus limit, so a
+    # deployment left on it silently misses both the shared seclab-net and a
+    # containment measure the category README promises. The operator still
+    # decides; they just have to decide.
+    offer_compose_update "$INSTALL_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
+        "rm $INSTALL_DIR/docker-compose.yml && bash $0"
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 fi
@@ -110,17 +118,23 @@ ENV_BIND=$(read_env_value "SECLAB_BIND" "$INSTALL_DIR/.env")
 ENV_PORT=$(read_env_value "JUICE_SHOP_PORT" "$INSTALL_DIR/.env")
 ENV_MODE=$(read_env_value "JUICE_SHOP_MODE" "$INSTALL_DIR/.env")
 
-if [[ -n "$ENV_MEM_LIMIT" ]]; then
-    {
-        echo "services:"
-        echo "  juice-shop:"
-        echo "    mem_limit: $ENV_MEM_LIMIT"
-    } > "$INSTALL_DIR/docker-compose.override.yml"
-    print_info "Memory limit $ENV_MEM_LIMIT applied to the 'juice-shop' container."
-else
-    rm -f "$INSTALL_DIR/docker-compose.override.yml"
-fi
+# ── Checked here, every run, not only on a first install ─────────────────
+# An empty SECLAB_BIND turns the compose file's "${SECLAB_BIND}:3000:3000"
+# into ":3000:3000" — every interface, for deliberately vulnerable software.
+# This is the one value in the file with no default, on purpose, so it is the
+# one value that has to be asserted. Fails closed.
+assert_seclab_bind "$ENV_BIND" "Juice Shop"
 
+# The compose file now carries a memory limit that always applies; this only
+# RAISES it when you asked for something else. `cpus` is set there too.
+if [[ -n "$ENV_MEM_LIMIT" ]]; then
+    set_env_value SECLAB_MEM "$ENV_MEM_LIMIT" "$INSTALL_DIR/.env"
+fi
+rm -f "$INSTALL_DIR/docker-compose.override.yml"
+
+# NOT fatal, deliberately: a redeploy whose image is already on disk must
+# still work on a host with no internet. pull_with_progress prints the real
+# failure; `up -d` below gives the verdict.
 pull_with_progress "$INSTALL_DIR" \
     || print_warn "Pull failed — the start below will report the real error."
 print_info "Starting Juice Shop..."

@@ -64,9 +64,25 @@ services:
     # Fork bombs are a genuine risk here: running a payload you found online
     # is the whole activity. This caps the blast radius at the container.
     pids_limit: 200
+    # ── Resource limits, and they are NOT optional ───────────────────────
+    # These used to exist only if you answered a memory prompt — while the
+    # category README listed `mem_limit` and `cpus` in its table of what the
+    # containment gives you, and `cpus` was set nowhere at all. A security
+    # page promising a limit that is not applied is worse than one that
+    # promises nothing, so the promise is kept here instead: a default that
+    # always applies, which the prompt can raise.
+    #
+    # Exhaustion is the realistic outcome of running a payload you found
+    # online — a crypto-miner pins every core, and a memory bomb takes the
+    # host down with the lab.
+    mem_limit: ${SECLAB_MEM:-512m}
+    cpus: ${SECLAB_CPUS:-1.5}
     networks:
-      - juice-shop-net
+      - seclab-net
 
 networks:
-  juice-shop-net:
-    driver: bridge
+  # Shared with the other lab services, not private to this one. See
+  # lib/common.sh, ensure_seclab_net, for why sharing is the right answer in
+  # this category and what it deliberately does NOT do.
+  seclab-net:
+    external: true

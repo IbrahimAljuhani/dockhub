@@ -131,7 +131,7 @@ To move to a newer release, bump `WEBGOAT_VERSION` in `.env` and rerun `deploy.s
 - **This image does *not* bind to localhost internally**, contrary to widely repeated advice. Its Dockerfile ends `--server.address 0.0.0.0`. The `server.address` gotcha applies to running the JAR **standalone**, outside Docker.
 - **`pids_limit: 512`**, far above Juice Shop's 200. Every Java thread counts against that limit, and some lessons compile Java at runtime — a low cap produces errors that look like broken lessons.
 - **The image already runs as a non-root user** (`USER webgoat` in its Dockerfile), left intact.
-- **`restart: "no"`**, own private network, never `main-net`, never proxied — the Security-Lab convention.
+- **`restart: "no"`**, the shared `seclab-net`, never `main-net`, never proxied — the Security-Lab convention.
 
 ---
 

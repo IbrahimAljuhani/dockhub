@@ -109,9 +109,24 @@ mkdir -p "$INSTALL_DIR"
 # "no such file or directory" at build time rather than a missing-submodule
 # message.
 if [[ -d "$REPO_DIR/.git" ]]; then
-    print_info "Updating the Vulhub library..."
+    # ── Say what changed, because this is somebody else's code ───────────
+    # These are upstream-owned compose files that this script then runs, and
+    # a silent `git pull` means every rerun executes whatever the repository
+    # contains today with nothing recorded about what moved. Pinning is not
+    # available — the whole point is tracking upstream's CVE reproductions —
+    # so the honest substitute is naming the commit before and after, and
+    # keeping it in the log.
+    _before="$(cd "$REPO_DIR" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    print_info "Updating the Vulhub library (currently at $_before)..."
     (cd "$REPO_DIR" && git pull --quiet --recurse-submodules) \
         || print_warn "Could not update — continuing with the copy already on disk."
+    _after="$(cd "$REPO_DIR" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    if [[ "$_before" != "$_after" ]]; then
+        print_warn "Upstream moved: $_before → $_after. You are about to run code that changed."
+        print_info "See what: cd $REPO_DIR && git log --oneline $_before..$_after"
+    else
+        print_info "Already up to date at $_after."
+    fi
 else
     print_info "Fetching the Vulhub library (a shallow clone, roughly 100 MB)..."
     git clone --depth 1 --recurse-submodules --quiet \
@@ -161,7 +176,11 @@ while [[ -z "$SELECTED" ]]; do
     [[ "$query" == "q" ]] && { echo "Nothing started."; exit 0; }
     [[ -n "$query" ]] || continue
 
-    mapfile -t MATCHES < <(printf '%s\n' "${ENVIRONMENTS[@]}" | grep -i -- "$query" || true)
+    # -F: this is a search box, and what a person types into one is a
+    # literal, not a regular expression. Without it a stray `[` or `*` either
+    # errors or matches something they did not ask for — the same
+    # regex-versus-literal trap this project has already paid for twice.
+    mapfile -t MATCHES < <(printf '%s\n' "${ENVIRONMENTS[@]}" | grep -iF -- "$query" || true)
     if (( ${#MATCHES[@]} == 0 )); then
         echo "No environment matches '$query'." >&2
         continue
@@ -201,6 +220,37 @@ else
     echo "$SELECTED"
 fi
 echo "══════════════════════════════════════════════"
+
+# ── What THIS environment asks for, named before you agree to it ─────────
+# The category README warns in general that some Vulhub compose files run
+# privileged or on host networking. A general warning read once is not the
+# same as being told, at the moment of choosing, that the specific thing in
+# front of you does it. These two are the settings that make container
+# escape trivial rather than merely possible:
+#   privileged: true       → effectively root on the host
+#   network_mode: host     → no network isolation at all; the container
+#                            shares the host's stack, so "bound to the
+#                            container" and "bound to your machine" are the
+#                            same thing, and nothing here can bind it to one
+#                            interface
+_danger=""
+if grep -qE '^[[:space:]]*privileged:[[:space:]]*true' "$ENV_DIR/docker-compose.yml" 2>/dev/null; then
+    _danger+="  · privileged: true — this container gets effectively root on the host\n"
+fi
+if grep -qE '^[[:space:]]*network_mode:[[:space:]]*["'\'']?host' "$ENV_DIR/docker-compose.yml" 2>/dev/null; then
+    _danger+="  · network_mode: host — no network isolation; it shares this machine's stack\n"
+fi
+if grep -qE '/var/run/docker\.sock' "$ENV_DIR/docker-compose.yml" 2>/dev/null; then
+    _danger+="  · mounts /var/run/docker.sock — the Docker socket is root on the host\n"
+fi
+if [[ -n "$_danger" ]]; then
+    echo
+    print_warn "THIS environment's compose file asks for more than the others:"
+    printf "%b" "$_danger" >&2
+    print_warn "That is upstream's file and this script does not modify it."
+    print_warn "On a disposable machine this is fine. On anything else it is not."
+fi
+
 echo
 read -rp "Start this environment? (y/N): " start_answer
 [[ "${start_answer,,}" == "y" ]] || { echo "Nothing started."; exit 0; }

@@ -49,6 +49,8 @@ confirm_vulnerable_deploy "OWASP WebGoat"
 mkdir -p "$INSTALL_DIR"
 
 # Deliberately NOT ensure_main_net. This service must never join it.
+# The lab's own shared network instead — see lib/common.sh.
+ensure_seclab_net
 
 # Asks for one of the two ports. $1 = label, $2 = default. Sets SEC_PORT.
 SEC_PORT=""
@@ -113,7 +115,13 @@ EOF
 fi
 
 if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
-    print_info "Existing docker-compose.yml found at $INSTALL_DIR — keeping it (not overwritten). Delete it yourself first if you want the latest version from this repo."
+    # OFFERED, not merely announced. A kept compose from before 2026-08-20
+    # still declares a PER-SERVICE network and carries no cpus limit, so a
+    # deployment left on it silently misses both the shared seclab-net and a
+    # containment measure the category README promises. The operator still
+    # decides; they just have to decide.
+    offer_compose_update "$INSTALL_DIR/docker-compose.yml" "$SOURCE_DIR/docker-compose.yml" \
+        "rm $INSTALL_DIR/docker-compose.yml && bash $0"
 else
     cp "$SOURCE_DIR/docker-compose.yml" "$INSTALL_DIR/docker-compose.yml"
 fi
@@ -124,16 +132,18 @@ ENV_WEBGOAT_PORT=$(read_env_value "WEBGOAT_PORT" "$INSTALL_DIR/.env")
 ENV_WEBWOLF_PORT=$(read_env_value "WEBWOLF_PORT" "$INSTALL_DIR/.env")
 ENV_TZ=$(read_env_value "WEBGOAT_TZ" "$INSTALL_DIR/.env")
 
+# Checked every run, not only on a first install. An empty SECLAB_BIND turns
+# the compose file's bindings into ":8080:8080" — every interface, for
+# deliberately vulnerable software — AND leaves WEBGOAT_HOST/WEBWOLF_HOST
+# empty, so the links between the two apps break too. Fails closed.
+assert_seclab_bind "$ENV_BIND" "WebGoat"
+
+# The compose file now carries a memory limit that always applies; this only
+# RAISES it when you asked for something else. `cpus` is set there too.
 if [[ -n "$ENV_MEM_LIMIT" ]]; then
-    {
-        echo "services:"
-        echo "  webgoat:"
-        echo "    mem_limit: $ENV_MEM_LIMIT"
-    } > "$INSTALL_DIR/docker-compose.override.yml"
-    print_info "Memory limit $ENV_MEM_LIMIT applied to the 'webgoat' container."
-else
-    rm -f "$INSTALL_DIR/docker-compose.override.yml"
+    set_env_value SECLAB_MEM "$ENV_MEM_LIMIT" "$INSTALL_DIR/.env"
 fi
+rm -f "$INSTALL_DIR/docker-compose.override.yml"
 
 pull_with_progress "$INSTALL_DIR" \
     || print_warn "Pull failed — the start below will report the real error."

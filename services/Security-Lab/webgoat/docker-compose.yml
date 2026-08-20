@@ -61,9 +61,22 @@ services:
     # compiler some lessons invoke will blow past a low cap, and the failures
     # look like random lesson errors rather than a resource limit.
     pids_limit: 512
+    # ── Resource limits, and they are NOT optional ───────────────────────
+    # See juice-shop's compose for the full reasoning: the category README
+    # promised `mem_limit` and `cpus`, the prompt made memory optional, and
+    # `cpus` was set nowhere. Defaults that always apply, raised by the
+    # prompt if you ask.
+    #
+    # 1g rather than Juice Shop's 512m: this is a JDK image and several
+    # lessons compile Java at runtime. Too low here does not look like a
+    # memory limit — it looks like a lesson that randomly fails.
+    mem_limit: ${SECLAB_MEM:-1g}
+    cpus: ${SECLAB_CPUS:-2}
     networks:
-      - webgoat-net
+      - seclab-net
 
 networks:
-  webgoat-net:
-    driver: bridge
+  # Shared with the other lab services, not private to this one. See
+  # lib/common.sh, ensure_seclab_net.
+  seclab-net:
+    external: true
