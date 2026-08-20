@@ -146,12 +146,24 @@ services:
     # called it a repair. The probe's own output is what settled it, not
     # the plausible story.
     #
-    # wget, because it is actually IN the image (checked, along with bash,
-    # openssl and a working /dev/tcp; nc and python3 are absent). It is GNU
-    # wget on Ubuntu 24.04, which exits non-zero on an HTTP error response,
-    # so a 404 or 503 fails the check as it should.
+    # ── NO EXTERNAL TOOL AT ALL, and that is the third attempt ───────────
+    # Attempt 1 kept upstream's curl and added a start_period. curl is not in
+    # the image; that would have delayed the same failure by 90 seconds.
+    # Attempt 2 used wget, verified present in v2025.3 — and the `2026`
+    # image ships NEITHER curl NOR wget. The tool inventory is not stable
+    # across this project's own builds, so depending on one is the bug.
+    #
+    # bash IS in both images, and `/dev/tcp` is a bash builtin that needs
+    # nothing installed. This speaks HTTP directly and reads the status line,
+    # so it still asserts that WebGoat ANSWERS rather than merely that a port
+    # is open — which matters here: this container runs two apps in one JVM,
+    # and the real failure seen on 2026-08-20 was WebWolf alive on 9090 while
+    # WebGoat's context had died on 8080.
+    #
+    # ["CMD", "bash", ...] and NOT CMD-SHELL: CMD-SHELL runs /bin/sh, which
+    # on Ubuntu is dash, and dash has no /dev/tcp.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://localhost:8080/WebGoat/actuator/health || exit 1"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /WebGoat/actuator/health HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q ' 200'"]
       interval: 15s
       timeout: 5s
       retries: 5
