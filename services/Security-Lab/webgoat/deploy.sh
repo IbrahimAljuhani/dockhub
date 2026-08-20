@@ -101,7 +101,7 @@ else
     prompt_mem_limit "webgoat" "1g"
 
     cat > "$INSTALL_DIR/.env" <<EOF
-WEBGOAT_VERSION=v2025.3
+WEBGOAT_VERSION=2026
 SECLAB_BIND=$SECLAB_BIND
 WEBGOAT_PORT=$WEBGOAT_PORT_VALUE
 WEBWOLF_PORT=$WEBWOLF_PORT_VALUE
@@ -138,18 +138,37 @@ ENV_TZ=$(read_env_value "WEBGOAT_TZ" "$INSTALL_DIR/.env")
 # empty, so the links between the two apps break too. Fails closed.
 assert_seclab_bind "$ENV_BIND" "WebGoat"
 
-# ── The data directory's name is derived, never typed twice ──────────────
-# WebGoat keeps its database at /home/webgoat/.webgoat-<version-without-v>,
-# so the volume mount in docker-compose.yml has to track WEBGOAT_VERSION. It
-# is computed here rather than written by hand in two places, because two
-# hand-maintained copies of the same version string drift the first time one
-# of them is bumped — and the failure is silent: WebGoat would create a fresh
-# database at the un-mounted path and every completed lesson would appear to
-# have vanished.
-_wg_ver="$(read_env_value "WEBGOAT_VERSION" "$INSTALL_DIR/.env")"
-_wg_ver="${_wg_ver:-v2025.3}"
-set_env_value WEBGOAT_DATA_SUFFIX "${_wg_ver#v}" "$INSTALL_DIR/.env"
-unset _wg_ver
+# ── The data path is PINNED, not derived. This removes a whole trap ──────
+# An earlier version of this script computed a directory suffix from
+# WEBGOAT_VERSION, because WebGoat's own default puts its database at
+# ~/.webgoat-<build version>/. That only works while the image tag and the
+# jar's internal version agree — and nothing guarantees they do, least of
+# all on a tag with no matching source release. A mount at the wrong path
+# fails SILENTLY: the app starts, writes to an unmounted directory, and the
+# lessons vanish at the next recreate.
+#
+# docker-compose.yml now sets WEBGOAT_SERVER_DIRECTORY and
+# WEBGOAT_USER_DIRECTORY to a fixed path instead, so there is nothing to
+# derive and nothing to keep in step. Any leftover key from the old scheme
+# is cleared so it cannot mislead someone reading .env later.
+sed -i '/^WEBGOAT_DATA_SUFFIX=/d' "$INSTALL_DIR/.env" 2>/dev/null || true
+
+# ── Moving off the v2025.3 pin, at the operator's request ────────────────
+# `2026` is what this repo now ships. It is NOT a release: there is no
+# v2026 tag in WebGoat's repository and no release notes to read — it is a
+# build from master that upstream pushed under a year-shaped tag, and a tag
+# like that can be overwritten in place. That is a real trade against the
+# reproducibility a pin normally buys, and it was made deliberately.
+#
+# Only a deployment still sitting on the old default is moved; a version you
+# chose yourself is left exactly as it is.
+if [[ "$(read_env_value WEBGOAT_VERSION "$INSTALL_DIR/.env")" == "v2025.3" ]]; then
+    set_env_value WEBGOAT_VERSION "2026" "$INSTALL_DIR/.env"
+    print_warn "Moved WEBGOAT_VERSION from v2025.3 to 2026 — the newer image upstream"
+    print_warn "publishes. Note it has no matching source release, so there are no"
+    print_warn "release notes and the tag may be rebuilt in place. Pin v2025.3 in"
+    print_warn ".env if you would rather have the last tagged release."
+fi
 
 # The compose file now carries a memory limit that always applies; this only
 # RAISES it when you asked for something else. `cpus` is set there too.

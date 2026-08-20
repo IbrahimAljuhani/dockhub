@@ -114,7 +114,19 @@ cd ~/docker/webgoat
 
 To move to a newer release, bump `WEBGOAT_VERSION` in `.env` and rerun `deploy.sh`.
 
-> 📌 `v2025.3` (March 2025) is genuinely the **latest release**. Development continues on `master`, but upstream hasn't cut a release since — so the pinned image is current, not neglected.
+### Which tag, and what that tag actually is
+
+This deployment ships **`2026`**, and it is worth knowing exactly what you are running, because it is not a normal version pin.
+
+| tag | what it is |
+|---|---|
+| **`2026`** | **shipped here.** An image upstream pushed on 2026-08-14 from their own account, multi-arch, 290 MB. **There is no `2026` or `v2026` release in the WebGoat repository** — no release notes, no source tag to read, and a year-shaped tag like this can be rebuilt in place under the same name. |
+| `v2025.3` | the last **actual release**, March 2025. Reproducible, and seventeen months older. |
+| `latest` | still points at `v2025.3`. Seventeen months stale — which is exactly why this service pins at all. |
+
+Both are defensible. `2026` gets you whatever upstream has merged since; `v2025.3` gets you something you can point at a changelog for. **Set `WEBGOAT_VERSION` in `~/docker/webgoat/.env` and rerun `deploy.sh` to move between them** — your progress follows, because the data path no longer depends on the version.
+
+> ⚠️ Moving to `2026` does **not** fix the broken healthcheck described below. `master`'s Dockerfile still calls `curl`, which the image still lacks; the `wget` override in this deployment is what handles it on either tag.
 
 ---
 
@@ -128,9 +140,9 @@ The distinction matters because [Juice Shop](../juice-shop/) really *does* reset
 
 | | |
 |---|---|
-| **Volume** | `webgoat-data-<version>`, mounted at `/home/webgoat/.webgoat-<version>` |
+| **Volume** | `webgoat-data`, mounted at `/home/webgoat/data` — a **fixed** path, pinned with `WEBGOAT_SERVER_DIRECTORY` |
 | **Backed up by** | the menu's ordinary **4) Backup** — the generic path archives named volumes |
-| **On a version bump** | a **clean** database. The mount path contains the version, so the new volume is new. Your old progress stays in the old volume and comes back if you return to that tag. |
+| **On a version bump** | your progress **carries over**, because the path no longer contains the version. WebGoat’s own default does (`~/.webgoat-<build version>/`), and following it would silently lose data the first time an image tag and the jar’s internal version disagree — so the path is pinned instead of predicted. |
 
 > ⚠️ **Do not "simplify" this to `/home/webgoat`.** `webgoat.jar` lives in that directory, and a volume over it hides the application from its own `ENTRYPOINT` — the container would stop starting at all.
 

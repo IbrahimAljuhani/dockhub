@@ -37,33 +37,36 @@ services:
   # WITHOUT THIS THE APP DOES NOT START. Learned the hard way on
   # 2026-08-20: adding the named volume below broke a working deployment
   # with
-  #   /home/webgoat/.webgoat-2025.3/webgoat.lck (Permission denied)
+  #   webgoat.lck (Permission denied)
   #
   # Docker creates a named volume's mount point owned by ROOT when the path
-  # does not already exist inside the image — and this one does not, because
-  # WebGoat derives it at runtime from user.home and its own version. The
-  # image then runs as the non-root `webgoat` user, which cannot write into
-  # a root-owned directory. The database never opens and Spring dies during
-  # startup.
+  # does not already exist inside the image. The image then runs as a
+  # non-root user, which cannot write into a root-owned directory, so HSQLDB
+  # never opens its lock file and Spring dies during startup.
   #
   # Exactly the same class of bug this project already handles for Flowise
-  # and Langflow, where deploy.sh checks for uid 1000 before starting. The
-  # lesson did not get carried across the first time.
+  # and Langflow, where deploy.sh checks the uid before starting. The lesson
+  # did not get carried across the first time.
   #
-  # Same image, so nothing extra is downloaded, and `webgoat:webgoat`
-  # resolves because the user exists in it. It runs as root, does one
-  # chown, and exits — `service_completed_successfully` below is what makes
-  # the app wait for it.
+  # ⚠️ `webgoat:webgoat` BY NAME, never a number. The recovery command used
+  # while debugging this discovered the container runs as **1001**, not the
+  # 1000 that Flowise and Langflow use — so a hardcoded uid would have set
+  # the wrong owner, left the service broken, and made the diagnosis look
+  # wrong. The name resolves inside the image whatever the number is.
+  #
+  # Same image, so nothing extra is downloaded. It runs as root, creates the
+  # directory and chowns it, then exits —
+  # `service_completed_successfully` below is what makes the app wait.
   webgoat-init:
-    image: webgoat/webgoat:${WEBGOAT_VERSION:-v2025.3}
+    image: webgoat/webgoat:${WEBGOAT_VERSION:-2026}
     container_name: webgoat-init
     user: root
     restart: "no"
     labels:
       dockhub.security-lab: "true"
-    entrypoint: ["sh", "-c", "chown -R webgoat:webgoat /home/webgoat/.webgoat-${WEBGOAT_DATA_SUFFIX:-2025.3}"]
+    entrypoint: ["sh", "-c", "mkdir -p /home/webgoat/data && chown -R webgoat:webgoat /home/webgoat/data"]
     volumes:
-      - webgoat-data:/home/webgoat/.webgoat-${WEBGOAT_DATA_SUFFIX:-2025.3}
+      - webgoat-data:/home/webgoat/data
     networks:
       - seclab-net
 
@@ -71,7 +74,7 @@ services:
     depends_on:
       webgoat-init:
         condition: service_completed_successfully
-    image: webgoat/webgoat:${WEBGOAT_VERSION:-v2025.3}
+    image: webgoat/webgoat:${WEBGOAT_VERSION:-2026}
     container_name: webgoat
     # NOT unless-stopped — a forgotten lab must not return after a reboot.
     restart: "no"
@@ -85,6 +88,27 @@ services:
       # timestamps and misbehave when the container's clock is in a different
       # zone than yours, which reads as a broken lesson.
       TZ: ${WEBGOAT_TZ:-UTC}
+
+      # ── A FIXED data directory, which is the whole point ───────────────
+      # WebGoat's own configuration derives its data path from its build
+      # version:
+      #   webgoat.server.directory = ${user.home}/.webgoat-${webgoat.build.version}/
+      #   spring.datasource.url    = jdbc:hsqldb:file:${webgoat.server.directory}/webgoat
+      #
+      # So out of the box the database moves every time the version changes.
+      # An earlier version of this file tried to follow that by deriving the
+      # path from the image tag — and that only works while the tag and the
+      # jar's internal version agree. They need not: the `2026` tag has no
+      # matching source release at all, so nothing guarantees it calls itself
+      # "2026" internally. A mount at the wrong path fails SILENTLY — the app
+      # starts, writes to an unmounted directory, and every completed lesson
+      # disappears on the next recreate with no error anywhere.
+      #
+      # These two Spring properties are settable as environment variables, so
+      # the path is simply pinned instead of predicted. It no longer depends
+      # on the tag, the release, or anything upstream may rename.
+      WEBGOAT_SERVER_DIRECTORY: /home/webgoat/data
+      WEBGOAT_USER_DIRECTORY: /home/webgoat/data
     ports:
       - "${SECLAB_BIND}:${WEBGOAT_PORT:-8080}:8080"
       - "${SECLAB_BIND}:${WEBWOLF_PORT:-9090}:9090"
@@ -148,32 +172,30 @@ services:
     mem_limit: ${SECLAB_MEM:-1g}
     cpus: ${SECLAB_CPUS:-2}
     # ── Lesson progress, which used to vanish silently ───────────────────
-    # WebGoat writes its HSQLDB to disk INSIDE the container:
-    #   jdbc:hsqldb:file:/home/webgoat/.webgoat-2025.3//webgoat
-    # With no volume, every `docker compose down` or container recreate took
-    # your completed lessons with it — and this service's README used to say
-    # "there is nothing of yours to lose", which was simply wrong. Juice Shop
-    # genuinely does reset by design (in-memory, self-healing); WebGoat does
-    # not, it just had nowhere to keep anything.
+    # WebGoat writes its HSQLDB to disk. With no volume, every
+    # `docker compose down` or container recreate took your completed lessons
+    # with it — and this service's README used to call that intentional, which
+    # it was not. Juice Shop genuinely does reset by design (in-memory,
+    # self-healing); WebGoat simply had nowhere to keep anything.
     #
-    # ⚠️ THE PATH CARRIES THE VERSION NUMBER, and that shapes both lines
-    # below. Mounting /home/webgoat instead would be simpler and would break
-    # the service outright: webgoat.jar lives there, and a volume over it
-    # hides the application from its own ENTRYPOINT.
+    # The path is /home/webgoat/data because the environment block above
+    # PINS it there. It is not WebGoat's own default, which moves with the
+    # version — see the note on WEBGOAT_SERVER_DIRECTORY for why following
+    # that default silently loses data the first time a tag and an internal
+    # version disagree.
     #
-    # The volume NAME carries the version too, so a version bump starts a
-    # clean database rather than handing new code an old schema at a path it
-    # expects to own. Your previous progress stays in the previous volume,
-    # and going back to the old tag finds it again.
+    # ⚠️ Do not "simplify" this to /home/webgoat. webgoat.jar lives in that
+    # directory, and a volume over it hides the application from its own
+    # ENTRYPOINT — the container stops starting at all.
     volumes:
-      - webgoat-data:/home/webgoat/.webgoat-${WEBGOAT_DATA_SUFFIX:-2025.3}
+      - webgoat-data:/home/webgoat/data
 
     networks:
       - seclab-net
 
 volumes:
   webgoat-data:
-    name: webgoat-data-${WEBGOAT_DATA_SUFFIX:-2025.3}
+    name: webgoat-data
 
 networks:
   # Shared with the other lab services, not private to this one. See
