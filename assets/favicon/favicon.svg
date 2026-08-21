@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"
+     role="img" aria-label="DockHub">
+  <title>DockHub</title>
+
+  <!--
+    THE FAVICON. The micro mark on a tile that it brings with it.
+
+    WHY A TILE AND NOT THE BARE MARK. A browser tab is not a neutral surface:
+    it is light in a light theme and dark in a dark one, and the same tab
+    strip changes colour when the user switches. A transparent favicon has to
+    guess which, and guesses wrong half the time. The tile removes the
+    question rather than answering it, exactly as the README lockup does, and
+    for the same reason: nothing of the artwork is behind it.
+
+    So there is no media query in this file and no inherited colour. For a
+    version that follows a page's theme, use mark-micro.svg. Keeping the two
+    apart is deliberate; one file trying to do both is how an icon ends up a
+    colour nobody predicted.
+
+    THE ROUNDING IS THE AVATAR'S. rx 18 of 100 is the same proportion as the
+    avatars' 96 of 512, so the favicon reads as a small sibling of the profile
+    tile rather than a different object. Checked against the geometry: the
+    widest bar runs x 9 to 91 at y 66 to 84, and at y 84 the rounded corner
+    has only reached x 0.11, so no bar is clipped.
+
+    SIZE. This is the file for 27px and below. The tier spec puts the same
+    three bars at 2.9px tall with 1.1px between them at 16px, which is the
+    floor the geometry was designed to hold. Above 27px the hull returns, and
+    the avatars are the tiles that carry it.
+
+    Note for future edits: this is XML, and a comment may not contain two
+    hyphens in a row.
+  -->
+
+  <rect width="100" height="100" rx="18" fill="#0B1417"/>
+
+  <!-- Geometry verbatim from the tier spec in website/mark.html. Do not
+       re-derive it; the taper is 1 : 0.75 : 0.5 and it is load bearing. -->
+  <rect x="9"     y="66" width="82"   height="18" rx="2" fill="#DEE7E7"/>
+  <rect x="19.25" y="41" width="61.5" height="18" rx="2" fill="#DEE7E7"/>
+  <rect x="29.5"  y="16" width="41"   height="18" rx="2" fill="#F0714A"/>
+</svg>

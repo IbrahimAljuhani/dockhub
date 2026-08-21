@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"
+     role="img" aria-label="DockHub">
+  <title>DockHub</title>
+
+  <!--
+    THE MICRO MARK, tier three, standing on its own for the first time.
+
+    Geometry copied verbatim from the tier spec in website/mark.html. It is
+    not re-derived here and must not be: the bars are 82, 61.5 and 41 wide at
+    y 66, 41 and 16, all 18 tall with rx 2. That keeps the 1 : 0.75 : 0.5
+    taper the cargo has as a knock-out inside the hull, so the same geometry
+    survives the change of tier. What changes is that the bars are drawn
+    POSITIVE here rather than cut out of a hull, and that they are enlarged
+    to fill the frame.
+
+    Enlarging is the entire point of the tier, not a stylistic choice. At the
+    hull's own scale a cargo bar measures 1.1px at 16px, which is not a bar.
+    Redrawn at full frame the same three bars are 2.9px tall with 1.1px
+    between them at 16px, which is exactly the margin the compact tier has at
+    its own floor of 28px. No tier is used outside the range its geometry
+    supports.
+
+    Use this at 27px and below. Above that the hull returns.
+
+    COLOURS INHERIT, and this is the one micro file that behaves that way.
+    The pattern is the same two level fallback the web lockup uses: the page's
+    own token first, then a differently named local as the fallback. The local
+    names are deliberately not the page's names, because defining the page's
+    token names in here would override the page and break its light theme.
+    Inlined into a themed document this follows the theme; opened on its own
+    it falls back to the dark palette.
+
+    For anything that gets rasterised, or that lands somewhere with no tokens
+    to inherit, use favicon.svg instead: it paints its own ground and hardcodes
+    everything. Do not merge the two. Inheriting a page's colours and fixing
+    them are opposite requirements.
+
+    Note for future edits: this is XML, and a comment may not contain two
+    hyphens in a row, which is why the token names above are described rather
+    than written.
+  -->
+
+  <style>
+    svg{ --mi-text:#DEE7E7; --mi-signal:#F0714A }
+    .b{ fill:var(--text,   var(--mi-text))   }
+    .s{ fill:var(--signal, var(--mi-signal)) }
+  </style>
+
+  <rect class="b" x="9"     y="66" width="82"   height="18" rx="2"/>
+  <rect class="b" x="19.25" y="41" width="61.5" height="18" rx="2"/>
+  <!-- Signal is the top bar in all three tiers. In a one colour setting the
+       page resolves signal to the ink and the mark still reads. -->
+  <rect class="s" x="29.5"  y="16" width="41"   height="18" rx="2"/>
+</svg>

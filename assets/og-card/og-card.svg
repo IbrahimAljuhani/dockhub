@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630"
+     role="img" aria-label="DockHub — your self-hosted server, simplified">
+  <title>DockHub — your self-hosted server, simplified</title>
+
+  <!--
+    THE SOCIAL PREVIEW CARD. 1200x630, the size every platform asks for.
+
+    WHY THE LOCKUP IS HORIZONTAL HERE and stacked everywhere else. The
+    stacked lockup is 442x295, a ratio of 1.5. This card is 1.91. Dropping
+    the stacked artwork into it leaves two wide columns of empty ground at
+    the sides and a card that looks like a mistake. So the mark moves beside
+    the type instead of above it. Same geometry, same proportions inside the
+    mark, different arrangement, because the frame is a different shape.
+
+    NO COUNT ON THIS CARD, and that is deliberate. "41 services" is the most
+    persuasive line available and it is exactly the line not to put here:
+    every platform caches a preview image and serves the cached copy long
+    after the file changes. A number that goes stale on the site can be
+    corrected in a minute; a number that goes stale in Twitter's and
+    LinkedIn's caches cannot be corrected at all. The card carries only what
+    stays true.
+
+    STATIC, with no animation and no media query. The pulse belongs to the
+    web lockup; this file is rasterised to PNG before anyone sees it, and a
+    rasteriser runs neither. It paints its own ground for the same reason the
+    README variant does: the card is composited onto whatever colour the
+    platform feels like using that month.
+
+    LIVE TEXT, with a caveat worth writing down. Both text lines carry
+    textLength so a machine with different mono metrics cannot push them out
+    of the safe area. What textLength cannot fix is the SHAPE of the glyphs:
+    rasterise this on a machine with no monospace face named below and the
+    wordmark renders in that machine's fallback. For a logotype that is a
+    real difference, so rasterise it once, on one machine, and ship the PNG.
+    Do not regenerate it per platform.
+
+    SAFE AREA. Content spans x 176 to 1025, leaving 176 and 175 of clear
+    ground at the sides and 195 above. Platforms crop this card in ways they
+    do not document and change without notice, so nothing lives near an edge.
+
+    Note for future edits: this is XML, and a comment may not contain two
+    hyphens in a row.
+  -->
+
+  <style>
+    .hl{ fill:#DEE7E7 }
+    .sp{ stroke:#DEE7E7; stroke-width:2.5; stroke-linecap:round; fill:none; opacity:.4 }
+    .nd{ fill:#DEE7E7; opacity:.55 }
+    .sg{ fill:#F0714A }
+
+    .wm, .tag, .url{
+      font-family:ui-monospace, "Cascadia Mono", "SF Mono", "JetBrains Mono",
+                  Menlo, Consolas, monospace;
+    }
+    .wm { font-size:120px; font-weight:600; letter-spacing:-4.2px }
+    .wm-dock{ fill:#DEE7E7 }
+    .wm-hub { fill:#F0714A }
+    .tag { font-size:21px; font-weight:400; letter-spacing:4.5px; fill:#93A7A9 }
+    .url { font-size:19px; font-weight:400; letter-spacing:3.2px; fill:#748A8D }
+  </style>
+
+  <rect width="1200" height="630" fill="#0B1417"/>
+
+  <mask id="og-cargo-rm">
+    <path fill="#fff" d="M50 26 L72 38 L72 62 L50 74 L28 62 L28 38 Z"/>
+    <rect fill="#000" x="36"   y="57.5" width="28" height="7"/>
+    <rect fill="#000" x="39.5" y="46.5" width="21" height="7"/>
+    <rect fill="#000" x="43"   y="35.5" width="14" height="7"/>
+  </mask>
+
+  <!-- Full tier: hull, cargo, six nodes and their spokes. The tier rule is
+       about pixels, not about which file this is, and the mark lands here at
+       240px tall, far above the 48px threshold where nodes start to close up.
+
+       Placement is measured from the RENDERED bounding box, not the 100-unit
+       construction grid: with nodes the artwork occupies x 11 to 89 and
+       y 9 to 91, so a transform framed on the grid would sit visibly high
+       and left. At 2.93x that box becomes 228.5 x 266.6, positioned so its
+       left edge is 176 and its vertical centre is 315. -->
+  <g transform="translate(143.77 168.63) scale(2.93)">
+    <path class="sp" d="M50 26 L50 14"/><path class="sp" d="M72 38 L84 31"/>
+    <path class="sp" d="M72 62 L84 69"/><path class="sp" d="M50 74 L50 86"/>
+    <path class="sp" d="M28 62 L16 69"/><path class="sp" d="M28 38 L16 31"/>
+    <circle class="nd" cx="50" cy="14" r="5"/><circle class="nd" cx="84" cy="31" r="5"/>
+    <circle class="nd" cx="84" cy="69" r="5"/><circle class="nd" cx="50" cy="86" r="5"/>
+    <circle class="nd" cx="16" cy="69" r="5"/><circle class="nd" cx="16" cy="31" r="5"/>
+    <path class="hl" d="M50 26 L72 38 L72 62 L50 74 L28 62 L28 38 Z" mask="url(#og-cargo-rm)"/>
+    <rect class="sg" x="43" y="35.5" width="14" height="7"/>
+  </g>
+
+  <!-- Left-aligned against the mark rather than centred under it: a centred
+       block beside an off-centre mark reads as two unrelated objects. -->
+  <text class="wm" x="465" y="336" textLength="480" lengthAdjust="spacing"
+    ><tspan class="wm-dock">dock</tspan><tspan class="wm-hub">hub</tspan></text>
+
+  <!-- The tagline runs wider than the wordmark above it. That is intended:
+       the two lines share a left edge, which is what makes them one block,
+       and a ragged right edge is what a left-aligned block looks like. -->
+  <text class="tag" x="465" y="384" textLength="560" lengthAdjust="spacing"
+        >your self-hosted server, simplified</text>
+
+  <!-- The address reads as a footer, so it is anchored to the composition's
+       own left margin (176, the mark's left edge) rather than centred. A
+       centred line under an off-centre block has nothing to align to and
+       floats; sharing the margin makes it part of the same layout.
+
+       y=558 clears the crop platforms actually apply: the common 2:1 recrop
+       takes 1200x600 out of the middle and loses 15 units top and bottom, so
+       anything above 615 survives. -->
+  <text class="url" x="176" y="558"
+        textLength="252" lengthAdjust="spacing">dockhub.ia.sa</text>
+</svg>

@@ -7,9 +7,15 @@
 
 <!-- The transparent, theme-adaptive lockup — chosen on sight over the
      panelled variant, which sat as a dark block on a light README. The
-     panelled one is kept as assets/dockhub-lockup-readme.svg for places
-     that need their own ground: social cards, video, slides. -->
-<img src="assets/dockhub-lockup.svg" alt="DockHub — your self-hosted server, simplified" width="420">
+     panelled one is kept at assets/dockhub-lockup-readme/ for places that
+     need their own ground: social cards, video, slides.
+
+     PATH NOTE: every asset now lives in a folder named after it, holding the
+     .svg source and the PNGs rendered from it. This <img> broke silently when
+     that reorganisation happened, because a broken image in a README is not
+     an error anywhere — it just renders as alt text. If you move an asset
+     again, grep the whole repo for "assets/" before you finish. -->
+<img src="assets/dockhub-lockup/dockhub-lockup.svg" alt="DockHub — your self-hosted server, simplified" width="420">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![ShellCheck](https://github.com/IbrahimAljuhani/dockhub/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/IbrahimAljuhani/dockhub/actions/workflows/shellcheck.yml)
@@ -101,7 +107,7 @@ You get a category menu, then a service menu, then a short interview — domain 
 | | |
 |---|---|
 | NGINX Proxy Manager | `admin@example.com` / `changeme` |
-| Portainer | No default — **the first visitor creates the admin account.** Do not leave it reachable before you have |
+| Portainer | No default — **the first visitor creates the admin account.** Reach it and create yours before anyone else can, or close it again until you do |
 
 **Docker is not optional; NPM and Portainer are.** The installer asks about the last two, because a host that only ever uses LAN ports needs neither. It does not ask about Docker — a choice you cannot decline is not a choice.
 
@@ -121,7 +127,7 @@ Each category has its own README explaining what the services are for, how they 
 |---|---|---|
 | 🧠 [**AI**](services/AI/) | Ollama · llama.cpp · LocalAI · Open WebUI | 4/4 |
 | 🤖 [**AI-Agents**](services/AI-Agents/) | OpenClaw · Hermes · OpenHands | 3/3 |
-| 🧩 [**Multi-Agent**](services/Multi-Agent/) | **Paperclip** · **Dify** · **Flowise** · **Langflow** | 4/4 |
+| 🧩 [**Multi-Agent**](services/Multi-Agent/) | Paperclip · Dify · Flowise · Langflow | 4/4 |
 | ⚙️ [**Automation**](services/Automation/) | n8n | 1/1 |
 | 🌐 [**DNS**](services/DNS/) | Pi-hole · AdGuard Home | 2/2 |
 | 🏢 [**ERP**](services/ERP/) | Odoo · ERPNext · Dolibarr | 3/3 |
@@ -162,8 +168,8 @@ Deployment is always a real Compose stack. Nothing is generated behind your back
 | Network | Who is on it | Purpose |
 |---|---|---|
 | **`main-net`** | NGINX Proxy Manager, Portainer, and any service you want proxied | Lets the proxy reach a container **by name** — no IPs, no published ports |
-| **`ai-net`** | Model providers, the [AI-Agents](services/AI-Agents/) services, Open WebUI, Paperclip | Keeps model traffic on its own bridge |
-| **`models-net`** | Model providers, and the [Multi-Agent](services/Multi-Agent/) builders (Dify · Flowise · Langflow) | The same models, reachable **without** reaching the agent services |
+| **`ai-net`** | Model providers, the [AI-Agents](services/AI-Agents/) services, and Paperclip | Keeps model traffic on its own bridge |
+| **`models-net`** | Model providers, Open WebUI, and the [Multi-Agent](services/Multi-Agent/) builders (Dify · Flowise · Langflow) | The same models, reachable **without** reaching the agent services |
 
 A service on `main-net` can be given a domain and a certificate. A service **not** on it is reachable only through an optional host port on your LAN — which is exactly right for anything without a login of its own, and is why several services here default to no proxy at all.
 

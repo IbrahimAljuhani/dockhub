@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="DockHub">
+  <title>DockHub</title>
+  <!--
+    AVATAR — the mark as it really is, sized to fill the frame.
+
+    Two coloured routes were tried and rejected: an accent GROUND, and an
+    accent HULL. Both changed what the mark is in order to make it visible.
+    This one changes nothing about the mark — light hull, dark ground, one
+    small signal bar, exactly as it appears everywhere else in the project.
+    The only lever left is SIZE, so it is pushed all the way: the hull spans
+    86% of the tile instead of the 59% it started at.
+
+    A third variant lifted the ground to the raised surface token (#16282D)
+    to differ in HUE from the near-neutral grey of default avatars. Visible
+    at 64px, measurably nothing at 32px in a feed test, so it was dropped
+    rather than kept as a file nobody could tell apart.
+
+    (Written without the token's real name on purpose: this is XML, and an
+    XML comment may not contain two hyphens in a row. Writing the token as
+    it appears in CSS is what broke this file once already.)
+
+    That is the whole idea. Separation from a column of dark neighbours comes
+    from the AREA of light, not from a colour. At 59% the pale shape was a
+    detail inside a dark square and the square is what the eye saw; at 86%
+    the pale shape IS the tile, and the ground is only the gap between its
+    edges and the corners.
+
+    Safe under a circular crop, which most platforms apply: the hexagon's
+    farthest points sit 220 from centre against a 256 radius, so nothing of
+    the artwork is cut — only ground.
+
+    Same rules as its siblings: no text, so no font dependency and an
+    identical raster on any machine; hull tier only, because the six nodes
+    turn to noise below 48px; hardcoded colours, because rasterisers do not
+    run media queries; one evenodd path with no ids to collide.
+  -->
+  <rect width="512" height="512" rx="96" fill="#0B1417"/>
+  <g transform="translate(-202.5 -202.5) scale(9.17)">
+    <path fill="#DEE7E7" fill-rule="evenodd"
+          d="M50 26 L72 38 L72 62 L50 74 L28 62 L28 38 Z
+             M36 57.5 H64 V64.5 H36 Z
+             M39.5 46.5 H60.5 V53.5 H39.5 Z
+             M43 35.5 H57 V42.5 H43 Z"/>
+    <rect x="43" y="35.5" width="14" height="7" fill="#F0714A"/>
+  </g>
+</svg>

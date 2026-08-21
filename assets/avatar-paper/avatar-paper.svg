@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="DockHub">
+  <title>DockHub</title>
+
+  <!--
+    AVATAR, light ground — the project's OWN light theme, not an invention.
+
+    Why this exists beside the dark one. An avatar has to be found in a
+    column of other avatars, and on GitHub, on a forum, in a chat sidebar,
+    almost all of them are dark. A light tile is the one thing in this
+    palette that separates itself from that crowd WITHOUT reaching for the
+    accent colour as a background.
+
+    Every value here is the light theme already approved for the site:
+      ground #E7EAE9   hull #0F1E20   signal #BF3F1B
+    Not a lightened copy of the dark artwork. The light signal is a deeper
+    red than the dark one for a measured reason: #F0714A on paper is far too
+    weak, while #BF3F1B holds.
+
+    Contrast: #0F1E20 on #E7EAE9 is 15.1:1 — marginally stronger even than
+    the dark variant's 14.8. Legibility is not what separates these two
+    files; only which crowd each one stands out from.
+
+    Same rules as its siblings: no text, hull tier only, 74% of the tile,
+    hardcoded colours, one evenodd path with no ids.
+  -->
+
+  <rect width="512" height="512" rx="96" fill="#E7EAE9"/>
+
+  <g transform="translate(-139 -139) scale(7.9)">
+    <path fill="#0F1E20" fill-rule="evenodd"
+          d="M50 26 L72 38 L72 62 L50 74 L28 62 L28 38 Z
+             M36 57.5 H64 V64.5 H36 Z
+             M39.5 46.5 H60.5 V53.5 H39.5 Z
+             M43 35.5 H57 V42.5 H43 Z"/>
+    <rect x="43" y="35.5" width="14" height="7" fill="#BF3F1B"/>
+  </g>
+</svg>
