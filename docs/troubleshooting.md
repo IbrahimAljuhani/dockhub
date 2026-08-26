@@ -169,7 +169,7 @@ grep -a '^DOMAIN=\|^NETBIRD_DOMAIN=\|^PHOTOPRISM_SITE_URL=\|^WEB_URL=' ~/docker/
 ```
 
 `cat -A` matters: it makes invisible characters visible. A domain that looks
-right but shows something like `vn.ia.sa M-bM-^@M-^F$` picked up a stray
+right but shows something like `vpn.example.com M-bM-^@M-^F$` picked up a stray
 character — most often a directional mark that travels along invisibly when a
 Latin domain is pasted from an Arabic (or other RTL) context. NetBird was the
 first service where this surfaced: the corrupted domain went into OAuth

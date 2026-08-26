@@ -276,7 +276,15 @@ run_with_spinner() {
 detect_os() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
-        case "$ID" in
+        # ${ID:-} , not $ID. Every mainstream distribution sets it, but the
+        # file is not required to and a stripped container image may not.
+        # Under `set -u` a bare $ID would abort the whole script with
+        # "ID: unbound variable" — instead of falling through to the manual
+        # picker below, which is the behaviour the README promises: "if
+        # detection fails you get a manual picker, the install never silently
+        # guesses wrong". ID_LIKE on the next branch was already guarded this
+        # way; this one was not, which is what gave it away.
+        case "${ID:-}" in
             ubuntu)
                 [[ "$(uname -m)" == "aarch64" ]] && echo "ubuntu-arm64" || echo "ubuntu"
                 ;;
@@ -441,15 +449,55 @@ DOCKHUB_ACCESS_METHOD=""
 _read_dockhub_env() {
     local env_file="$REAL_HOME/docker/.dockhub-env"
     [[ -f "$env_file" ]] || return 0
-    DOCKHUB_ENVIRONMENT=$(grep -a '^ENVIRONMENT=' "$env_file" 2>/dev/null | cut -d= -f2)
-    DOCKHUB_ACCESS_METHOD=$(grep -a '^ACCESS_METHOD=' "$env_file" 2>/dev/null | cut -d= -f2)
+    # `tr -d '\r'` because this file is plain text a user may well open in an
+    # editor, and one saved with CRLF yields "tunnel\r", which matches neither
+    # "tunnel" nor anything else — the value looks right in every dump and
+    # silently fails every comparison. Same class as the carriage return that
+    # made a typed `y` get rejected at a prompt. Cheap, and it removes a
+    # failure that is invisible when you go looking for it.
+    DOCKHUB_ENVIRONMENT=$(grep -a '^ENVIRONMENT=' "$env_file" 2>/dev/null | cut -d= -f2 | tr -d '\r')
+    DOCKHUB_ACCESS_METHOD=$(grep -a '^ACCESS_METHOD=' "$env_file" 2>/dev/null | cut -d= -f2 | tr -d '\r')
 }
 
 detect_environment() {
     local env_file="$REAL_HOME/docker/.dockhub-env"
     # Already answered on a previous run: load it rather than returning blind.
     # The early return here is why every later warning in this file was generic.
-    [[ -f "$env_file" ]] && { _read_dockhub_env; return 0; }
+    #
+    # And SAY what was loaded. Neither "Reset" nor "Reconfigure" re-asks these
+    # — this return fires first — and nothing in the project documented how to
+    # change them. Someone who moves from direct exposure to a tunnel, or the
+    # other way, would otherwise keep getting advice for an architecture they
+    # no longer run, including the default for where NPM's admin panel listens.
+    # These answers are inputs to everything printed below, so show them.
+    if [[ -f "$env_file" ]]; then
+        _read_dockhub_env
+        if [[ -n "$DOCKHUB_ENVIRONMENT" ]]; then
+            print_info "Using your saved answers: ${DOCKHUB_ENVIRONMENT}${DOCKHUB_ACCESS_METHOD:+ / $DOCKHUB_ACCESS_METHOD}"
+            print_info "  Changed setup? Delete $env_file and rerun to answer again."
+        fi
+        return 0
+    fi
+
+    # No terminal: ask nothing, record nothing, and say so.
+    #
+    # The questions below now re-ask until they get a valid answer, which is
+    # right at a keyboard and a hang anywhere else — `read` returns immediately
+    # at EOF, the answer is empty, and the loop spins forever. This script is
+    # meant to survive `curl ... | bash`, so that would be a hang on the very
+    # first prompt. prompt_yes_no has guarded this from the start; these loops
+    # were added later and did not copy it.
+    #
+    # Writing nothing is deliberate: an empty ENVIRONMENT recorded now would
+    # look answered forever, because this function returns early whenever the
+    # file exists. Leaving it absent means the next interactive run still asks.
+    # Every later branch already treats "unknown" as its neutral case —
+    # lib/common.sh states that rule for this exact value.
+    if [[ ! -t 0 ]]; then
+        print_info "No terminal attached — skipping the one-time environment questions."
+        print_info "They only shape advice; run this interactively to record them."
+        return 0
+    fi
 
     dockhub_ask "One-time setup question: what kind of server is this?"
     dockhub_item 1 "Home server (behind a home router — no public IP guaranteed)"
@@ -470,21 +518,41 @@ detect_environment() {
         esac
     done
 
+    # ASKED FOR BOTH ENVIRONMENTS, and it used to be asked only for "home".
+    #
+    # That single `if` was the root of several wrong answers. It meant a VPS
+    # could never record ACCESS_METHOD=tunnel, so the 31 service scripts that
+    # end their summary with print_tunnel_reminder_if_relevant() were no-ops
+    # for every VPS user — and this script, having no way to tell a tunnelled
+    # host from a directly exposed one, assumed the second and told everyone to
+    # open ports.
+    #
+    # The assumption is simply wrong. A tunnel is not a workaround for lacking
+    # a public IP; on a VPS that has one it is the stronger option, because it
+    # is the only way to have no inbound port at all — which also happens to be
+    # the only arrangement Docker cannot publish its way past.
+    dockhub_ask "How do you plan to reach your services from the internet?"
     if [[ "$environment" == "home" ]]; then
-        dockhub_ask "How do you plan to reach your services from the internet?"
         dockhub_item 1 "Port forwarding (forward 80/443 on your router to this server)"
-        dockhub_item 2 "Cloudflare Tunnel (no port forwarding needed)"
-        local sub
-        while true; do
-            read -rp "Choice [ 1-2 ]: " sub || sub=""
-            sub="${sub//$'\r'/}"; sub="${sub//[[:space:]]/}"
-            case "$sub" in
-                1) access_method="port_forward"; break ;;
-                2) access_method="tunnel";       break ;;
-                *) print_warn "Please answer 1 or 2." ;;
-            esac
-        done
+    else
+        dockhub_item 1 "Directly (this host's public IP, with ports open to the internet)"
     fi
+    dockhub_item 2 "Cloudflare Tunnel (no inbound ports opened at all)"
+    local sub
+    while true; do
+        read -rp "Choice [ 1-2 ]: " sub || sub=""
+        sub="${sub//$'\r'/}"; sub="${sub//[[:space:]]/}"
+        case "$sub" in
+            # "port_forward" for home, "direct" for a VPS: the same answer means
+            # different work, and a VPS forwards nothing. Only "tunnel" is read
+            # by anything today, but a value that lies is a trap for whoever
+            # adds the next reader.
+            1) [[ "$environment" == "home" ]] && access_method="port_forward" \
+                                              || access_method="direct"; break ;;
+            2) access_method="tunnel"; break ;;
+            *) print_warn "Please answer 1 or 2." ;;
+        esac
+    done
 
     cat > "$env_file" <<EOF
 ENVIRONMENT=$environment
@@ -497,22 +565,45 @@ EOF
     DOCKHUB_ACCESS_METHOD="$access_method"
     print_ok "Saved to $env_file — shapes the advice this script and the services/ deploy.sh scripts give you."
 
-    if [[ "$environment" == "home" && "$access_method" == "port_forward" ]]; then
+    # Branch on the ACCESS METHOD first, because it decides how many ports are
+    # open — which is the thing all of this advice is actually about. The
+    # environment then only changes the wording.
+    echo
+    if [[ "$access_method" == "tunnel" ]]; then
+        print_info "Cloudflare Tunnel: 'cloudflared' dials OUT, so no inbound port is opened"
+        print_info "at all. Install and configure it yourself — not automated here."
         echo
+        print_info "  Route every hostname to NPM itself: Service URL 'http://localhost:80',"
+        print_info "  never straight at a service's container. NPM reads the hostname and"
+        print_info "  decides where it goes — that is its whole job."
+        print_warn "  And leave Force SSL OFF on tunnel-routed Proxy Hosts. cloudflared"
+        print_warn "  delivers plain HTTP by design; forcing a redirect fights Cloudflare's"
+        print_warn "  own HTTPS and surfaces as '400 Request Header Or Cookie Too Large'."
+        echo
+        if [[ "$environment" == "vps" ]]; then
+            # The real prize, and the reason a tunnel beats a firewall here: with
+            # nothing bound to an external interface, Docker has nothing to
+            # publish past ufw, and there is no allow-list to keep correct.
+            print_info "  On a VPS this is the strongest posture available: your provider's"
+            print_info "  firewall needs SSH and nothing else. Once it works, bind NPM to"
+            print_info "  loopback in ~/docker/npm/docker-compose.yml as well —"
+            print_info "  '127.0.0.1:80:80' and '127.0.0.1:81:81', dropping 443 — and reach"
+            print_info "  the admin panel over an SSH tunnel:"
+            echo "     ssh -L 8181:127.0.0.1:81 $REAL_USER@<this-server>"
+            print_info "  A port bound to loopback is not blocked; it is not there."
+        fi
+        print_info "  See docs/cloudflare-tunnel.md."
+
+    elif [[ "$environment" == "home" ]]; then
         print_warn "Remember to forward ports 80 and 443 on your router to this server's LAN IP."
         print_warn "No static public IP from your ISP? You'll also need Dynamic DNS."
-    elif [[ "$environment" == "home" && "$access_method" == "tunnel" ]]; then
-        echo
-        print_info "You'll need to install and configure 'cloudflared' yourself (not automated here)."
-        print_info "When routing a service's domain in Cloudflare Tunnel, point it at THIS server, port 80 (NGINX Proxy Manager) — not directly at the service — and leave Force SSL OFF on that Proxy Host in NPM. See docs/cloudflare-tunnel.md."
-    elif [[ "$environment" == "vps" ]]; then
-        # There was no branch here at all. Home got two, VPS got silence —
-        # the one environment with no NAT in front of it and the highest cost
-        # for a wrong default. This is the posture the project actually
-        # recommends, stated once, at the moment the user declares the host.
-        echo
-        print_info "On a VPS, every published port is the public internet. The posture that"
-        print_info "follows from that, and what the rest of this run will assume:"
+
+    else
+        # VPS, exposed directly. There was no branch here at all until now: home
+        # got two, and the one environment with no NAT in front of it got
+        # silence.
+        print_info "Exposed directly, every published port is the public internet. The"
+        print_info "posture that follows, and what the rest of this run assumes:"
         echo
         print_info "  Open exactly three: 80 and 443 for NGINX Proxy Manager to proxy and to"
         print_info "  issue certificates, and 81 for its admin panel. Nothing else."
@@ -582,6 +673,53 @@ run_core_install() {
     else
         INSTALL_NPM="n"
         print_info "  Skipped. Services will be reachable by host port only."
+    fi
+
+    # ── Where NPM's admin panel listens ──────────────────────────────────────
+    #
+    # This was published on every interface unconditionally, and never asked
+    # about. Portainer — which is harder to abuse, because an attacker still has
+    # to claim an account nobody has created — gets a whole paragraph, a default
+    # of no, and a warning. NPM's admin panel ships with admin@example.com /
+    # changeme, a pair printed in this project's own documentation, and got one
+    # line telling you to change it later.
+    #
+    # There are deliberately only two answers, not three. "No port at all" is
+    # the option that looks safest and is unusable: you cannot proxy the admin
+    # panel behind NPM without first reaching the admin panel to configure it.
+    # Loopback is the honest floor — invisible to every network, still reachable
+    # over SSH, and it can never lock you out.
+    NPM_ADMIN_BIND=""
+    # Initialised here, not where it is measured. It is assigned inside the
+    # install block, which `check_ports_or_warn` can skip entirely when a port
+    # is already taken — while INSTALL_NPM stays "y", so the summary still reads
+    # it. Under `set -Eeuo pipefail` an unset read aborts the run, and it would
+    # abort at the summary: work finished, then the script dies reporting it.
+    # That is the exact failure this script already shipped once.
+    NPM_ADMIN_BOUND=""
+    if [[ "$INSTALL_NPM" == "y" ]]; then
+        echo
+        local admin_default="y"
+        if [[ "$DOCKHUB_ACCESS_METHOD" == "tunnel" ]]; then
+            # Nothing needs to reach it over the network: cloudflared talks to
+            # NPM over loopback, and the panel itself goes behind a Proxy Host.
+            admin_default="n"
+            print_info "  You chose a tunnel, so nothing needs to reach this host directly."
+        elif [[ "$DOCKHUB_ENVIRONMENT" == "vps" ]]; then
+            print_warn "  NPM's admin panel ships with admin@example.com / changeme, and on a"
+            print_warn "  VPS a published port is the public internet. Those credentials are"
+            print_warn "  in this project's README — assume they are already known."
+        fi
+        print_info "  Saying no binds it to 127.0.0.1, reachable only over an SSH tunnel:"
+        echo "     ssh -L 8181:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@<this-server>"
+        if prompt_yes_no "  Publish NPM's admin panel (port $NPM_ADMIN_PORT) on this host's interfaces?" "$admin_default"; then
+            NPM_ADMIN_BIND=""
+            [[ "$DOCKHUB_ENVIRONMENT" == "vps" ]] && \
+                print_warn "  Published. Change those credentials before you do anything else."
+        else
+            NPM_ADMIN_BIND="127.0.0.1:"
+            print_ok "  Admin panel bound to 127.0.0.1 only."
+        fi
     fi
     if prompt_yes_no "  Install Portainer CE? (web view of your containers)" y; then
         INSTALL_PORTAINER="y"
@@ -704,7 +842,13 @@ services:
     ports:
       - '$NPM_HTTP_PORT:80'
       - '$NPM_HTTPS_PORT:443'
-      - '$NPM_ADMIN_PORT:81'
+      # 80 and 443 stay on every interface: they are how NPM proxies and how
+      # Let's Encrypt validates. The admin panel is a separate question, and
+      # NPM_ADMIN_BIND carries the answer — empty for every interface, or
+      # '127.0.0.1:' for loopback only. Change it here and recreate the
+      # container; editing the mapping needs a new one, so 'up -d' alone will
+      # report Started and change nothing. Use --force-recreate.
+      - '$NPM_ADMIN_BIND$NPM_ADMIN_PORT:81'
     volumes:
       - ./data:/data
       - ./letsencrypt:/etc/letsencrypt
@@ -738,6 +882,26 @@ YAML
             print_ok "NGINX Proxy Manager is running."
         else
             print_warn "NPM started but no running container detected. Check: (cd $NPM_DIR && docker compose logs)"
+        fi
+
+        # Verify what was actually published rather than trusting the answer
+        # given a minute ago. An existing docker-compose.yml is reused, never
+        # overwritten — deliberately, so manual edits survive — which means a
+        # rerun can accept "bind it to loopback" and change nothing at all.
+        # Portainer has carried this check for a while; the admin panel, which
+        # ships with published credentials, had none.
+        NPM_ADMIN_BOUND=$(docker port npm-app-1 "81/tcp" 2>/dev/null | tr '\n' ' ' || true)
+        if [[ -n "$NPM_ADMIN_BIND" && "$NPM_ADMIN_BOUND" == *"0.0.0.0"* ]]; then
+            print_warn "You asked for the admin panel on loopback, but it is published on:"
+            print_warn "  $NPM_ADMIN_BOUND"
+            print_warn "That came from the existing $NPM_DIR/docker-compose.yml, which is kept"
+            print_warn "rather than overwritten. Change the '81' line to '127.0.0.1:$NPM_ADMIN_PORT:81' and run:"
+            echo   "     cd $NPM_DIR && docker compose up -d --force-recreate"
+            print_warn "  A port change needs a NEW container — 'up -d' alone reports Started and does nothing."
+        elif [[ -z "$NPM_ADMIN_BIND" && "$NPM_ADMIN_BOUND" == *"127.0.0.1"* ]]; then
+            print_warn "You asked for the admin panel to be published, but it is bound to loopback."
+            print_warn "That also came from the kept $NPM_DIR/docker-compose.yml."
+            print_info "  Reach it meanwhile with: ssh -L 8181:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@<this-server>"
         fi
     else
         print_warn "Skipping NPM installation due to port conflicts."
@@ -937,7 +1101,22 @@ ALL_IPS=$(hostname -I 2>/dev/null \
 
 if [[ "${INSTALL_NPM,,}" == "y" ]]; then
     echo "-> NGINX Proxy Manager:"
-    echo "   URL:      http://$SERVER_IP:$NPM_ADMIN_PORT"
+    # Branch on the binding that was actually written, not on the environment
+    # or the access method. Those only supplied the default; the user may have
+    # answered against it, and a summary that prints http://<ip>:81 for a
+    # loopback-bound panel hands out a dead link at the exact moment someone
+    # has to change a default password — which is how it stops being changed.
+    # Prefer the MEASURED binding over the answer. They can disagree — a kept
+    # docker-compose.yml wins over anything asked this run — and the summary
+    # must describe the server that exists, not the one that was requested.
+    if [[ "$NPM_ADMIN_BOUND" == *"127.0.0.1"* ]] \
+       || { [[ -z "$NPM_ADMIN_BOUND" ]] && [[ -n "$NPM_ADMIN_BIND" ]]; }; then
+        echo "   Bound to 127.0.0.1 — reach it over an SSH tunnel:"
+        echo "     ssh -L 8181:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@$SERVER_IP"
+        echo "   then open http://localhost:8181"
+    else
+        echo "   URL:      http://$SERVER_IP:$NPM_ADMIN_PORT"
+    fi
     echo "   Username: admin@example.com"
     echo "   Password: changeme"
     print_warn "Change the default NPM credentials immediately after first login."

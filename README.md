@@ -98,7 +98,7 @@ You get a category menu, then a service menu, then a short interview — domain 
 | | Purpose | Reached at |
 |---|---|---|
 | **Docker CE + Compose** | Installed for your distribution, or skipped if already present | — |
-| **NGINX Proxy Manager** | Routes domains to containers, issues Let's Encrypt certificates | `:81` admin |
+| **NGINX Proxy Manager** | Routes domains to containers, issues Let's Encrypt certificates | `:81` admin — **you are asked where it listens**, see below |
 | **Portainer CE** | A web view of every container, volume and network | **no host port by default** — see below |
 | **`main-net`** | The shared bridge network the proxy and your services meet on | — |
 
@@ -115,7 +115,11 @@ You get a category menu, then a service menu, then a short interview — domain 
 
 > The same rule already removed the host-port option from [Vaultwarden](services/Security/vaultwarden/) outright. Portainer is the more dangerous of the two and kept its ports open for longer than it should have.
 
-The installer also asks, once, whether this is a **home server or a VPS**, and how you intend to reach it from outside — port forwarding or Cloudflare Tunnel. The answer is remembered in `~/docker/.dockhub-env` and shapes the advice every later script gives you.
+**NPM's admin panel is asked about too, and it took even longer.** Port `81` was published on every interface unconditionally, with `admin@example.com` / `changeme` — a pair printed in this very file, so treat it as already known. The installer now asks, and the two answers are *every interface* or *`127.0.0.1` only*, reached over `ssh -L 8181:127.0.0.1:81 <user>@<server>`. It defaults to loopback when you say you are using a Cloudflare Tunnel, and warns loudly on a directly exposed VPS.
+
+There is deliberately no "no port at all" option: you cannot put the admin panel behind NPM without first reaching the admin panel to configure it. Loopback is the honest floor — invisible to every network, and it can never lock you out.
+
+The installer also asks, once, whether this is a **home server or a VPS**, and how you intend to reach it from outside — port forwarding (or, on a VPS, direct exposure) versus **Cloudflare Tunnel**. Both questions are asked in both cases: a tunnel is not only a workaround for lacking a public IP, and on a VPS it is the stronger option, being the only arrangement with no inbound port at all. The answers are remembered in `~/docker/.dockhub-env` and shape the advice this installer and every later script give you — which ports to open, where NPM's admin panel should listen, and what the closing summary tells you to visit.
 
 ---
 
@@ -189,6 +193,8 @@ One tree, so the whole host is one backup target:
 ~/docker/
 ├── install_dockhub.log        # the installer's log, rotated on rerun
 ├── .dockhub-env               # your one-time home/VPS + access answers
+│                              #   delete it and rerun the installer to change them —
+│                              #   neither Reset nor Reconfigure re-asks
 ├── npm/                       # NGINX Proxy Manager: compose, data, certs
 ├── portainer/                 # compose (its data is a named volume, kept on rerun)
 ├── backups/

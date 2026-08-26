@@ -1014,12 +1014,28 @@ detect_seclab_bind() {
 
 # ── Environment detection (home vs VPS) ─────────────────────────────────
 # Reads ~/docker/.dockhub-env, written once by install_dockhub.sh on first
-# core-infra install. Sets DOCKHUB_ENVIRONMENT ("home"/"vps") and
-# DOCKHUB_ACCESS_METHOD ("tunnel"/"port_forward") in the caller's shell —
-# both empty if the file doesn't exist (standalone curl users who never ran
-# install_dockhub.sh). Callers must treat "empty" as "unknown", never assume
-# "vps" as a default — this only ever adds an extra reminder, it must never
-# gate whether a deploy works.
+# core-infra install. Sets, in the caller's shell:
+#
+#   DOCKHUB_ENVIRONMENT     "home" | "vps"
+#   DOCKHUB_ACCESS_METHOD   "tunnel" | "port_forward" | "direct"
+#
+# "port_forward" only ever accompanies "home" and "direct" only ever
+# accompanies "vps" — the same answer means different work, and a VPS forwards
+# nothing. "tunnel" can accompany either: install_dockhub.sh offers it to both,
+# because a tunnel is not a workaround for lacking a public IP. On a VPS that
+# has one it is the stronger option, being the only arrangement with no inbound
+# port at all — which is also the only one Docker cannot publish past a host
+# firewall. Anything matching on this value should test for "tunnel"
+# specifically rather than treating "not port_forward" as meaning it.
+#
+# Both are empty when the file does not exist — a standalone `curl` user who
+# never ran install_dockhub.sh, or a run with no terminal attached, where the
+# questions are skipped and nothing is recorded rather than a blank being
+# written that would look answered forever.
+#
+# Callers must treat "empty" as "unknown", never assume "vps" as a default —
+# this only ever adds an extra reminder, it must never gate whether a deploy
+# works.
 DOCKHUB_ENVIRONMENT=""
 DOCKHUB_ACCESS_METHOD=""
 read_dockhub_env() {
@@ -1027,8 +1043,11 @@ read_dockhub_env() {
     DOCKHUB_ENVIRONMENT=""
     DOCKHUB_ACCESS_METHOD=""
     [[ -f "$env_file" ]] || return 0
-    DOCKHUB_ENVIRONMENT=$(grep -a '^ENVIRONMENT=' "$env_file" 2>/dev/null | cut -d= -f2)
-    DOCKHUB_ACCESS_METHOD=$(grep -a '^ACCESS_METHOD=' "$env_file" 2>/dev/null | cut -d= -f2)
+    # `tr -d '\r'` — a CRLF-saved file yields "tunnel\r", which matches nothing
+    # while looking correct in every dump. Kept identical to the duplicate of
+    # this reader inside install_dockhub.sh (which cannot source this file).
+    DOCKHUB_ENVIRONMENT=$(grep -a '^ENVIRONMENT=' "$env_file" 2>/dev/null | cut -d= -f2 | tr -d '\r')
+    DOCKHUB_ACCESS_METHOD=$(grep -a '^ACCESS_METHOD=' "$env_file" 2>/dev/null | cut -d= -f2 | tr -d '\r')
 }
 
 # Call at the end of a service's post-deploy summary, after printing the
