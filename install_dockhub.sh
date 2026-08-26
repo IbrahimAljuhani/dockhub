@@ -455,21 +455,35 @@ detect_environment() {
     dockhub_item 1 "Home server (behind a home router — no public IP guaranteed)"
     dockhub_item 2 "VPS / cloud server (has a public IP)"
     local choice environment access_method=""
-    read -rp "Choice [ 1-2 ]: " choice || choice=""
-    if [[ "$choice" == "1" ]]; then
-        environment="home"
+    # Re-ask rather than falling through. This was `if 1 then home; else vps`,
+    # so a bare Enter, a typo, or a "3" silently classified the host as a VPS
+    # — and lib/common.sh's own note on this file says callers must treat an
+    # unknown value as unknown and "never assume vps as a default". The rule
+    # was being broken at the source that writes the file.
+    while true; do
+        read -rp "Choice [ 1-2 ]: " choice || choice=""
+        choice="${choice//$'\r'/}"; choice="${choice//[[:space:]]/}"
+        case "$choice" in
+            1) environment="home"; break ;;
+            2) environment="vps";  break ;;
+            *) print_warn "Please answer 1 or 2." ;;
+        esac
+    done
+
+    if [[ "$environment" == "home" ]]; then
         dockhub_ask "How do you plan to reach your services from the internet?"
         dockhub_item 1 "Port forwarding (forward 80/443 on your router to this server)"
         dockhub_item 2 "Cloudflare Tunnel (no port forwarding needed)"
         local sub
-        read -rp "Choice [ 1-2 ]: " sub || sub=""
-        if [[ "$sub" == "2" ]]; then
-            access_method="tunnel"
-        else
-            access_method="port_forward"
-        fi
-    else
-        environment="vps"
+        while true; do
+            read -rp "Choice [ 1-2 ]: " sub || sub=""
+            sub="${sub//$'\r'/}"; sub="${sub//[[:space:]]/}"
+            case "$sub" in
+                1) access_method="port_forward"; break ;;
+                2) access_method="tunnel";       break ;;
+                *) print_warn "Please answer 1 or 2." ;;
+            esac
+        done
     fi
 
     cat > "$env_file" <<EOF
@@ -491,6 +505,27 @@ EOF
         echo
         print_info "You'll need to install and configure 'cloudflared' yourself (not automated here)."
         print_info "When routing a service's domain in Cloudflare Tunnel, point it at THIS server, port 80 (NGINX Proxy Manager) — not directly at the service — and leave Force SSL OFF on that Proxy Host in NPM. See docs/cloudflare-tunnel.md."
+    elif [[ "$environment" == "vps" ]]; then
+        # There was no branch here at all. Home got two, VPS got silence —
+        # the one environment with no NAT in front of it and the highest cost
+        # for a wrong default. This is the posture the project actually
+        # recommends, stated once, at the moment the user declares the host.
+        echo
+        print_info "On a VPS, every published port is the public internet. The posture that"
+        print_info "follows from that, and what the rest of this run will assume:"
+        echo
+        print_info "  Open exactly three: 80 and 443 for NGINX Proxy Manager to proxy and to"
+        print_info "  issue certificates, and 81 for its admin panel. Nothing else."
+        print_info "  Every other service — Portainer included — takes NO host port. It joins"
+        print_info "  'main-net', and NPM reaches it by container name behind HTTPS."
+        echo
+        print_warn "Port 81 is the admin panel, and it ships with admin@example.com / changeme."
+        print_warn "On this host that pair is reachable from the internet the moment NPM starts."
+        print_warn "Change it before you do anything else."
+        echo
+        print_info "  And note ufw will not enforce any of this: Docker publishes past it."
+        print_info "  Use your provider's firewall, or DOCKER-USER rules. See"
+        print_info "  docs/troubleshooting.md."
     fi
 }
 
@@ -944,12 +979,35 @@ echo "Log file: $LOGFILE"
 echo
 
 # Firewalld hint (Docker bypasses ufw via DOCKER-USER, but firewalld can still block).
+#
+# This printed one suggestion to everyone, which on a VPS amounted to telling
+# the user to open the NPM admin panel — and its published default credentials
+# — to the internet, with no caveat. The advice now follows the environment
+# they declared.
 if systemctl is-active --quiet firewalld 2>/dev/null; then
     print_warn "firewalld is active. If you cannot reach the services, open the ports, e.g.:"
-    [[ "${INSTALL_NPM,,}" == "y" ]] && \
-        echo "   sudo firewall-cmd --permanent --add-port=$NPM_HTTP_PORT/tcp --add-port=$NPM_HTTPS_PORT/tcp --add-port=$NPM_ADMIN_PORT/tcp"
-    [[ "${INSTALL_PORTAINER,,}" == "y" && "$PORTAINER_PUBLISH" == "y" ]] && \
-        echo "   sudo firewall-cmd --permanent --add-port=$PORTAINER_HTTP_PORT/tcp --add-port=$PORTAINER_HTTPS_PORT/tcp"
+    if [[ "${INSTALL_NPM,,}" == "y" ]]; then
+        if [[ "$DOCKHUB_ENVIRONMENT" == "vps" ]]; then
+            # 80/443 must be public: that is how NPM proxies and how ACME
+            # validates. The admin panel is a different question entirely.
+            echo "   sudo firewall-cmd --permanent --add-port=$NPM_HTTP_PORT/tcp --add-port=$NPM_HTTPS_PORT/tcp"
+            print_warn "  Port $NPM_ADMIN_PORT is the ADMIN PANEL, shipping admin@example.com / changeme."
+            print_warn "  Restrict it to your own address rather than opening it:"
+            echo "   sudo firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=YOUR.IP.HERE port port=$NPM_ADMIN_PORT protocol=tcp accept'"
+            echo "   # or open nothing and tunnel:  ssh -L $NPM_ADMIN_PORT:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@$SERVER_IP"
+        else
+            echo "   sudo firewall-cmd --permanent --add-port=$NPM_HTTP_PORT/tcp --add-port=$NPM_HTTPS_PORT/tcp --add-port=$NPM_ADMIN_PORT/tcp"
+        fi
+    fi
+    if [[ "${INSTALL_PORTAINER,,}" == "y" && "$PORTAINER_PUBLISH" == "y" ]]; then
+        if [[ "$DOCKHUB_ENVIRONMENT" == "vps" ]]; then
+            print_warn "  Portainer is published on a VPS. It holds the Docker socket, so do not"
+            print_warn "  open it — put it behind NPM. Rerun this script, pick Reconfigure, and"
+            print_warn "  answer no to publishing its ports."
+        else
+            echo "   sudo firewall-cmd --permanent --add-port=$PORTAINER_HTTP_PORT/tcp --add-port=$PORTAINER_HTTPS_PORT/tcp"
+        fi
+    fi
     echo "   sudo firewall-cmd --reload"
 fi
 
