@@ -117,6 +117,18 @@ chown "$REAL_USER":"$REAL_GROUP" "$REAL_HOME/docker" 2>/dev/null || true
 
 LOGFILE="$REAL_HOME/docker/install_dockhub.log"
 
+# This host's address, resolved once, so every `ssh -L` recipe printed further
+# down carries a real address instead of a "<this-server>" placeholder the
+# reader has to fill in by hand. A command printed to be copied should be
+# copyable; a placeholder in one is a step you left for the user.
+#
+# Resolved here rather than at each use because the first of those is inside
+# detect_environment(), long before the summary computes SERVER_IP.
+# `|| true` plus the `:=` default: this only ever decorates a printed line, and
+# nothing that decorates output may be able to fail the run under `set -u`.
+_THIS_HOST="$(_host_lan_ip 2>/dev/null || true)"
+: "${_THIS_HOST:=<this-server>}"
+
 # --- Color codes ---
 INFO='\033[0;36m'
 OK='\033[0;32m'
@@ -589,7 +601,7 @@ EOF
             print_info "  loopback in ~/docker/npm/docker-compose.yml as well —"
             print_info "  '127.0.0.1:80:80' and '127.0.0.1:81:81', dropping 443 — and reach"
             print_info "  the admin panel over an SSH tunnel:"
-            echo "     ssh -L 8181:127.0.0.1:81 $REAL_USER@<this-server>"
+            echo "     ssh -L 8181:127.0.0.1:81 $REAL_USER@$_THIS_HOST"
             print_info "  A port bound to loopback is not blocked; it is not there."
         fi
         print_info "  See docs/cloudflare-tunnel.md."
@@ -711,7 +723,7 @@ run_core_install() {
             print_warn "  in this project's README — assume they are already known."
         fi
         print_info "  Saying no binds it to 127.0.0.1, reachable only over an SSH tunnel:"
-        echo "     ssh -L 8181:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@<this-server>"
+        echo "     ssh -L 8181:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@$_THIS_HOST"
         if prompt_yes_no "  Publish NPM's admin panel (port $NPM_ADMIN_PORT) on this host's interfaces?" "$admin_default"; then
             NPM_ADMIN_BIND=""
             [[ "$DOCKHUB_ENVIRONMENT" == "vps" ]] && \
@@ -901,7 +913,7 @@ YAML
         elif [[ -z "$NPM_ADMIN_BIND" && "$NPM_ADMIN_BOUND" == *"127.0.0.1"* ]]; then
             print_warn "You asked for the admin panel to be published, but it is bound to loopback."
             print_warn "That also came from the kept $NPM_DIR/docker-compose.yml."
-            print_info "  Reach it meanwhile with: ssh -L 8181:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@<this-server>"
+            print_info "  Reach it meanwhile with: ssh -L 8181:127.0.0.1:$NPM_ADMIN_PORT $REAL_USER@$_THIS_HOST"
         fi
     else
         print_warn "Skipping NPM installation due to port conflicts."
