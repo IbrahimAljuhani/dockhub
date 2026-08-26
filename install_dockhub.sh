@@ -62,6 +62,34 @@ PORTAINER_EDGE_PORT="${PORTAINER_EDGE_PORT:-8000}"
 _valid_image() { [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]*:[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; }
 _valid_port()  { [[ "$1" =~ ^[0-9]+$ ]] && (( 10#$1 > 0 && 10#$1 < 65536 )); }
 
+# The host's LAN address, for the summary this script prints at the end.
+#
+# THIS IS A DELIBERATE DUPLICATE of host_lan_ip() in lib/common.sh, and it has
+# to be. This file does not source that library — see the note above the banner
+# for why: lib/common.sh redefines every print_* with a different format and a
+# different stream, and this script must also run from a bare `curl` with no
+# repo beside it. A shared helper it cannot reach is not a shared helper.
+#
+# It went missing exactly that way. A repo-wide rollout replaced this idiom
+# with a call to host_lan_ip in all 40-odd files that DO source the library,
+# and in this one, which does not. `bash -n` accepts a call to an undefined
+# function, so nothing caught it until a real install died at the last line
+# with "host_lan_ip: command not found" — after the install had succeeded.
+#
+# If you change the logic here, change lib/common.sh:host_lan_ip too.
+_host_lan_ip() {
+    local ip
+    ip="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*[[:space:]]src[[:space:]]\+\([0-9.]\+\).*/\1/p' | head -1)"
+    [[ -n "$ip" ]] && { printf '%s\n' "$ip"; return 0; }
+
+    ip="$(ip -o -4 addr show scope global 2>/dev/null \
+          | awk '$2 !~ /^(docker|br-|veth|virbr|cni|flannel|kube)/ {print $4}' \
+          | cut -d/ -f1 | head -1)"
+    [[ -n "$ip" ]] && { printf '%s\n' "$ip"; return 0; }
+
+    hostname -I 2>/dev/null | awk '{print $1}'
+}
+
 for v in NPM_IMAGE PORTAINER_IMAGE; do
     if ! _valid_image "${!v}"; then
         echo "ERROR: $v='${!v}' is not a valid image reference (name:tag)." >&2
@@ -216,6 +244,17 @@ prompt_yes_no() {
     prompt="$(print_info "$question ($hint):")"
     while true; do
         read -rp "$prompt " ans || ans=""
+        # Strip carriage returns and surrounding whitespace before matching.
+        # `read -r` removes the newline but not a \r, so input that arrives
+        # CRLF-terminated yields "y\r", which matches neither `y` nor `yes`
+        # and is refused as though the user had typed something else. Seen
+        # once in a live run: a `y` rejected, then the identical `y` accepted
+        # on the retry. The cause was NOT proven, so this is not claimed as
+        # the fix — it removes the one class of invisible input that would
+        # produce exactly that symptom, and costs nothing if it was not.
+        ans="${ans//$'\r'/}"
+        ans="${ans#"${ans%%[![:space:]]*}"}"
+        ans="${ans%"${ans##*[![:space:]]}"}"
         ans="${ans,,}"
         [[ -z "$ans" ]] && ans="${default,,}"
         case "$ans" in
@@ -775,7 +814,12 @@ else
 fi
 echo
 
-SERVER_IP=$(host_lan_ip)
+# `|| true` because this whole block is only a printed summary. The install has
+# already finished by the time we get here, and the previous failure mode was
+# exactly this: the work succeeded, then the script died reporting it, which
+# reads to the user as a failed install. A summary must never be able to fail
+# the run it is summarising.
+SERVER_IP=$(_host_lan_ip || true)
 [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
 
 # Gather additional non-loopback, non-docker-bridge IPs for the summary.
