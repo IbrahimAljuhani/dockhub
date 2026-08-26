@@ -702,6 +702,11 @@ run_core_install() {
     # Loopback is the honest floor — invisible to every network, still reachable
     # over SSH, and it can never lock you out.
     NPM_ADMIN_BIND=""
+    # Defaults for the HTTP/HTTPS pair: published on every interface, which is
+    # what a directly exposed host needs and what this script always did. Only
+    # the tunnel branch below changes them.
+    NPM_HTTP_BIND=""
+    NPM_WANT_HTTPS="y"
     # Initialised here, not where it is measured. It is assigned inside the
     # install block, which `check_ports_or_warn` can skip entirely when a port
     # is already taken — while INSTALL_NPM stays "y", so the summary still reads
@@ -731,6 +736,30 @@ run_core_install() {
         else
             NPM_ADMIN_BIND="127.0.0.1:"
             print_ok "  Admin panel bound to 127.0.0.1 only."
+        fi
+
+        # ── And 80/443, but only when a tunnel is in play ─────────────────
+        #
+        # Asked because leaving them out was incoherent: the script tells a
+        # tunnel user their firewall "needs SSH and nothing else", then
+        # publishes 80 and 443 on every interface anyway. A live run ended with
+        # the origin IP still serving NPM's default page in a browser — exactly
+        # what choosing a tunnel was meant to prevent.
+        #
+        # Not asked in the direct case, where 80 and 443 are the whole point:
+        # they are how NPM proxies and how Let's Encrypt validates.
+        if [[ "$DOCKHUB_ACCESS_METHOD" == "tunnel" ]]; then
+            echo
+            print_info "  cloudflared reaches NPM over loopback, and Cloudflare terminates TLS"
+            print_info "  at its edge — so nothing ever connects to this host on 443 either."
+            if prompt_yes_no "  Bind NPM's HTTP port to 127.0.0.1 as well, and drop 443?" y; then
+                NPM_HTTP_BIND="127.0.0.1:"
+                NPM_WANT_HTTPS="n"
+                print_ok "  NPM will have no externally reachable port at all."
+            else
+                print_info "  Keeping 80 and 443 on all interfaces. Your provider's firewall is"
+                print_info "  then the only thing in front of them — and ufw is not it."
+            fi
         fi
     fi
     if prompt_yes_no "  Install Portainer CE? (web view of your containers)" y; then
@@ -844,6 +873,23 @@ run_core_install() {
         if [[ -f "$NPM_DIR/docker-compose.yml" ]]; then
             print_warn "Existing docker-compose.yml found at $NPM_DIR — keeping it (not overwritten)."
         else
+            # Built as a string rather than written inline, because a heredoc
+            # cannot drop a line conditionally and 443 is dropped entirely for a
+            # tunnelled host. Same approach Portainer's block already uses.
+            NPM_PORTS_BLOCK="    ports:
+      - '$NPM_HTTP_BIND$NPM_HTTP_PORT:80'"
+            if [[ "$NPM_WANT_HTTPS" == "y" ]]; then
+                NPM_PORTS_BLOCK="$NPM_PORTS_BLOCK
+      - '$NPM_HTTPS_PORT:443'"
+            else
+                NPM_PORTS_BLOCK="$NPM_PORTS_BLOCK
+      # 443 deliberately absent: Cloudflare terminates TLS at its edge, so
+      # nothing ever connects to this host on it. Add it back, and drop the
+      # 127.0.0.1 prefixes, if you stop using a tunnel."
+            fi
+            NPM_PORTS_BLOCK="$NPM_PORTS_BLOCK
+      - '$NPM_ADMIN_BIND$NPM_ADMIN_PORT:81'"
+
             # Unquoted heredoc so env-var-configured ports/image are substituted.
             # NPM is attached to 'main-net' so other containers can be proxied by hostname.
             cat > "$NPM_DIR/docker-compose.yml" <<YAML
@@ -851,16 +897,12 @@ services:
   app:
     image: '$NPM_IMAGE'
     restart: unless-stopped
-    ports:
-      - '$NPM_HTTP_PORT:80'
-      - '$NPM_HTTPS_PORT:443'
-      # 80 and 443 stay on every interface: they are how NPM proxies and how
-      # Let's Encrypt validates. The admin panel is a separate question, and
-      # NPM_ADMIN_BIND carries the answer — empty for every interface, or
-      # '127.0.0.1:' for loopback only. Change it here and recreate the
-      # container; editing the mapping needs a new one, so 'up -d' alone will
-      # report Started and change nothing. Use --force-recreate.
-      - '$NPM_ADMIN_BIND$NPM_ADMIN_PORT:81'
+    # Each mapping is 'address:host:container'. Where a line has no address it
+    # binds every interface, IPv4 and IPv6. All three were answered at install
+    # time; change them here and then RECREATE the container — editing a port
+    # mapping needs a new one, so 'up -d' alone reports Started and does
+    # nothing. Use: docker compose up -d --force-recreate
+$NPM_PORTS_BLOCK
     volumes:
       - ./data:/data
       - ./letsencrypt:/etc/letsencrypt
@@ -1132,6 +1174,24 @@ if [[ "${INSTALL_NPM,,}" == "y" ]]; then
     echo "   Username: admin@example.com"
     echo "   Password: changeme"
     print_warn "Change the default NPM credentials immediately after first login."
+    echo
+    # NPM can proxy its own admin panel, and until now nothing here said so —
+    # Portainer's section printed a Proxy Host recipe while the panel you have
+    # to visit first printed none. It is the same rule the README already
+    # states, applied to NPM itself: point a Proxy Host at the container name.
+    #
+    # It matters most in exactly the case above, where the panel is bound to
+    # loopback and an SSH tunnel is the only way in. This is how that becomes a
+    # permanent route on a real domain with a real certificate.
+    echo "   For a permanent route on your own domain, proxy NPM through itself:"
+    echo "     Forward Hostname / IP : npm-app-1"
+    echo "     Forward Port          : $NPM_ADMIN_PORT"
+    echo "     Scheme                : http     (NPM handles the HTTPS)"
+    if [[ "$DOCKHUB_ACCESS_METHOD" == "tunnel" ]]; then
+        echo "     SSL Certificate       : None     (Cloudflare terminates TLS)"
+    fi
+    echo "   Create it BEFORE you rely on it — the SSH tunnel above is what gets"
+    echo "   you back in if that Proxy Host is ever wrong."
     echo
 fi
 
