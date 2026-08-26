@@ -427,9 +427,29 @@ install_compose() {
 # deploys: main-net + NPM work identically either way. Skips silently if
 # already answered (including after a Reset NPM & Portainer, which has
 # nothing to do with network topology).
+# The answers detect_environment() collects, kept for the rest of the run.
+#
+# They were being written to disk and never read back — not by this script,
+# which is the one that asked. lib/common.sh has read_dockhub_env() for the
+# service scripts, and this file cannot source it (see _host_lan_ip above for
+# why), so the reader is duplicated here for the same reason.
+#
+# `grep -a` is not decoration: a plain grep over a file it decides is binary
+# prints "Binary file … matches" and hands that back as the value.
+DOCKHUB_ENVIRONMENT=""
+DOCKHUB_ACCESS_METHOD=""
+_read_dockhub_env() {
+    local env_file="$REAL_HOME/docker/.dockhub-env"
+    [[ -f "$env_file" ]] || return 0
+    DOCKHUB_ENVIRONMENT=$(grep -a '^ENVIRONMENT=' "$env_file" 2>/dev/null | cut -d= -f2)
+    DOCKHUB_ACCESS_METHOD=$(grep -a '^ACCESS_METHOD=' "$env_file" 2>/dev/null | cut -d= -f2)
+}
+
 detect_environment() {
     local env_file="$REAL_HOME/docker/.dockhub-env"
-    [[ -f "$env_file" ]] && return 0
+    # Already answered on a previous run: load it rather than returning blind.
+    # The early return here is why every later warning in this file was generic.
+    [[ -f "$env_file" ]] && { _read_dockhub_env; return 0; }
 
     dockhub_ask "One-time setup question: what kind of server is this?"
     dockhub_item 1 "Home server (behind a home router — no public IP guaranteed)"
@@ -457,7 +477,11 @@ ENVIRONMENT=$environment
 ACCESS_METHOD=$access_method
 EOF
     chown "$REAL_USER":"$REAL_GROUP" "$env_file" 2>/dev/null || true
-    print_ok "Saved to $env_file — used by services/ deploy.sh scripts for post-deploy reminders only."
+    # Publish the fresh answers to the rest of this run too, so the first
+    # install gets the same tailored advice a later one does.
+    DOCKHUB_ENVIRONMENT="$environment"
+    DOCKHUB_ACCESS_METHOD="$access_method"
+    print_ok "Saved to $env_file — shapes the advice this script and the services/ deploy.sh scripts give you."
 
     if [[ "$environment" == "home" && "$access_method" == "port_forward" ]]; then
         echo
@@ -547,7 +571,33 @@ run_core_install() {
         print_info "  You then publish it deliberately, behind NGINX Proxy Manager and HTTPS."
         if prompt_yes_no "  Publish Portainer's ports on this host anyway?" n; then
             PORTAINER_PUBLISH="y"
-            print_warn "  Ports will be published on ALL interfaces. On a VPS that is the internet."
+            # This said "On a VPS that is the internet" to everyone, which is
+            # both alarmist for one reader and wrong for the other — and it was
+            # unnecessary, because THIS SCRIPT ALREADY KNOWS. detect_environment()
+            # asked the question minutes ago and wrote the answer to
+            # ~/docker/.dockhub-env; nothing here ever read it back. The advice
+            # is now the answer the user actually gave.
+            print_warn "  Ports will be published on ALL interfaces, IPv4 and IPv6."
+            case "$DOCKHUB_ENVIRONMENT" in
+                vps)
+                    print_warn "  You told this script this is a VPS. That means the public internet,"
+                    print_warn "  right now, on a service that is root on this machine."
+                    ;;
+                home)
+                    # NAT is real protection for IPv4 and it is fair to say so.
+                    # What it does not cover is the LAN itself, and it does not
+                    # exist for IPv6 — where a global address is reachable unless
+                    # the router blocks inbound, which this script cannot see.
+                    print_warn "  You told this script this is a home server, so NAT keeps IPv4 off"
+                    print_warn "  the internet unless you forwarded this port — but every device on"
+                    print_warn "  your LAN reaches it, guests and IoT included."
+                    if hostname -I 2>/dev/null | tr ' ' '\n' | grep -qiE '^[23][0-9a-f]{3}:'; then
+                        print_warn "  This host also has a GLOBAL IPv6 address, and IPv6 has no NAT."
+                        print_warn "  There, only your router's inbound firewall is in the way."
+                    fi
+                    ;;
+                *)  print_warn "  On a VPS that is the internet." ;;
+            esac
         else
             print_ok "  Portainer will have no host ports."
         fi
@@ -774,7 +824,28 @@ YAML
             PORTAINER_BOUND=$(docker port portainer 2>/dev/null | tr '\n' ' ' || true)
             if [[ -n "${PORTAINER_BOUND// /}" ]]; then
                 print_warn "Portainer is publishing: $PORTAINER_BOUND"
-                print_warn "That interface reaches a root-equivalent service. Firewall it."
+                # NOT just "firewall it", which is what this said and which sends
+                # the reader straight to ufw — where it does nothing. Docker
+                # publishes a port by DNAT in PREROUTING and filters it in
+                # FORWARD via the DOCKER chain; ufw's rules live in INPUT and
+                # never see the packet. Verified on a live host: three ufw rules
+                # denying 9000 while DOCKER-USER sat completely empty and the
+                # port stayed open. Naming the wrong remedy is worse than naming
+                # none, because the user stops looking.
+                print_warn "UFW WILL NOT BLOCK THIS. Docker publishes past it — a 'ufw deny 9000'"
+                print_warn "looks applied and changes nothing. Either add a DOCKER-USER rule, or"
+                print_warn "rerun this script, pick Reconfigure, and answer no to publishing."
+                # Name the exposure instead of leaving the reader to notice
+                # "[::]" in a list of port mappings. A global v6 address here
+                # means the bind is reachable from outside unless the router
+                # blocks it — and if Portainer's data was just wiped, its admin
+                # account is unclaimed, so the first visitor to arrive owns it.
+                if [[ "$PORTAINER_BOUND" == *"[::]"* ]] \
+                   && hostname -I 2>/dev/null | tr ' ' '\n' | grep -qiE '^[23][0-9a-f]{3}:'; then
+                    print_warn "This host has a GLOBAL IPv6 address and Portainer is bound on [::]."
+                    print_warn "IPv6 is not behind NAT. Confirm your router blocks inbound v6, or"
+                    print_warn "restrict the port now — and create the admin account before anyone else."
+                fi
                 [[ "$PORTAINER_PUBLISH" == "n" ]] && \
                     print_warn "You asked for no ports — this came from an existing docker-compose.yml at $PORTAINER_DIR."
             else

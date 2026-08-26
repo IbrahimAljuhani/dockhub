@@ -99,9 +99,48 @@ If you're using Cloudflare Tunnel instead of a normal DNS A/AAAA record (common 
 You deployed with an optional host port (e.g. `http://192.168.1.50:6464` — every address in this file is a placeholder, use your own), it works via `curl` from the server itself, but not from your phone/laptop on the same network.
 
 1. **Check `ufw`/firewall on the server**: `sudo ufw status verbose`. If active, make sure the port is allowed.
+   > ⚠️ This cuts one way only. A published Docker port is **reachable even when `ufw` denies it** — see [I denied a port in ufw and it is still open](#i-denied-a-port-in-ufw-and-it-is-still-open) below. So `ufw` can explain a port that will not open, but never a port you thought you had closed.
 2. **Try a different port number.** Some routers and ISPs silently block or deprioritize specific ports by default as a security measure — port `6666` in particular has a bad reputation from historical IRC-botnet malware and gets blocked by some consumer routers/ISPs even on a private LAN. If a port mysteriously doesn't work despite everything else being correct, retry with an unrelated port (e.g. `6464` instead of `6666`) before assuming a deeper networking problem.
 3. **Router client/AP isolation.** Some routers (especially with a guest network, or some mesh systems) block devices on the same Wi-Fi from reaching each other by default. Test with `ping <server-ip>` from the other device — if even ping fails, this is almost certainly the cause; check your router's admin settings for "AP isolation" / "client isolation".
 4. If none of the above explains it and you have a stable domain set up already, it's simpler to just use NPM + your domain instead of chasing direct-port LAN issues — the direct host port is only meant for quick testing, not as the primary access method.
+
+---
+
+## I denied a port in ufw and it is still open
+
+This is not a mistake in your rules. **`ufw` does not filter Docker-published ports at all**, and it gives no sign that it didn't.
+
+Docker publishes a port by writing a DNAT rule in `PREROUTING`, after which the packet is **forwarded** to the container and filtered in the `FORWARD` chain via Docker's own `DOCKER` chain. `ufw`'s rules live in `INPUT`. The packet is never evaluated there, so the rule is not overridden — it is never consulted.
+
+Measured on a live host: three `ufw` rules denying `9000`, `ufw status` reporting them active, `DOCKER-USER` empty, and the port answering normally the whole time.
+
+**Check what is actually filtering:**
+
+```bash
+sudo iptables -L DOCKER-USER -n -v && sudo ip6tables -L DOCKER-USER -n -v
+```
+
+An empty chain means nothing is filtering Docker traffic, whatever `ufw status` says.
+
+### The fix, in order of preference
+
+**1. Don't publish the port.** Every `deploy.sh` here asks before publishing one, and defaults to no. A service on `main-net` is reached by NGINX Proxy Manager under a real certificate, and nothing on the host is exposed to firewall in the first place. To change your answer, rerun the deploy script — for the core, `install_dockhub.sh` → `Reconfigure`.
+
+**2. If you need the port, filter it in `DOCKER-USER`** — the chain Docker provides for exactly this and never overwrites:
+
+```bash
+sudo iptables  -I DOCKER-USER -p tcp --dport 9000 ! -s 10.0.0.0/8 -j DROP
+sudo ip6tables -I DOCKER-USER -p tcp --dport 9000 -j DROP
+```
+
+Two things about that:
+
+- **Match the CONTAINER's port, not the published one.** By the time a packet reaches `DOCKER-USER` it has already been DNAT'd, so `--dport` is the port inside the container. They are the same number for Portainer; they are not for a service published on a different host port.
+- **These do not survive a reboot.** Persist them with `iptables-persistent`, or accept that the exposure returns on the next restart — which is the strongest argument for option 1.
+
+### Why this matters more than it looks
+
+`/var/run/docker.sock` is mounted by Portainer, so reaching its web interface is equivalent to root on the host. And **IPv6 has no NAT in front of it**: a home server with a native IPv6 address is directly addressable from the internet, with only the router's inbound firewall in between. "It's a home server, not a VPS" is not protection.
 
 ---
 
