@@ -75,6 +75,8 @@ cat ~/docker/ghost/.ghost-docker-secrets.txt
 
 ## 🌐 Reverse Proxy (NGINX Proxy Manager)
 
+> ☁️ **Using Cloudflare Tunnel?** Two steps below are different: where you open NPM, and the SSL certificate (`None`, not Let's Encrypt). See [docs/cloudflare-tunnel.md](../../../docs/cloudflare-tunnel.md#deploying-a-service-behind-the-tunnel).
+
 1. Open `http://<server-ip>:81`
 2. Create a **Proxy Host**:
    - **Domain**: the domain you gave `deploy.sh`

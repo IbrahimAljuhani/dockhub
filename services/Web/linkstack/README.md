@@ -73,6 +73,8 @@ LinkStack has **no default admin account**. Visiting the site for the first time
 
 ## 🌐 Reverse Proxy (NGINX Proxy Manager)
 
+> ☁️ **Using Cloudflare Tunnel?** Two steps below are different: where you open NPM, and the SSL certificate (`None`, not Let's Encrypt). See [docs/cloudflare-tunnel.md](../../../docs/cloudflare-tunnel.md#deploying-a-service-behind-the-tunnel).
+
 > ⚠️ **This service is different from every other one in this repo.** LinkStack's container serves HTTPS internally on port 443 with its own self-signed certificate, and upstream's own docs are explicit: *"Make sure to use HTTPS to access your container to avoid mixed content errors."* Proxying plain HTTP to port 80 (like every other service here) will cause broken/mixed-content pages.
 
 1. Open `http://<server-ip>:81`
