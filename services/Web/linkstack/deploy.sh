@@ -125,7 +125,11 @@ if [[ -n "$HOST_PORT" ]]; then
     [[ -z "${SERVER_IP:-}" ]] && SERVER_IP="<your-server-ip>"
     echo "🌐 URL:          http://$SERVER_IP:$HOST_PORT"
 fi
-echo "🔗 Proxy target: linkstack-$INSTANCE_NAME:443 (HTTPS, self-signed) on 'main-net'"
+# Says where the container IS. It used to say how to proxy it — hostname, port
+# and scheme — which the Proxy Host form below now spells out field by field.
+# Two statements of the same three values, a few lines apart, is how a reader
+# starts wondering which one is authoritative.
+echo "🔗 Network:      on 'main-net' as 'linkstack-$INSTANCE_NAME' — no host port"
 echo "👤 First visit:  follow the setup wizard — create your own admin account"
 echo "📜 Log:          $LOGFILE"
 echo "──────────────────────────────────────────────"
