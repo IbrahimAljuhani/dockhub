@@ -1050,9 +1050,53 @@ read_dockhub_env() {
     DOCKHUB_ACCESS_METHOD=$(grep -a '^ACCESS_METHOD=' "$env_file" 2>/dev/null | cut -d= -f2 | tr -d '\r')
 }
 
+# The Proxy Host a service needs, printed as a form you can read across.
+#
+#   $1 forward hostname   $2 forward port   $3 scheme (default http)
+#   $4 domain (optional, echoed back if the deploy asked for one)
+#
+# This replaces a paragraph of prose that every service wrote for itself, and
+# it exists because that prose was wrong half the time. Eleven deploy scripts
+# ended with "enable SSL on the NPM side" and then called the tunnel reminder
+# two lines later — which says the opposite. A tunnelled host cannot get a
+# certificate (ACME validates inbound on port 80, which is not exposed) and
+# does not need one (Cloudflare terminates TLS). The script knows which case it
+# is in; it was simply printing both.
+#
+# Aligned key/value rather than a sentence, because these are values to be
+# copied into four boxes in a web form. A parenthetical explanation in the
+# middle of a paragraph is not a field you can copy.
+print_proxy_host_block() {
+    local fwd_host="$1" fwd_port="$2" scheme="${3:-http}" domain="${4:-}"
+    read_dockhub_env
+    echo
+    echo "Set up NGINX Proxy Manager — add a Proxy Host:"
+    [[ -n "$domain" ]] && echo "   Domain Names          : $domain"
+    echo "   Forward Hostname / IP : $fwd_host"
+    echo "   Forward Port          : $fwd_port"
+    echo "   Forward Scheme        : $scheme"
+    if [[ "$DOCKHUB_ACCESS_METHOD" == "tunnel" ]]; then
+        echo "   SSL Certificate       : None"
+        echo "   Force SSL             : off"
+        echo
+        echo "   ☁️  Cloudflare Tunnel is recorded for this host, so:"
+        echo "      · Route the domain to NPM itself — Service URL 'http://localhost:80'."
+        echo "        Never point the tunnel straight at this service."
+        echo "      · Do not request a certificate here. It would fail — ACME validates"
+        echo "        inbound on port 80 — and Cloudflare already gives the visitor HTTPS."
+        echo "      See docs/cloudflare-tunnel.md."
+    else
+        echo "   SSL Certificate       : request one from the NPM UI (Let's Encrypt)"
+    fi
+}
+
 # Call at the end of a service's post-deploy summary, after printing the
 # normal "Set up NGINX Proxy Manager..." line. No-op unless the saved
 # environment is specifically Cloudflare Tunnel.
+#
+# Superseded by print_proxy_host_block() for services that have adopted it —
+# that function covers the tunnel case itself, so calling both would print the
+# advice twice. Still used by services not yet migrated.
 print_tunnel_reminder_if_relevant() {
     read_dockhub_env
     if [[ "$DOCKHUB_ACCESS_METHOD" == "tunnel" ]]; then
