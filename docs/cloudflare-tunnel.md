@@ -89,6 +89,51 @@ Then set up the matching Proxy Host in NPM as normal, following that service's o
 
 ---
 
+## Deploying a service behind the tunnel
+
+Every service's own README has a **Reverse Proxy** section, and it is written for a directly reachable host. Three things in it change here. Nothing else does.
+
+### 1. Where you open NPM
+
+Those READMEs say `http://<server-ip>:81`. If you answered *no* when the installer asked whether to publish the admin panel, that address does not exist — the panel is bound to loopback. Reach it the way the installer's closing summary told you:
+
+```bash
+ssh -L 8181:127.0.0.1:81 <user>@<server>   # then http://localhost:8181
+```
+
+Or, once you have set it up, at whatever hostname you gave NPM's own Proxy Host.
+
+### 2. The certificate: `None`, not Let's Encrypt
+
+Those READMEs say to issue a Let's Encrypt certificate from the NPM UI. **It will fail here, and you do not need it.**
+
+It fails because ACME validates by connecting *inbound* to port 80, which a tunnelled host does not expose. You do not need it because Cloudflare terminates TLS at its edge — the visitor already has HTTPS.
+
+So on every Proxy Host: **SSL Certificate = `None`**. Force SSL is then unavailable, which is exactly right; enabling it is what produces the `400 Request Header Or Cookie Too Large` loop described above.
+
+### 3. The scheme, in three places that look alike
+
+This is the one that actually bites, because the answer is different at each hop and two of them are counter-intuitive:
+
+| Hop | Scheme | Why |
+|---|---|---|
+| Visitor → Cloudflare | **HTTPS** | Cloudflare's edge certificate. Nothing to configure |
+| Cloudflare tunnel → NPM | **`http://localhost:80`** | Never `https`. This hop never leaves your server |
+| NPM → the service | usually **`http`** | Whatever that service's README says |
+
+⚠️ **The middle row is where people go wrong, and the interface encourages it:** Cloudflare's *Service URL* field shows `https://localhost:8080` as its placeholder. Type `http`, against what the box suggests. Getting it wrong produces this in `journalctl -u cloudflared`, which names itself clearly once you have seen it once:
+
+```
+originService=https://localhost:80
+tls: first record does not look like a TLS handshake
+```
+
+cloudflared attempted a TLS handshake against a port serving plain HTTP.
+
+**The third row has exactly one exception in this catalogue: [LinkStack](../services/Web/linkstack/), which terminates its own self-signed TLS inside the container and must be forwarded as `https` to port `443`.** That combination — `http` to NPM, then `https` onward to the service — is correct and looks wrong. Its own README explains why.
+
+---
+
 ## On a VPS: finish the job by binding NPM to loopback
 
 The tunnel means nothing on your server needs to listen on a public interface. Once a hostname works end to end, make that true — otherwise the ports are still open and the tunnel is only the route you happen to be using.
