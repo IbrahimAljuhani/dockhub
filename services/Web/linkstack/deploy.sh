@@ -129,12 +129,18 @@ echo "🔗 Proxy target: linkstack-$INSTANCE_NAME:443 (HTTPS, self-signed) on 'm
 echo "👤 First visit:  follow the setup wizard — create your own admin account"
 echo "📜 Log:          $LOGFILE"
 echo "──────────────────────────────────────────────"
+# The values, as a form. This was five lines of prose with the scheme
+# explanation buried mid-sentence, followed by "Enable SSL on the NPM side
+# too" — which the tunnel reminder on the next line then contradicted.
+# print_proxy_host_block handles the certificate question itself, so it
+# replaces both, and calling the reminder as well would print it twice.
+print_proxy_host_block "linkstack-$INSTANCE_NAME" "443" "https" "$SERVER_NAME_VALUE"
 echo
-echo "Set up NGINX Proxy Manager: forward to linkstack-$INSTANCE_NAME, port 443,"
-echo "forward scheme HTTPS (not HTTP — LinkStack's container terminates its"
-echo "own self-signed TLS on 443; proxying plain HTTP to port 80 causes"
-echo "mixed-content errors per upstream's own docs). Enable SSL on the NPM"
-echo "side too. See the README's Reverse Proxy section."
-print_tunnel_reminder_if_relevant
+# Kept as prose because it is the reason for the odd value above, not a value
+# to copy. LinkStack is the only service in this catalogue forwarded as HTTPS.
+echo "   Why 'https' and port 443: LinkStack's container terminates its own"
+echo "   self-signed TLS there. NPM does not validate it, so this needs no extra"
+echo "   configuration — but forwarding plain HTTP to port 80 produces the"
+echo "   mixed-content errors upstream's own docs warn about."
 echo
 echo "To manage: cd $INSTANCE_DIR && $COMPOSE_CMD [ps|logs -f|stop|restart]"
