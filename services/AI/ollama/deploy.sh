@@ -298,7 +298,7 @@ if (( API_OK )); then
     # but the human name is on the SYMLINK that points at it. Keeping only the
     # resolved path made the suggested model name a 64-character sha256 — the
     # blob's filename — which is what a live run offered.
-    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=(); GGUF_NOTES=(); DUP_SKIPPED=0
+    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=(); GGUF_NOTES=(); GGUF_OWNERS=(); DUP_SKIPPED=0
     if [[ -n "$MODELS_PARENT" && -d "$MODELS_PARENT" ]]; then
         while IFS= read -r g; do
             [[ -z "$g" ]] && continue
@@ -359,6 +359,7 @@ if (( API_OK )); then
             GGUF_NAMES+=("$base")
             GGUF_LABELS+=("$base   $(du -h "$real" 2>/dev/null | cut -f1)   from $owner")
             GGUF_NOTES+=("$note")
+            GGUF_OWNERS+=("$owner")
         done < <(find "$MODELS_PARENT" -name '*.gguf' 2>/dev/null | sort)
     fi
 
@@ -377,13 +378,6 @@ if (( API_OK )); then
     # said nothing about the one thing that separates it from 4: Ollama copies
     # the weights, so the file ends up on this disk twice.
     echo "   4) Another model — Ollama's library or Hugging Face"
-    # Nothing is hidden without saying so. If every file another provider has
-    # is already in Ollama's store, option 5 is absent — and that absence gets
-    # one line of explanation rather than leaving the reader to wonder whether
-    # the scan found anything at all.
-    if (( DUP_SKIPPED > 0 && ${#GGUF_PATHS[@]} == 0 )); then
-        print_info "   (Every model file the other providers have is already here.)"
-    fi
     if (( ${#GGUF_PATHS[@]} > 0 )); then
         # "A file already on this disk" read as "the models you already have",
         # and a user with three installed models asked why only one was listed.
@@ -406,6 +400,28 @@ if (( API_OK )); then
         echo "   0) Skip — I'll pull one myself later"
     else
         echo "   0) Keep what I have — add nothing"
+    fi
+
+    # What the scan found, AFTER the list and never inside it.
+    #
+    # This note used to sit between 4) and 0), which put a sentence in the
+    # middle of a numbered list and made the list stop reading as one. It is
+    # not an option; it is the result of looking. So it goes below the last
+    # option, and uses print_info — the same [✓] the rest of this script marks
+    # good news with — rather than a colour invented here. lib/common.sh
+    # carries no colour codes at all, and one file is the wrong place to start.
+    if (( ${#GGUF_PATHS[@]} > 0 )); then
+        # `paste -d', '` cycles through the delimiter CHARACTERS, so with two
+        # items it uses only the comma and prints "llama-cpp,localai". Joined
+        # with sed instead.
+        _own="$(printf '%s\n' "${GGUF_OWNERS[@]}" | sort -u | paste -sd, - | sed 's/,/, /g')"
+        if (( ${#GGUF_PATHS[@]} == 1 )); then
+            print_info "Found a model file in $_own that Ollama does not have — option 5."
+        else
+            print_info "Found ${#GGUF_PATHS[@]} model files in $_own that Ollama does not have — option 5."
+        fi
+    elif (( DUP_SKIPPED > 0 )); then
+        print_info "Every model file the other providers have is already here."
     fi
     echo
     read -rp "Pull a model now? " model_choice
