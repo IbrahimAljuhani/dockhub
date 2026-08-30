@@ -118,6 +118,11 @@ pick_llama_model() {
             nm="$(basename "$d")"; nm="${nm#models--}"
             org="${nm%%--*}"; rest="${nm#*--}"
             [[ "$org" == "$rest" ]] && continue      # no '--' at all: not a repo dir
+            # A repo directory can exist with nothing usable in it — an
+            # interrupted download leaves refs/ and an empty snapshots/. Listing
+            # that as "already downloaded, no download needed" is a promise the
+            # next start cannot keep, so require an actual .gguf to be there.
+            compgen -G "$d/snapshots/*/*.gguf" >/dev/null 2>&1 || continue
             sz="$(du -sh "$d" 2>/dev/null | cut -f1)"
             CACHED_REPOS+=("$org/$rest")
             CACHED_LABELS+=("$org/$rest  ($sz)")

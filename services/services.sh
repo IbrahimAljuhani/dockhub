@@ -291,6 +291,45 @@ prompt_choice() {
 # docker-compose.yml/override.yml so a future deploy.sh re-copies the latest
 # version — .env/secrets/logs are kept so a reinstall can reuse them.
 # Full wipe: also removes named volumes and deletes the whole directory.
+# Say what a "complete" removal did NOT remove.
+#
+# The AI providers keep their weights OUTSIDE the service directory, in a
+# shared tree under AI_MODELS_DIR, so that switching provider or reinstalling
+# does not re-download tens of gigabytes. That is the right behaviour and it
+# makes the line above — "Removed … completely (data wiped)" — a claim that
+# overstates: the largest thing on disk stayed. Nobody goes looking for space
+# they do not know is missing.
+#
+# Generic on purpose. There is no per-service hook in this file and this does
+# not add one: it reads the one env file, and prints nothing at all unless a
+# models tree exists and actually holds something for the service just removed.
+# The other services in the catalogue never see it.
+report_kept_model_weights() {
+    local instance_dir="$1" env_file="$HOME/docker/.dockhub-env" root svc kept sz
+    [[ -f "$env_file" ]] || return 0
+    root=$(grep -a '^AI_MODELS_DIR=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r')
+    [[ -n "$root" && -d "$root" ]] || return 0
+
+    # Instance dir is ~/docker/<service>[/<instance>]; the provider's weights
+    # live at $root/<service>. Match on the service name only.
+    svc=$(basename "$instance_dir")
+    [[ -d "$root/$svc" ]] || svc=$(basename "$(dirname "$instance_dir")")
+    kept="$root/$svc"
+    [[ -d "$kept" ]] || return 0
+    # An empty directory is left behind by a provider that was deployed and
+    # never given a model. Warning that "0 remains" is noise, and it is also
+    # what stops a service instance that happens to share a provider's name
+    # from triggering this: the directory would have to hold weights.
+    find "$kept" -mindepth 1 -print -quit 2>/dev/null | grep -q . || return 0
+
+    sz=$(du -sh "$kept" 2>/dev/null | cut -f1)
+    echo
+    print_warn "Model weights were NOT part of that: ${sz:-some} remains in"
+    print_warn "  $kept"
+    print_info "Deploying this service again reuses it and downloads nothing."
+    print_info "To reclaim the space instead:  rm -rf $kept"
+}
+
 remove_instance() {
     local instance_dir="$1" cc wipe
     cc="$(compose_cmd)"
@@ -348,6 +387,7 @@ remove_instance() {
         else
             print_info "Removed $instance_dir completely (data wiped)."
         fi
+        report_kept_model_weights "$instance_dir"
     else
         (cd "$instance_dir" && $cc down) || true
         rm -f "$instance_dir/docker-compose.yml" "$instance_dir/docker-compose.override.yml"

@@ -280,13 +280,25 @@ if (( API_OK )); then
     #     for one (ADAPTER is LoRA), so offering it would hand someone a
     #     model that cannot answer. It is filtered out, and a model that has
     #     one is flagged, because importing that model loses its vision.
+    # The scan root is the parent of this provider's directory — which is only
+    # a shared models tree when the path follows the convention. AI_MODELS_PATH
+    # can be set by hand, and `AI_MODELS_PATH=/models` makes the parent `/`,
+    # turning a helpful lookup into a find over the entire filesystem.
+    # Refuse the obviously-wrong roots rather than scanning them.
     MODELS_PARENT="$(dirname "$ENV_MODELS_PATH")"
+    case "$MODELS_PARENT" in
+        / | /home | /mnt | /media | /root | "$HOME")
+            print_info "Skipping the local-file scan: '$ENV_MODELS_PATH' has no models"
+            print_info "directory of its own to look beside."
+            MODELS_PARENT=""
+            ;;
+    esac
     # Two parallel arrays on purpose. The weights live in a hash-named blob,
     # but the human name is on the SYMLINK that points at it. Keeping only the
     # resolved path made the suggested model name a 64-character sha256 — the
     # blob's filename — which is what a live run offered.
-    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=(); GGUF_NOTES=()
-    if [[ -d "$MODELS_PARENT" ]]; then
+    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=(); GGUF_NOTES=(); GGUF_DUPS=()
+    if [[ -n "$MODELS_PARENT" && -d "$MODELS_PARENT" ]]; then
         while IFS= read -r g; do
             [[ -z "$g" ]] && continue
             base="$(basename "$g")"
@@ -316,10 +328,32 @@ if (( API_OK )); then
             # reads its own file in place, Ollama copies.
             rel="${g#"$MODELS_PARENT"/}"; owner="${rel%%/*}"
             [[ "$owner" == "$rel" ]] && owner="?"
+
+            # Is this exact file ALREADY in Ollama's store?
+            #
+            # A live run imported a model that was listed as installed three
+            # lines above, copied 4.9 GB to do it, and finished with the same
+            # model count it started with — Ollama reported "using existing
+            # layer" for every layer and wrote nothing.
+            #
+            # The check is free, because both stores are content-addressed by
+            # the same function: the Hugging Face cache names a blob with the
+            # sha256 of its contents, and Ollama names its own blobs
+            # sha256-<the same hex>. So this is a filename lookup, not a 5 GB
+            # hash. If the layout ever differs the lookup simply misses and the
+            # behaviour is what it was before — never a wrong claim.
+            hex="$(basename "$real")"
+            if [[ "$hex" =~ ^[0-9a-f]{64}$ ]] \
+               && [[ -e "$ENV_MODELS_PATH/models/blobs/sha256-$hex" ]]; then
+                dup="  ✓ already imported"
+            else
+                dup=""
+            fi
             GGUF_PATHS+=("$real")
             GGUF_NAMES+=("$base")
-            GGUF_LABELS+=("$base   $(du -h "$real" 2>/dev/null | cut -f1)   from $owner")
+            GGUF_LABELS+=("$base   $(du -h "$real" 2>/dev/null | cut -f1)   from $owner$dup")
             GGUF_NOTES+=("$note")
+            GGUF_DUPS+=("$dup")
         done < <(find "$MODELS_PARENT" -name '*.gguf' 2>/dev/null | sort)
     fi
 
@@ -432,6 +466,23 @@ if (( API_OK )); then
             if (( ${#GGUF_PATHS[@]} > 0 )); then
                 echo
                 read -rp "  Which file? (1-${#GGUF_PATHS[@]}): " gi
+                if [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
+                    # Ask before spending the copy, not after. Re-importing an
+                    # identical file is not harmful — Ollama recognises every
+                    # layer and writes nothing — but it still costs a full
+                    # staging copy of several gigabytes to reach that
+                    # conclusion, and a live run did exactly that.
+                    if [[ -n "${GGUF_DUPS[$((gi-1))]}" ]]; then
+                        print_warn "  That file is already in Ollama's store — the same content,"
+                        print_warn "  byte for byte. Importing it again copies it, then Ollama"
+                        print_warn "  finds every layer already present and writes nothing new."
+                        read -rp "  Import it anyway, under a different name? (y/N): " dup_ok
+                        if [[ "${dup_ok,,}" != "y" ]]; then
+                            print_info "  Skipped."
+                            gi=""
+                        fi
+                    fi
+                fi
                 if [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
                     IMPORT_SRC="${GGUF_PATHS[$((gi-1))]}"
                     IMPORT_NAME_SRC="${GGUF_NAMES[$((gi-1))]}"
