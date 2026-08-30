@@ -285,7 +285,7 @@ if (( API_OK )); then
     # but the human name is on the SYMLINK that points at it. Keeping only the
     # resolved path made the suggested model name a 64-character sha256 — the
     # blob's filename — which is what a live run offered.
-    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=()
+    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=(); GGUF_NOTES=()
     if [[ -d "$MODELS_PARENT" ]]; then
         while IFS= read -r g; do
             [[ -z "$g" ]] && continue
@@ -306,7 +306,7 @@ if (( API_OK )); then
             # Same reason: the companion file may be named either way round.
             if compgen -G "$(dirname "$g")/*mmproj*.gguf" >/dev/null 2>&1 \
             || compgen -G "$(dirname "$g")/*MMPROJ*.gguf" >/dev/null 2>&1; then
-                note="  [vision projector present — Ollama imports text only]"
+                note="⚠ has a vision projector — Ollama imports the text half only"
             fi
             # Which provider fetched it. Every provider owns one subdirectory
             # under the shared parent, so the first path component after it
@@ -318,18 +318,34 @@ if (( API_OK )); then
             [[ "$owner" == "$rel" ]] && owner="?"
             GGUF_PATHS+=("$real")
             GGUF_NAMES+=("$base")
-            GGUF_LABELS+=("$base  ($(du -h "$real" 2>/dev/null | cut -f1))  — downloaded by $owner$note")
+            GGUF_LABELS+=("$base   $(du -h "$real" 2>/dev/null | cut -f1)   from $owner")
+            GGUF_NOTES+=("$note")
         done < <(find "$MODELS_PARENT" -name '*.gguf' 2>/dev/null | sort)
     fi
 
     echo "   1) llama3.2:3b     ~2 GB   fast, modest quality — fine on CPU"
     echo "   2) llama3.1:8b     ~5 GB   the usual default; wants a GPU or patience"
     echo "   3) qwen2.5-coder:7b ~5 GB  tuned for code"
-    echo "   4) Any model on Hugging Face — 45k GGUF repos, you give the name"
+    # Labels 4 and 5 describe what happens, in the same voice as 1 to 3.
+    #
+    # Four used to read "Any model on Hugging Face — 45k GGUF repos". Both
+    # halves were wrong by the time it printed: the option now offers Ollama's
+    # library as well, so naming one source was a lie about what it does, and
+    # "45k" is a figure that goes stale on its own — the same reason no service
+    # count is printed on the social card.
+    #
+    # Five said "Import a .gguf", which is the mechanism, not the choice, and
+    # said nothing about the one thing that separates it from 4: Ollama copies
+    # the weights, so the file ends up on this disk twice.
+    echo "   4) Another model — Ollama's library or Hugging Face"
     if (( ${#GGUF_PATHS[@]} > 0 )); then
-        echo "   5) Import a .gguf already on this machine (no download):"
+        echo "   5) A file already on this disk — no download, but Ollama copies it:"
         for i in "${!GGUF_LABELS[@]}"; do
             printf "        %d. %s\n" "$((i+1))" "${GGUF_LABELS[$i]}"
+            # The projector caveat gets its own line. Appended, it pushed the
+            # row past any sensible terminal width and buried the size and the
+            # source it needed to sit beside.
+            [[ -n "${GGUF_NOTES[$i]}" ]] && printf "           %s\n" "${GGUF_NOTES[$i]}"
         done
     fi
     # Wording follows the situation: with nothing installed, declining leaves
