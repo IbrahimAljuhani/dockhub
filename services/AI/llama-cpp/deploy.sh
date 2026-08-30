@@ -98,6 +98,32 @@ pick_llama_model() {
         print_info "llama.cpp serves ONE model. Pick it now — rerun this script"
         print_info "later to change it."
     fi
+    # ── What this machine has already downloaded ─────────────────────────
+    #
+    # The cache already works: type a repo you have pulled before and
+    # llama.cpp serves it immediately, downloading nothing. What was missing
+    # is that nothing ever SAID what was in it — so switching back meant
+    # remembering "dealignai/Ornith-1.5-9B-UNCENSORED-GGUF" and typing it
+    # from memory, which is exactly the kind of thing a menu exists to avoid.
+    #
+    # The cache uses the Hugging Face layout: one directory per repo, named
+    # models--{org}--{repo}. Only the FIRST '--' after the prefix separates
+    # the two — a repo name may contain single hyphens of its own, and
+    # Ornith-1.5-9B-UNCENSORED-GGUF is full of them.
+    local -a CACHED_REPOS=() CACHED_LABELS=()
+    if [[ -d "$ENV_MODELS_PATH" ]]; then
+        local d nm org rest sz
+        while IFS= read -r d; do
+            [[ -z "$d" ]] && continue
+            nm="$(basename "$d")"; nm="${nm#models--}"
+            org="${nm%%--*}"; rest="${nm#*--}"
+            [[ "$org" == "$rest" ]] && continue      # no '--' at all: not a repo dir
+            sz="$(du -sh "$d" 2>/dev/null | cut -f1)"
+            CACHED_REPOS+=("$org/$rest")
+            CACHED_LABELS+=("$org/$rest  ($sz)")
+        done < <(find "$ENV_MODELS_PATH" -maxdepth 1 -type d -name 'models--*' 2>/dev/null | sort)
+    fi
+
     echo
     [[ -n "$current" ]] && echo "   0) Keep it — just restart"
     # Note the different owners: the ggml-org org (llama.cpp's own) publishes
@@ -108,7 +134,18 @@ pick_llama_model() {
     echo "   2) ggml-org/gemma-3-4b-it-GGUF               ~3 GB  small, good general quality"
     echo "   3) bartowski/Qwen2.5-Coder-7B-Instruct-GGUF  ~5 GB  tuned for code"
     echo "   4) Enter a Hugging Face repo myself"
-    read -rp "Choice ($( [[ -n "$current" ]] && echo 0 || echo 1 )-4): " choice
+    if (( ${#CACHED_REPOS[@]} > 0 )); then
+        echo "   5) Already downloaded on this machine — no download needed:"
+        local i
+        for i in "${!CACHED_LABELS[@]}"; do
+            if [[ "${CACHED_REPOS[$i]}" == "$current" ]]; then
+                printf "        %d. %s   ← currently serving\n" "$((i+1))" "${CACHED_LABELS[$i]}"
+            else
+                printf "        %d. %s\n" "$((i+1))" "${CACHED_LABELS[$i]}"
+            fi
+        done
+    fi
+    read -rp "Choice: " choice
     case "$choice" in
         1) HF_REPO_VALUE="ggml-org/gemma-3-1b-it-GGUF";              MODEL_GB=2; MODEL_CHANGED=1 ;;
         2) HF_REPO_VALUE="ggml-org/gemma-3-4b-it-GGUF";              MODEL_GB=4; MODEL_CHANGED=1 ;;
@@ -128,6 +165,23 @@ pick_llama_model() {
                 echo "Expected user/repo (e.g. ggml-org/gemma-3-4b-it-GGUF), not a URL." >&2
             done
             MODEL_GB=8; MODEL_CHANGED=1
+            ;;
+        5)
+            if (( ${#CACHED_REPOS[@]} > 0 )); then
+                local ci
+                read -rp "  Which one? (1-${#CACHED_REPOS[@]}): " ci
+                if [[ "$ci" =~ ^[0-9]+$ ]] && (( ci >= 1 && ci <= ${#CACHED_REPOS[@]} )); then
+                    HF_REPO_VALUE="${CACHED_REPOS[$((ci-1))]}"
+                    # Already on disk, so no download and no disk check to make.
+                    MODEL_GB=0
+                    [[ "$HF_REPO_VALUE" == "$current" ]] || MODEL_CHANGED=1
+                    print_info "  Selected $HF_REPO_VALUE — already downloaded, nothing to fetch."
+                else
+                    print_warn "  Not one of the listed numbers — keeping the current model."
+                fi
+            else
+                print_warn "  Nothing is downloaded on this machine yet."
+            fi
             ;;
         *)
             # A typo must not tear down a working deployment, so this only
