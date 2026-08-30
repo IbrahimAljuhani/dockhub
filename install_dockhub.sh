@@ -130,11 +130,19 @@ _THIS_HOST="$(_host_lan_ip 2>/dev/null || true)"
 : "${_THIS_HOST:=<this-server>}"
 
 # --- Color codes ---
-INFO='\033[0;36m'
-OK='\033[0;32m'
-WARN='\033[0;33m'
-ERROR='\033[0;31m'
-NC='\033[0m'
+# Guarded, like lib/common.sh — these were defined unconditionally, so piping
+# a run to a file or through `tee` wrote escape sequences into it. Same three
+# tests: a terminal, no NO_COLOR, and a TERM that is not "dumb" (CI and cron).
+# -t 1 because most of this script's output is stdout.
+if [[ -t 1 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
+    INFO='\033[0;36m'
+    OK='\033[0;32m'
+    WARN='\033[0;33m'
+    ERROR='\033[0;31m'
+    NC='\033[0m'
+else
+    INFO=''; OK=''; WARN=''; ERROR=''; NC=''
+fi
 
 # ── The masthead ────────────────────────────────────────────────────────
 # Guarded, never required. lib/banner.sh defines four `dockhub_*` functions,
@@ -156,10 +164,19 @@ declare -F dockhub_banner >/dev/null || dockhub_banner() { :; }
 declare -F dockhub_ask  >/dev/null || dockhub_ask()  { printf '\n%s\n' "$1"; }
 declare -F dockhub_item >/dev/null || dockhub_item() { printf '[ %s ] %s\n' "$1" "$2"; }
 
-print_info()    { echo -e "${INFO}[INFO]${NC} $1"; }
-print_ok()      { echo -e "${OK}[OK]${NC} $1"; }
-print_warn()    { echo -e "${WARN}[WARN]${NC} $1" >&2; }
-print_error()   { echo -e "${ERROR}[ERROR]${NC} $1" >&2; }
+# Same markers as lib/common.sh — [✓] [!] [✗], not [INFO] [OK] [WARN] [ERROR].
+# This script and the forty-one service scripts are one project and printed as
+# though they were two. The symbols come from the library because they are
+# already in every service; the four-level split stays here because it is the
+# accurate one, and the library has adopted it too. Colours are unchanged.
+print_info()    { echo -e "${INFO}[✓]${NC} $1"; }
+print_ok()      { echo -e "${OK}[✓]${NC} $1"; }
+print_warn()    { echo -e "${WARN}[!]${NC} $1" >&2; }
+print_error()   { echo -e "${ERROR}[✗]${NC} $1" >&2; }
+# Cyan, the same as a question in lib/common.sh. A prompt is neither good news
+# nor a warning; it is the script waiting for you, and it should be findable in
+# a screenful of output at a glance.
+print_ask()     { printf '%b' "${INFO}$1${NC}"; }
 
 # --- Rotate previous log, create fresh one owned by the real user ---
 if [[ -s "$LOGFILE" ]]; then
@@ -224,7 +241,7 @@ check_ports_or_warn() {
     done
     if (( ${#busy[@]} > 0 )); then
         print_warn "$svc needs ports ${busy[*]} but they are already in use on the host."
-        read -rp "$(print_info 'Continue anyway? (y/n): ')" ans || ans=""
+        read -rp "$(print_ask "$(print_info 'Continue anyway? (y/n): ')")" ans || ans=""
         [[ "${ans,,}" == "y" ]] || return 1
     fi
     return 0
@@ -255,7 +272,7 @@ prompt_yes_no() {
     local prompt
     prompt="$(print_info "$question ($hint):")"
     while true; do
-        read -rp "$prompt " ans || ans=""
+        read -rp "$(print_ask "$prompt ")" ans || ans=""
         # Strip carriage returns and surrounding whitespace before matching.
         # `read -r` removes the newline but not a \r, so input that arrives
         # CRLF-terminated yields "y\r", which matches neither `y` nor `yes`
@@ -521,7 +538,7 @@ detect_environment() {
     # unknown value as unknown and "never assume vps as a default". The rule
     # was being broken at the source that writes the file.
     while true; do
-        read -rp "Choice [ 1-2 ]: " choice || choice=""
+        read -rp "$(print_ask "Choice [ 1-2 ]: ")" choice || choice=""
         choice="${choice//$'\r'/}"; choice="${choice//[[:space:]]/}"
         case "$choice" in
             1) environment="home"; break ;;
@@ -552,7 +569,7 @@ detect_environment() {
     dockhub_item 2 "Cloudflare Tunnel (no inbound ports opened at all)"
     local sub
     while true; do
-        read -rp "Choice [ 1-2 ]: " sub || sub=""
+        read -rp "$(print_ask "Choice [ 1-2 ]: ")" sub || sub=""
         sub="${sub//$'\r'/}"; sub="${sub//[[:space:]]/}"
         case "$sub" in
             # "port_forward" for home, "direct" for a VPS: the same answer means
@@ -1272,7 +1289,7 @@ exit 0
 # main-net, or any other running container/service (confirmed scope). ---
 reset_npm_portainer() {
     local wipe_data
-    read -rp "Also permanently delete NPM/Portainer data (proxy configs, SSL certs, Portainer users/settings)? (y/N): " wipe_data || wipe_data="n"
+    read -rp "$(print_ask "Also permanently delete NPM/Portainer data (proxy configs, SSL certs, Portainer users/settings)? (y/N): ")" wipe_data || wipe_data="n"
 
     local npm_dir="$REAL_HOME/docker/npm"
     local portainer_dir="$REAL_HOME/docker/portainer"
@@ -1327,7 +1344,7 @@ core_menu() {
             dockhub_item 2 "Reconfigure            (keep them running; answer the install questions again)"
             dockhub_item 0 "Back to main menu"
             local choice
-            read -rp "Choice [ 0-2 ]: " choice || exit 0
+            read -rp "$(print_ask "Choice [ 0-2 ]: ")" choice || exit 0
             case "$choice" in
                 1) reset_npm_portainer; run_core_install; return ;;
                 2) run_core_install; return ;;
@@ -1391,7 +1408,7 @@ main_menu() {
         dockhub_item 2 "Install a service"
         dockhub_item 0 "Exit"
         local choice
-        read -rp "Choice [ 0-2 ]: " choice || exit 0
+        read -rp "$(print_ask "Choice [ 0-2 ]: ")" choice || exit 0
         case "$choice" in
             # core_menu only ever returns here via its own "back to main menu"
             # choice (every other path inside it ends the script via exit 0

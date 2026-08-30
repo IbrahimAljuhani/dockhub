@@ -14,9 +14,59 @@
 # didn't) — see services/README.md's "Convention Every Service Follows" for
 # the story.
 
-print_info()  { echo -e "[✓] $1" >&2; }
-print_warn()  { echo -e "[!] $1" >&2; }
-print_error() { echo -e "[✗] $1" >&2; exit 1; }
+# ── Colour ──────────────────────────────────────────────────────────────
+#
+# install_dockhub.sh has been coloured since the beginning and this library
+# was not, so the core installer looked like one program and all forty-one
+# services like another. Same palette here, so the whole project reads as one
+# thing.
+#
+# Three guards, and each one matters:
+#
+#   -t 2          these all write to stderr. Redirect it to a file — which
+#                 every deploy.log does — and escape codes would be written
+#                 into it, turning a log into something you have to strip
+#                 before you can grep it.
+#   NO_COLOR      the standard opt-out (no-color.org). Honouring it costs one
+#                 test and is the difference between a preference and an
+#                 imposition.
+#   TERM=dumb     what CI runners, cron and some editors' terminals report.
+#
+# THE MARKER IS COLOURED, NEVER THE MESSAGE. A whole line in yellow is harder
+# to read, not easier, and these messages carry paths and commands that must
+# stay literal enough to copy. The colour is there to let the eye find the
+# [!] among the [✓], which is the only job it has.
+if [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
+    _C_INFO=$'\033[0;36m'; _C_OK=$'\033[0;32m'; _C_WARN=$'\033[0;33m'
+    _C_ERR=$'\033[0;31m';  _C_ASK=$'\033[0;36m'; _C_OFF=$'\033[0m'
+else
+    _C_INFO=''; _C_OK=''; _C_WARN=''; _C_ERR=''; _C_ASK=''; _C_OFF=''
+fi
+
+# ONE vocabulary across the whole project: [✓] [!] [✗], and four levels.
+#
+# install_dockhub.sh printed [INFO] [OK] [WARN] [ERROR] while this library
+# printed [✓] [!] [✗] — one program with two ways of saying the same things,
+# which is what a reader notices before anything else.
+#
+# The symbols come from here (compact, and already in forty-one scripts) and
+# the four-level split comes from the installer (accurate: "here is a fact" is
+# not "that worked"). print_info was green, which made every neutral statement
+# read as a success — "[✓] Existing deployment found" announces nothing that
+# succeeded. Cyan for a fact, green for an outcome.
+print_info()  { echo -e "${_C_INFO}[✓]${_C_OFF} $1" >&2; }
+print_ok()    { echo -e "${_C_OK}[✓]${_C_OFF} $1" >&2; }
+print_warn()  { echo -e "${_C_WARN}[!]${_C_OFF} $1" >&2; }
+print_error() { echo -e "${_C_ERR}[✗]${_C_OFF} $1" >&2; exit 1; }
+
+# For a question. Cyan, matching install_dockhub.sh's [INFO], because a prompt
+# is neither good news nor a warning — it is the script waiting for you, and it
+# should be findable in a screen of output at a glance.
+#
+# The markers stay exactly as they were: [✓] [!] [✗]. Forty-one scripts and
+# anyone reading their output know them, and a marker is not a colour's job to
+# replace.
+print_ask()   { printf '%s' "${_C_ASK}$1${_C_OFF}"; }
 
 # Sets COMPOSE_CMD in the caller's shell. Exits via print_error if anything
 # required is missing.
@@ -244,7 +294,7 @@ prompt_domain() {
         # final line with no trailing newline — data, not absence — so the
         # status alone is not enough and an answer typed without Enter was
         # being thrown away in favour of the default.
-        if read -rp "$prompt" value || [[ -n "$value" ]]; then
+        if read -rp "$(print_ask "$prompt")" value || [[ -n "$value" ]]; then
             [[ -z "$value" && -n "$default" ]] && value="$default"
         else
             eof=1
@@ -273,7 +323,7 @@ prompt_optional_domain() {
     local prompt="$1" label="${2:-domain}" value msg
     PROMPTED_DOMAIN=""
     while true; do
-        read -rp "$prompt" value
+        read -rp "$(print_ask "$prompt")" value
         if [[ -z "$value" ]]; then
             return 0
         fi
@@ -407,7 +457,7 @@ confirm_version_change() {
     print_warn "Take a backup first if you have not:"
     print_warn "    bash services/services.sh   →  this service  →  4) Backup"
     echo >&2
-    read -rp "Continue with the version change? (y/N): " answer
+    read -rp "$(print_ask "Continue with the version change? (y/N): ")" answer
     if [[ "${answer,,}" != "y" ]]; then
         print_info "Stopped. Nothing was changed — the running deployment is untouched."
         exit 0
@@ -447,7 +497,7 @@ offer_compose_update() {
     print_warn "made since you deployed, and Compose will not apply what it cannot see."
     print_warn "Your .env, data directory and volumes are NOT touched either way."
     echo >&2
-    read -rp "Take the updated compose file now? (y/N): " answer
+    read -rp "$(print_ask "Take the updated compose file now? (y/N): ")" answer
     if [[ "${answer,,}" == "y" ]]; then
         backup="${deployed}.bak-$(date '+%Y%m%d-%H%M%S')"
         cp "$deployed" "$backup" || { print_warn "Could not save a backup — leaving your file alone."; return 0; }
@@ -505,7 +555,7 @@ ensure_single_in_group() {
     done <<< "$why"
     echo >&2
     local answer
-    read -rp "Stop ${running[*]} and continue? (Y/n): " answer
+    read -rp "$(print_ask "Stop ${running[*]} and continue? (Y/n): ")" answer
     if [[ "${answer,,}" == "n" ]]; then
         print_info "Leaving ${running[*]} running. Nothing was deployed."
         return 1
@@ -555,7 +605,7 @@ prompt_agent_network() {
     print_warn "service by name, including Portainer and its Docker socket."
     print_warn "An agent acts on text it did not write. Keep that in mind here."
     echo >&2
-    read -rp "Also join 'main-net', so NPM can serve it on a domain? (y/N): " answer
+    read -rp "$(print_ask "Also join 'main-net', so NPM can serve it on a domain? (y/N): ")" answer
     if [[ "${answer,,}" == "y" ]]; then
         AGENT_ON_MAIN_NET=1
         ensure_main_net
@@ -711,7 +761,7 @@ resolve_ai_models_dir() {
     print_info "Asked once; every AI service reuses the answer."
     echo
     while true; do
-        read -rp "Directory (default: $default): " answer
+        read -rp "$(print_ask "Directory (default: $default): ")" answer
         AI_MODELS_DIR="${answer:-$default}"
         # Absolute only: a relative path resolves against whatever directory
         # deploy.sh happened to be run from, which is not the same place twice.
@@ -821,10 +871,10 @@ MEM_LIMIT=""
 prompt_mem_limit() {
     local container="$1" default="$2" answer value
     MEM_LIMIT=""
-    read -rp "Set a memory limit for the '$container' container? (y/N): " answer
+    read -rp "$(print_ask "Set a memory limit for the '$container' container? (y/N): ")" answer
     [[ "${answer,,}" == "y" ]] || return 0
     while true; do
-        read -rp "Memory limit (default: $default, e.g. 512m, 2g): " value
+        read -rp "$(print_ask "Memory limit (default: $default, e.g. 512m, 2g): ")" value
         value="${value:-$default}"
         if valid_mem_limit "$value"; then
             MEM_LIMIT="$value"
@@ -863,18 +913,18 @@ prompt_host_port() {
     local default="$1" required="${2:-}" answer port cont
     HOST_PORT=""
     if [[ "$required" != "required" ]]; then
-        read -rp "Also publish a host port for direct access without NPM (e.g. http://<server-ip>:<port>)? (y/N): " answer
+        read -rp "$(print_ask "Also publish a host port for direct access without NPM (e.g. http://<server-ip>:<port>)? (y/N): ")" answer
         [[ "${answer,,}" == "y" ]] || return 0
     fi
     while true; do
-        read -rp "Host port (default: $default): " port
+        read -rp "$(print_ask "Host port (default: $default): ")" port
         port="${port:-$default}"
         if ! valid_port "$port"; then
             echo "Invalid port — must be a number between 1024 and 65535." >&2
             continue
         fi
         if port_in_use "$port"; then
-            read -rp "Port $port looks already in use — continue anyway? (y/N): " cont
+            read -rp "$(print_ask "Port $port looks already in use — continue anyway? (y/N): ")" cont
             [[ "${cont,,}" == "y" ]] || continue
         fi
         HOST_PORT="$port"
@@ -991,7 +1041,7 @@ confirm_vulnerable_deploy() {
     print_warn "this host and everything else on your network. Never expose it to the"
     print_warn "internet, and stop it when you are done practising."
     echo >&2
-    read -rp "Type I-UNDERSTAND to continue (anything else aborts): " answer
+    read -rp "$(print_ask "Type I-UNDERSTAND to continue (anything else aborts): ")" answer
     [[ "$answer" == "I-UNDERSTAND" ]] || print_error "Aborted — nothing was deployed."
 }
 
