@@ -308,9 +308,17 @@ if (( API_OK )); then
             || compgen -G "$(dirname "$g")/*MMPROJ*.gguf" >/dev/null 2>&1; then
                 note="  [vision projector present — Ollama imports text only]"
             fi
+            # Which provider fetched it. Every provider owns one subdirectory
+            # under the shared parent, so the first path component after it
+            # names the owner. Worth showing: with two providers installed the
+            # list becomes a flat set of filenames with no way to tell which
+            # is which, and the answer changes what importing costs — llama.cpp
+            # reads its own file in place, Ollama copies.
+            rel="${g#"$MODELS_PARENT"/}"; owner="${rel%%/*}"
+            [[ "$owner" == "$rel" ]] && owner="?"
             GGUF_PATHS+=("$real")
             GGUF_NAMES+=("$base")
-            GGUF_LABELS+=("$base  ($(du -h "$real" 2>/dev/null | cut -f1))$note")
+            GGUF_LABELS+=("$base  ($(du -h "$real" 2>/dev/null | cut -f1))  — downloaded by $owner$note")
         done < <(find "$MODELS_PARENT" -name '*.gguf' 2>/dev/null | sort)
     fi
 
@@ -347,22 +355,62 @@ if (( API_OK )); then
         2) OLLAMA_MODEL="llama3.1:8b";      OLLAMA_MODEL_GB=6 ;;
         3) OLLAMA_MODEL="qwen2.5-coder:7b"; OLLAMA_MODEL_GB=6 ;;
         4)
+            # ASK WHICH SOURCE FIRST, then take the name in that source's own
+            # notation.
+            #
+            # This offered Hugging Face only, and required typing the "hf.co/"
+            # prefix by hand — a syntax the user has already communicated by
+            # choosing it. Ollama's own library, which is where its three
+            # suggestions above come from, could not be browsed at all: any
+            # model not in that hardcoded list of three was unreachable from
+            # this menu.
+            #
+            # Each branch prints its own browse URL, because "you give the
+            # name" is only useful once you know where to look the name up.
             echo
-            print_info "  Any GGUF repo on Hugging Face works, as: hf.co/<user>/<repo>"
-            print_info "  Add ':<quant>' to choose one — the default is Q4_K_M if present."
-            print_info "  Example: hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q8_0"
-            print_warn "  GGUF only. Raw safetensors weights cannot be pulled this way."
-            read -rp "  Repo: " hf_repo
-            hf_repo="${hf_repo//$'\r'/}"; hf_repo="${hf_repo## }"; hf_repo="${hf_repo%% }"
-            if [[ "$hf_repo" =~ ^(hf\.co|huggingface\.co)/[^/]+/[^/]+$ ]]; then
-                OLLAMA_MODEL="$hf_repo"
-                # Size is unknown before the pull, so the disk check below is
-                # given a figure large enough to be worth a warning rather
-                # than a number invented to look precise.
-                OLLAMA_MODEL_GB=5
-            elif [[ -n "$hf_repo" ]]; then
-                print_warn "  That is not a hf.co/<user>/<repo> reference — skipped."
-            fi
+            echo "   Which source?"
+            echo "     1) Ollama's own library    https://ollama.com/library"
+            echo "     2) Hugging Face            https://huggingface.co/models?library=gguf"
+            read -rp "   Source (1-2): " src_choice
+            src_choice="${src_choice//[[:space:]]/}"
+            case "$src_choice" in
+                1)
+                    print_info "  Names look like 'gemma3:4b' or 'qwen2.5-coder:7b' — model:tag."
+                    read -rp "  Model: " ol_name
+                    ol_name="${ol_name//$'\r'/}"; ol_name="${ol_name//[[:space:]]/}"
+                    if [[ "$ol_name" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+                        OLLAMA_MODEL="$ol_name"
+                        OLLAMA_MODEL_GB=5
+                    elif [[ -n "$ol_name" ]]; then
+                        print_warn "  That does not look like a model name — skipped."
+                    fi
+                    ;;
+                2)
+                    print_info "  Give it as <user>/<repo>, optionally with ':<quant>'."
+                    print_info "  The quant defaults to Q4_K_M when the repo has one."
+                    print_info "  Example: bartowski/Llama-3.2-3B-Instruct-GGUF:Q8_0"
+                    print_warn "  GGUF only. Raw safetensors weights cannot be pulled this way."
+                    read -rp "  Repo: " hf_repo
+                    hf_repo="${hf_repo//$'\r'/}"; hf_repo="${hf_repo//[[:space:]]/}"
+                    # A pasted full URL or an already-prefixed reference is
+                    # accepted rather than rejected — both are what someone
+                    # naturally has in hand, and the prefix is this script's
+                    # job to add, not the user's to remember.
+                    hf_repo="${hf_repo#https://}"; hf_repo="${hf_repo#http://}"
+                    hf_repo="${hf_repo#huggingface.co/}"; hf_repo="${hf_repo#hf.co/}"
+                    if [[ "$hf_repo" =~ ^[^/]+/[^/]+$ ]]; then
+                        OLLAMA_MODEL="hf.co/$hf_repo"
+                        print_info "  Pulling as: $OLLAMA_MODEL"
+                        # The size is unknown before the pull, so the disk check
+                        # below gets a figure big enough to be worth a warning
+                        # rather than a number invented to look precise.
+                        OLLAMA_MODEL_GB=5
+                    elif [[ -n "$hf_repo" ]]; then
+                        print_warn "  Expected <user>/<repo> — skipped."
+                    fi
+                    ;;
+                *) print_warn "  Not 1 or 2 — skipped." ;;
+            esac
             ;;
         5)
             if (( ${#GGUF_PATHS[@]} > 0 )); then
