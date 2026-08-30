@@ -52,6 +52,8 @@ Once you switch to NPM+SSL, edit `N8N_HOST` to your real domain, `N8N_PROTOCOL=h
 
 ## 🌐 Reverse Proxy (NGINX Proxy Manager)
 
+> ☁️ **Using Cloudflare Tunnel?** Two steps below are different: where you open NPM, and the SSL certificate (`None`, not Let's Encrypt). See [docs/cloudflare-tunnel.md](../../../docs/cloudflare-tunnel.md#deploying-a-service-behind-the-tunnel).
+
 1. Open `http://<server-ip>:81`
 2. Create a **Proxy Host**:
    - **Domain**: the same domain you entered during `deploy.sh` (must match `N8N_HOST` in `.env`)

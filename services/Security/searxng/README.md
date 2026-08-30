@@ -181,7 +181,41 @@ Verify it took effect by asking the instance directly — a 200 means the format
 curl -s -o /dev/null -w '%{http_code}\n' "http://<server-ip>:<port>/search?q=test&format=json"
 ```
 
+To prove the route from *inside* the agent, use the interpreter the image is built on rather than a tool you hope is there — Hermes ships **no `wget`**:
+
+```bash
+docker exec hermes python3 -c "import urllib.request;print(urllib.request.urlopen('http://searxng-app:8080/search?q=test&format=json',timeout=10).status)"
+```
+
+> Check per image, never per habit. In this catalogue Flowise has wget, Langflow has curl, Paperclip has neither, and Hermes' own deploy probes for all three before choosing. A probe that fails for want of a tool looks exactly like a service that is down.
+
 Other agents take a URL the same way. The address is always `http://searxng-app:8080` from inside `ai-net`.
+
+### ⚠️ Setting the backend is not the same as closing the door
+
+After `web.search_backend = searxng`, `hermes config get web` still reports:
+
+```yaml
+search_backend: searxng
+extract_backend: ''
+keyless_fallback: true
+keyless_rescue: true
+```
+
+**Two ways a query still reaches a stranger**, and neither announces itself:
+
+**1. SearXNG is search-only.** Upstream's provider says so outright — *"does not fetch/extract arbitrary URLs. `supports_extract()` returns False."* So `web_search` is yours; **`web_extract` has no provider and falls through to the keyless ring.**
+
+**2. A failure is a fallback.** `keyless_rescue` exists precisely to catch a configured backend that errored. SearXNG being briefly down does not produce an error you see — it produces a search served by one of five third parties.
+
+Closing both is one setting, because the rescue is implicitly off whenever the tier is:
+
+```bash
+docker exec -it hermes hermes config set web.keyless_fallback false
+docker restart hermes
+```
+
+**The cost, stated plainly:** `web_extract` stops working rather than silently going elsewhere, and a SearXNG outage becomes a visible failure instead of an invisible leak. Hermes can still fetch a page through its own browser and terminal — what it loses is the one-call convenience. **That is the trade: a tool that fails loudly, or one that quietly succeeds by another route.**
 
 ---
 

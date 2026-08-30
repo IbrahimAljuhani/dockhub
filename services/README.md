@@ -86,7 +86,7 @@ Only relevant if you opt into a service's **direct host port** prompt (default i
 | ownCloud (Infinite Scale) | `9200` (optional, oCIS's own port). ⚠️ Even this direct port is **https** with a self-signed cert — oCIS's web UI is an OIDC client and needs a browser secure context, so plain http can't work. See its README. |
 | Ghost | `2368` (optional, Ghost's own port). `GHOST_URL` in `.env` must match how you reach it — see its README. |
 | Vaultwarden | **none** — no host-port option. Its web vault needs a browser "secure context" (HTTPS or localhost), so a direct port can't work; NPM + SSL is the only route. |
-| SearXNG | `8088` (optional) → the container's `8080`. ⚠️ That `8080` is **Granian's** port, not SearXNG's — the image runs a Granian WSGI server, so `server.port` in `settings.yml` (default `8888`) is inert. |
+| SearXNG | `8089` (optional) → the container's `8080`. Deliberately **not** 8088, which is Dify's default. ⚠️ That `8080` is **Granian's** port, not SearXNG's — the image runs a Granian WSGI server, so `server.port` in `settings.yml` (default `8888`) is inert. |
 | OpenVPN (Access Server) | Web UI `9443` (optional) → the container's own `943`; deliberately not `943` itself, which the shared port prompt rejects as below `1024`. The VPN data port (`1194/udp`) is **always** bound to the host, not an opt-in prompt — same reasoning as WireGuard's. An OpenVPN-over-TCP fallback is optional on `8443` ⚠️ deliberately not `443` (upstream's own default) — NPM owns that. |
 | NetBird | **none** for HTTP — the domain is load-bearing for OAuth/gRPC, so NPM + SSL only. STUN (`3478/udp`) is **always** bound to the host and must reach the internet; it can't go through NPM or Cloudflare Tunnel. |
 
