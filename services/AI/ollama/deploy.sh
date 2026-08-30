@@ -242,20 +242,129 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
     echo
     print_info "No models are installed yet — Ollama can't answer anything without one."
     echo
+    # ── What is already on this machine ──────────────────────────────────
+    #
+    # Scans the SHARED PARENT of the provider directories, not Ollama's own.
+    # Every provider gets its own subdirectory under AI_MODELS_DIR, so a
+    # llama.cpp download is a SIBLING of Ollama's store and never inside it.
+    # This is the reason the old flow could never notice one.
+    #
+    # Two things make the obvious scan wrong, both found on a live host:
+    #
+    #   · llama.cpp stores in the Hugging Face cache layout. The only things
+    #     named *.gguf are SYMLINKS under snapshots/; the weights themselves
+    #     are hash-named blobs with no extension. `ls *.gguf` finds nothing
+    #     even when two models are sitting there.
+    #
+    #   · A repo can ship an mmproj-*.gguf — a vision projector, a companion
+    #     to a model and not a model. Ollama's Modelfile has no instruction
+    #     for one (ADAPTER is LoRA), so offering it would hand someone a
+    #     model that cannot answer. It is filtered out, and a model that has
+    #     one is flagged, because importing that model loses its vision.
+    MODELS_PARENT="$(dirname "$ENV_MODELS_PATH")"
+    GGUF_PATHS=(); GGUF_LABELS=()
+    if [[ -d "$MODELS_PARENT" ]]; then
+        while IFS= read -r g; do
+            [[ -z "$g" ]] && continue
+            base="$(basename "$g")"
+            [[ "$base" == mmproj* ]] && continue
+            real="$(readlink -f "$g" 2>/dev/null || echo "$g")"
+            [[ -f "$real" ]] || continue
+            note=""
+            # A projector beside it means this model is multimodal and Ollama
+            # would import only half of it.
+            if compgen -G "$(dirname "$g")/mmproj*.gguf" >/dev/null 2>&1; then
+                note="  [vision projector present — Ollama imports text only]"
+            fi
+            GGUF_PATHS+=("$real")
+            GGUF_LABELS+=("$base  ($(du -h "$real" 2>/dev/null | cut -f1))$note")
+        done < <(find "$MODELS_PARENT" -name '*.gguf' 2>/dev/null | sort)
+    fi
+
     echo "   1) llama3.2:3b     ~2 GB   fast, modest quality — fine on CPU"
     echo "   2) llama3.1:8b     ~5 GB   the usual default; wants a GPU or patience"
     echo "   3) qwen2.5-coder:7b ~5 GB  tuned for code"
-    echo "   4) Skip — I'll pull one myself later"
+    echo "   4) Any model on Hugging Face — 45k GGUF repos, you give the name"
+    if (( ${#GGUF_PATHS[@]} > 0 )); then
+        echo "   5) Import a .gguf already on this machine (no download):"
+        for i in "${!GGUF_LABELS[@]}"; do
+            printf "        %d. %s\n" "$((i+1))" "${GGUF_LABELS[$i]}"
+        done
+    fi
+    echo "   0) Skip — I'll pull one myself later"
     echo
-    read -rp "Pull a model now? (1-4): " model_choice
+    read -rp "Pull a model now? " model_choice
     OLLAMA_MODEL=""
     OLLAMA_MODEL_GB=0
+    IMPORT_SRC=""
     case "$model_choice" in
         1) OLLAMA_MODEL="llama3.2:3b";      OLLAMA_MODEL_GB=3 ;;
         2) OLLAMA_MODEL="llama3.1:8b";      OLLAMA_MODEL_GB=6 ;;
         3) OLLAMA_MODEL="qwen2.5-coder:7b"; OLLAMA_MODEL_GB=6 ;;
+        4)
+            echo
+            print_info "  Any GGUF repo on Hugging Face works, as: hf.co/<user>/<repo>"
+            print_info "  Add ':<quant>' to choose one — the default is Q4_K_M if present."
+            print_info "  Example: hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q8_0"
+            print_warn "  GGUF only. Raw safetensors weights cannot be pulled this way."
+            read -rp "  Repo: " hf_repo
+            hf_repo="${hf_repo//$'\r'/}"; hf_repo="${hf_repo## }"; hf_repo="${hf_repo%% }"
+            if [[ "$hf_repo" =~ ^(hf\.co|huggingface\.co)/[^/]+/[^/]+$ ]]; then
+                OLLAMA_MODEL="$hf_repo"
+                # Size is unknown before the pull, so the disk check below is
+                # given a figure large enough to be worth a warning rather
+                # than a number invented to look precise.
+                OLLAMA_MODEL_GB=5
+            elif [[ -n "$hf_repo" ]]; then
+                print_warn "  That is not a hf.co/<user>/<repo> reference — skipped."
+            fi
+            ;;
+        5)
+            if (( ${#GGUF_PATHS[@]} > 0 )); then
+                echo
+                read -rp "  Which file? (1-${#GGUF_PATHS[@]}): " gi
+                if [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
+                    IMPORT_SRC="${GGUF_PATHS[$((gi-1))]}"
+                else
+                    print_warn "  Not one of the listed numbers — skipped."
+                fi
+            else
+                # Option 5 is only printed when something was found, but a
+                # number can still be typed. Say why nothing happened rather
+                # than returning to a silent prompt.
+                print_warn "  No .gguf files were found on this machine — nothing to import."
+            fi
+            ;;
         *) print_info "Skipped. Pull one later with: docker exec -it ollama ollama pull <model>" ;;
     esac
+
+    if [[ -n "$IMPORT_SRC" ]]; then
+        default_name="$(basename "${IMPORT_SRC%.gguf}" | tr 'A-Z' 'a-z')"
+        read -rp "  Name it in Ollama [$default_name]: " import_name
+        import_name="${import_name:-$default_name}"
+        stage="$ENV_MODELS_PATH/.import.gguf"
+        # Hard link first: both directories live under the same parent, so this
+        # is instant and costs no space. `ollama create` will still copy the
+        # weights into its own content-addressed store — that copy is the real
+        # cost and it is unavoidable — but staging should not add a third.
+        if ln "$IMPORT_SRC" "$stage" 2>/dev/null; then
+            print_info "  Staged by hard link — no extra space used for this step."
+        else
+            print_warn "  Different filesystem, so this stage needs a full copy first."
+            cp "$IMPORT_SRC" "$stage" || { print_warn "  Copy failed — skipped."; stage=""; }
+        fi
+        if [[ -n "$stage" ]]; then
+            printf 'FROM /root/.ollama/.import.gguf\n' > "$ENV_MODELS_PATH/.import.Modelfile"
+            if docker exec ollama ollama create "$import_name" -f /root/.ollama/.import.Modelfile; then
+                MODEL_COUNT=1
+                print_info "  Imported as '$import_name'."
+                print_warn "  The weights now exist twice: the original, and Ollama's own copy."
+            else
+                print_warn "  Import failed. The original file is untouched."
+            fi
+            rm -f "$stage" "$ENV_MODELS_PATH/.import.Modelfile"
+        fi
+    fi
 
     if [[ -n "$OLLAMA_MODEL" ]]; then
         if ! check_free_disk_gb "$OLLAMA_MODEL_GB" "$ENV_MODELS_PATH"; then
