@@ -258,7 +258,8 @@ if (( API_OK )); then
         print_info "$MODEL_COUNT model(s) already installed:"
         docker exec ollama ollama list 2>/dev/null | tail -n +2 \
             | awk 'NF {printf "     · %s\n", $0}' || true
-        print_info "Ollama serves several at once — adding one replaces nothing."
+        print_info "All of those are served at once — nothing below replaces them,"
+        print_info "and none of them needs anything done to it."
     fi
     echo
     # ── What is already on this machine ──────────────────────────────────
@@ -373,7 +374,12 @@ if (( API_OK )); then
     # the weights, so the file ends up on this disk twice.
     echo "   4) Another model — Ollama's library or Hugging Face"
     if (( ${#GGUF_PATHS[@]} > 0 )); then
-        echo "   5) A file already on this disk — no download, but Ollama copies it:"
+        # "A file already on this disk" read as "the models you already have",
+        # and a user with three installed models asked why only one was listed.
+        # It never meant that: the models above are already served and need
+        # nothing done to them. This lists weights belonging to ANOTHER
+        # provider, which Ollama cannot use until it has its own copy.
+        echo "   5) Take a copy of another provider's model file:"
         for i in "${!GGUF_LABELS[@]}"; do
             printf "        %d. %s\n" "$((i+1))" "${GGUF_LABELS[$i]}"
             # The projector caveat gets its own line. Appended, it pushed the
@@ -479,11 +485,18 @@ if (( API_OK )); then
                         read -rp "  Import it anyway, under a different name? (y/N): " dup_ok
                         if [[ "${dup_ok,,}" != "y" ]]; then
                             print_info "  Skipped."
-                            gi=""
+                            # 'declined', not '' — clearing it made the range
+                            # check below fail, which then reported "Not one of
+                            # the listed numbers" after a perfectly valid pick
+                            # that the user had simply turned down. Two
+                            # contradictory lines for one answer.
+                            gi="declined"
                         fi
                     fi
                 fi
-                if [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
+                if [[ "$gi" == "declined" ]]; then
+                    : # already reported above; nothing more to say
+                elif [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
                     IMPORT_SRC="${GGUF_PATHS[$((gi-1))]}"
                     IMPORT_NAME_SRC="${GGUF_NAMES[$((gi-1))]}"
                 else
