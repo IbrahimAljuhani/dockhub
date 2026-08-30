@@ -195,7 +195,13 @@ validate_identifier() {
 read_env_value() {
     local key="$1" file="$2"
     [[ -f "$file" ]] || return 0
-    grep -a "^${key}=" "$file" 2>/dev/null | head -n1 | cut -d= -f2- || true
+    # `tr -d '\r'` for the same reason the .dockhub-env readers do it, and it
+    # matters more here: this is the value that becomes a port, a domain, an
+    # image tag. A .env saved with CRLF — by an editor over SFTP, or on a
+    # mounted share — yields "8081\r", which looks correct in every dump and
+    # matches nothing. Two of the four env readers in this file stripped it and
+    # two did not; they all do now.
+    grep -a "^${key}=" "$file" 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r' || true
 }
 
 # The counterpart: write a key into an existing .env, replacing the line if
@@ -746,7 +752,11 @@ resolve_ai_models_dir() {
     default="$HOME/docker/ai-models"
     mkdir -p "$HOME/docker"
 
-    stored=$(grep -a '^AI_MODELS_DIR=' "$env_file" 2>/dev/null | cut -d= -f2- || true)
+    # A trailing \r here is worse than a failed comparison: mkdir -p below
+    # would CREATE a directory whose name ends in a carriage return, and every
+    # provider path built from it would point into it. Silently the wrong disk
+    # location, with a name you cannot see.
+    stored=$(grep -a '^AI_MODELS_DIR=' "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     if [[ -n "$stored" ]]; then
         AI_MODELS_DIR="$stored"
         mkdir -p "$AI_MODELS_DIR" 2>/dev/null || true
