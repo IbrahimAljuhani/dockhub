@@ -195,6 +195,11 @@ CATALOG=(
     "Projects|redmine|Redmine"
     "Projects|taiga|Taiga"
     "Security|vaultwarden|Vaultwarden"
+    # SearXNG sits here rather than in Web because the category is about what
+    # a thing protects, not what it looks like: Vaultwarden keeps your
+    # credentials to yourself, SearXNG keeps what you search for. It is also
+    # the only service here an AGENT is expected to consume — see its README.
+    "Security|searxng|SearXNG"
     # Security-Lab is deliberately its OWN category, not part of Security.
     # Everything below is software that is vulnerable ON PURPOSE — training
     # targets with real, working flaws. Listing them next to Vaultwarden, a

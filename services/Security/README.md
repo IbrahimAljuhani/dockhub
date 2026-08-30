@@ -1,12 +1,13 @@
 # 🔐 Security
 
-Software that protects your credentials.
+Software that keeps what is yours to yourself — your credentials, and what you search for.
 
 > ⚠️ Not to be confused with [**Security-Lab**](../Security-Lab/), which is the opposite: software that is deliberately *vulnerable*, for practising on. Two different categories on purpose.
 
 | | What it is |
 |---|---|
 | ✅ [**Vaultwarden**](vaultwarden/) | A password manager — a lightweight server that works with the official **Bitwarden** apps and browser extensions on every platform. |
+| ✅ [**SearXNG**](searxng/) | A metasearch engine of your own. It queries other engines and merges the results, so no account, profile or history follows you. Also the private search tool for the agents in [AI-Agents](../AI-Agents/). |
 
 ---
 

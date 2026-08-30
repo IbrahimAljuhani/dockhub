@@ -1,0 +1,131 @@
+# SearXNG — a metasearch engine you run yourself. It forwards your query to
+# other engines, merges the results, and returns them without ever building a
+# profile of you: no account, no cookies that follow you, no search history.
+#
+# Verified against the CURRENT upstream sources, not a tutorial:
+#   https://docs.searxng.org/admin/installation-docker.html
+#   git://container/docker-compose.yml, dist.dockerfile, entrypoint.sh
+#
+# ⚠️ THE REPOSITORY MOST GUIDES POINT AT IS DEAD.
+# `searxng/searxng-docker` is superseded — its README now says so and its
+# compose file has been deleted. Anything you find that tells you to clone it
+# is describing a layout that no longer exists. The templates now live inside
+# the main repo under container/. This matters beyond tidiness: the old repo
+# shipped `limiter: true` by default, which blocks API queries, so following
+# a stale guide produces an instance that works in a browser and refuses
+# every agent request — with no error that says why.
+#
+# ── 1. THE CONTAINER PORT IS 8080, AND NOT FOR THE REASON YOU'D GUESS ───
+# The image runs Granian (a WSGI server), and the socket is Granian's, not
+# SearXNG's. From dist.dockerfile:
+#
+#   GRANIAN_HOST="::"   GRANIAN_PORT="8080"   EXPOSE 8080
+#
+# So `server.bind_address` and `server.port` in settings.yml are inert here —
+# the defaults there are `127.0.0.1:8888`, which inside a container would
+# mean "unreachable from anything", and it is only because Granian owns the
+# socket that this works at all. The entrypoint bridges the documented
+# variable across (`export GRANIAN_PORT="$SEARXNG_PORT"`), which is why
+# SEARXNG_PORT still behaves as the docs say.
+#
+# ── 2. JSON IS OFF BY DEFAULT, AND NO ENVIRONMENT VARIABLE TURNS IT ON ──
+# Upstream's default is `search.formats: [html]`. An API query against an
+# instance in that state is refused. Ten SEARXNG_* variables are honoured —
+# BASE_URL, BIND_ADDRESS, DEBUG, IMAGE_PROXY, LIMITER, METHOD, PORT,
+# PUBLIC_INSTANCE, SECRET, VALKEY_URL — and `formats` is not among them.
+#
+# It can therefore only be changed in settings.yml, which is why ./config is
+# a BIND mount rather than a named volume: deploy.sh writes that file, and
+# you can read and edit it afterwards without entering the container.
+#
+# ── 3. THE ENTRYPOINT WRITES settings.yml ONLY IF IT IS ABSENT ──────────
+# On first run it copies its template and sed-replaces "ultrasecretkey" with
+# fresh randomness. It never touches an existing file. Two consequences:
+#   · because deploy.sh writes the file first, the entrypoint's key
+#     generation never runs — so deploy.sh must generate the secret itself,
+#     and it does.
+#   · your edits to settings.yml survive every redeploy and every image
+#     update. Nothing here will overwrite them.
+#
+# ── 4. VALKEY IS NOT OPTIONAL IF YOU EVER ENABLE THE LIMITER ────────────
+# `server.limiter` is false by default, which is correct for a private
+# instance and required for agent use. Turning it on for a public instance
+# needs the shared counter store below; without it the limiter cannot work.
+# Valkey is on the private network only — it holds rate-limit counters, has
+# no authentication, and nothing outside this service has any business
+# reaching it.
+#
+# ── 5. `latest` IS THE RIGHT DEFAULT HERE, AND NOWHERE ELSE IN DOCKHUB ──
+# Every other service in this catalogue pins its tag. This one does not, and
+# the reason is the release model rather than laziness. Checked against the
+# registry on 2026-08-30:
+#
+#   tags       2026.8.29-d226b78bc, 2026.8.29-451c46aa3, 2026.8.28-a30b2d474 …
+#   scheme     YYYY.M.D-<commit>. No semantic version exists at all, and some
+#              days carry two builds.
+#   latest     sha256:b36af798… — byte-identical to 2026.8.29-d226b78bc, the
+#              newest build. Well-behaved, unlike Flowise's, where `latest`
+#              turned out to be an EARLIER build than the tagged release.
+#   arches     amd64, arm64, arm/v7 — so a Raspberry Pi is in scope.
+#
+# Pinning would mean freezing a specific day and commit, and for a metasearch
+# engine that is the harmful choice: engines break when Google or Bing change
+# their markup, and the fix arrives as a new build. A pinned SearXNG decays
+# into an instance whose results quietly thin out.
+#
+# SEARXNG_VERSION in .env is the escape hatch if you want a fixed one anyway.
+#
+# ── NETWORKS ────────────────────────────────────────────────────────────
+#   searxng-net  app <-> valkey. Private, never published.
+#   main-net     so NGINX Proxy Manager can reach it by container name.
+#   ai-net       ADDED BY deploy.sh, only if you answer yes — this is what
+#                lets an agent on ai-net query it at http://searxng-app:8080.
+#                Not hardcoded here, because a SearXNG installed for your own
+#                browsing has no reason to sit on the agent network.
+#
+# No `ports:` here on purpose — deploy.sh adds one through an override only
+# if you ask for it, so NPM is the only way in by default.
+#
+# This file is the SOURCE template (tracked in git). deploy.sh copies it (and
+# the generated .env) to ~/docker/searxng/ and runs it from there.
+
+services:
+  searxng:
+    image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
+    container_name: searxng-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Bind, not a named volume — see block 2. settings.yml is a file you
+      # are meant to be able to open.
+      - ./config:/etc/searxng
+      # Favicon cache and other regenerable state. A named volume is right
+      # here: losing it costs nothing but a warm cache.
+      - data:/var/cache/searxng
+    networks:
+      - searxng-net
+      - main-net
+
+  valkey:
+    image: docker.io/valkey/valkey:9-alpine
+    container_name: searxng-valkey
+    restart: unless-stopped
+    # Upstream's own arguments. --save 30 1 keeps a light snapshot so
+    # restarting does not reset every counter at once.
+    command: valkey-server --save 30 1 --loglevel warning
+    volumes:
+      - valkey-data:/data
+    networks:
+      - searxng-net
+    # Never on main-net, never published. See block 4.
+
+volumes:
+  data:
+  valkey-data:
+
+networks:
+  searxng-net:
+    driver: bridge
+  main-net:
+    external: true
