@@ -24,7 +24,7 @@
 [![Platforms](https://img.shields.io/badge/Platforms-Debian%20%7C%20Ubuntu%20%7C%20RHEL%20%7C%20Arch%20%7C%20openSUSE-lightgrey)](#-supported-systems)
 [![ARM64](https://img.shields.io/badge/arch-x86__64%20%7C%20ARM64-lightgrey)](#-supported-systems)
 
-[![Services](https://img.shields.io/badge/Services-41%20built%20%2F%2041-brightgreen)](#-the-catalogue)
+[![Services](https://img.shields.io/badge/Services-42%20built%20%2F%2042-brightgreen)](#-the-catalogue)
 [![Categories](https://img.shields.io/badge/Categories-15-blue)](#-the-catalogue)
 [![NPM](https://img.shields.io/badge/NGINX%20Proxy%20Manager-latest-00A98F)](#-environment-variable-overrides)
 [![Portainer](https://img.shields.io/badge/Portainer--CE-latest-13BEF9)](#-environment-variable-overrides)
@@ -34,7 +34,7 @@
 
 </div>
 
-**Self-hosted services, deployed properly.** One script installs the Docker foundation; a menu deploys any of **41 services** on top of it — each with a reverse proxy route, a backup path, and documentation written from actually running it.
+**Self-hosted services, deployed properly.** One script installs the Docker foundation; a menu deploys any of **42 services** on top of it — each with a reverse proxy route, a backup path, and documentation written from actually running it.
 
 ```bash
 git clone https://github.com/IbrahimAljuhani/dockhub.git
@@ -314,7 +314,7 @@ That produced a few habits worth knowing about as a reader:
 
 ## 📌 Status
 
-**All 41 services are built and deployed on real hardware** — the catalogue is complete as of 2026-08-19, with Langflow closing the [Multi-Agent](services/Multi-Agent/) category.
+**41 of the 42 services are built and deployed on real hardware.** The catalogue was closed at 41 on 2026-08-19, with Langflow finishing the [Multi-Agent](services/Multi-Agent/) category. [SearXNG](services/Security/searxng/) was added afterwards and is **written but not yet run on a real server** — it is listed here rather than held back, and this line will say so until its first live deploy.
 
 Categories, conventions and the shared library (`lib/`) are stable. Service scripts are added one at a time, each verified on real hardware before it lands.
 
