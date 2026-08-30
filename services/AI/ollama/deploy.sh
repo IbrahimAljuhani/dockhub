@@ -238,9 +238,28 @@ if (( API_OK )); then
     MODEL_COUNT=$(docker exec ollama ollama list 2>/dev/null | tail -n +2 | grep -c . || true)
 fi
 
-if (( API_OK )) && (( MODEL_COUNT == 0 )); then
+# Offered on EVERY run, not only when the count is zero.
+#
+# The guard here used to be `MODEL_COUNT == 0`, which meant the menu vanished
+# for good the moment you had one model. Adding a second, or importing a GGUF
+# downloaded after the first deploy, was then only possible from the CLI —
+# while llama.cpp's own menu appears on every rerun with a "keep it" option.
+# Two providers in the same catalogue behaved differently for no reason a
+# reader could see.
+#
+# Ollama serves MANY models at once, so the wording differs from llama.cpp's:
+# there, picking another REPLACES the one model it can serve; here it is an
+# addition and nothing is lost.
+if (( API_OK )); then
     echo
-    print_info "No models are installed yet — Ollama can't answer anything without one."
+    if (( MODEL_COUNT == 0 )); then
+        print_info "No models are installed yet — Ollama can't answer anything without one."
+    else
+        print_info "$MODEL_COUNT model(s) already installed:"
+        docker exec ollama ollama list 2>/dev/null | tail -n +2 \
+            | awk 'NF {printf "     · %s\n", $0}' || true
+        print_info "Ollama serves several at once — adding one replaces nothing."
+    fi
     echo
     # ── What is already on this machine ──────────────────────────────────
     #
@@ -271,13 +290,22 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
         while IFS= read -r g; do
             [[ -z "$g" ]] && continue
             base="$(basename "$g")"
-            [[ "$base" == mmproj* ]] && continue
+            # 'mmproj' ANYWHERE in the name, not as a prefix. The first repo
+            # this was written against called it mmproj-Ornith-1.5-9B-f16.gguf;
+            # Google ships gemma-4-E4B-it-mmproj.gguf. A prefix match passed
+            # the second straight through and offered a vision projector as a
+            # model. One naming sample was not a convention.
+            shopt -s nocasematch
+            if [[ "$base" == *mmproj* ]]; then shopt -u nocasematch; continue; fi
+            shopt -u nocasematch
             real="$(readlink -f "$g" 2>/dev/null || echo "$g")"
             [[ -f "$real" ]] || continue
             note=""
             # A projector beside it means this model is multimodal and Ollama
             # would import only half of it.
-            if compgen -G "$(dirname "$g")/mmproj*.gguf" >/dev/null 2>&1; then
+            # Same reason: the companion file may be named either way round.
+            if compgen -G "$(dirname "$g")/*mmproj*.gguf" >/dev/null 2>&1 \
+            || compgen -G "$(dirname "$g")/*MMPROJ*.gguf" >/dev/null 2>&1; then
                 note="  [vision projector present — Ollama imports text only]"
             fi
             GGUF_PATHS+=("$real")
@@ -296,7 +324,14 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
             printf "        %d. %s\n" "$((i+1))" "${GGUF_LABELS[$i]}"
         done
     fi
-    echo "   0) Skip — I'll pull one myself later"
+    # Wording follows the situation: with nothing installed, declining leaves
+    # Ollama unable to answer and should say so; with models present, declining
+    # is the ordinary answer and should not read like a warning.
+    if (( MODEL_COUNT == 0 )); then
+        echo "   0) Skip — I'll pull one myself later"
+    else
+        echo "   0) Keep what I have — add nothing"
+    fi
     echo
     read -rp "Pull a model now? " model_choice
     OLLAMA_MODEL=""
@@ -346,7 +381,13 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
                 print_warn "  No .gguf files were found on this machine — nothing to import."
             fi
             ;;
-        *) print_info "Skipped. Pull one later with: docker exec -it ollama ollama pull <model>" ;;
+        *)
+            if (( MODEL_COUNT == 0 )); then
+                print_info "Skipped. Pull one later with: docker exec -it ollama ollama pull <model>"
+            else
+                print_info "Keeping the $MODEL_COUNT model(s) already installed."
+            fi
+            ;;
     esac
 
     if [[ -n "$IMPORT_SRC" ]]; then
@@ -382,7 +423,7 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
         if [[ -n "$stage" ]]; then
             printf 'FROM /root/.ollama/.import.gguf\n' > "$ENV_MODELS_PATH/.import.Modelfile"
             if docker exec ollama ollama create "$import_name" -f /root/.ollama/.import.Modelfile; then
-                MODEL_COUNT=1
+                MODEL_COUNT=$(docker exec ollama ollama list 2>/dev/null | tail -n +2 | grep -c . || true)
                 print_info "  Imported as '$import_name'."
                 print_warn "  The weights now exist twice: the original, and Ollama's own copy."
             else
@@ -402,7 +443,7 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
     if [[ -n "$OLLAMA_MODEL" ]]; then
         print_info "Pulling $OLLAMA_MODEL — this is a large download, progress is shown below."
         if docker exec ollama ollama pull "$OLLAMA_MODEL"; then
-            MODEL_COUNT=1
+            MODEL_COUNT=$(docker exec ollama ollama list 2>/dev/null | tail -n +2 | grep -c . || true)
             print_info "Model $OLLAMA_MODEL is ready."
         else
             print_warn "The pull failed. Retry with: docker exec -it ollama ollama pull $OLLAMA_MODEL"

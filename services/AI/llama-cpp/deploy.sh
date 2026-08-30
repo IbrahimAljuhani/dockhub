@@ -240,6 +240,36 @@ else
     print_info "Other DockHub services reach it as http://llama-cpp:8080 without a port."
     prompt_host_port "8081"
 
+    # ── Context length ────────────────────────────────────────────────────
+    #
+    # This is the OPPOSITE question to Ollama's, and the wording matters
+    # because the two defaults fail in opposite directions.
+    #
+    # Ollama picks a context from available VRAM, often 4096, so its prompt
+    # exists to RAISE it — agents need far more. llama.cpp's default is
+    # `-c 0`, meaning the model's own trained context, which is usually the
+    # right answer and occasionally a fatal one: a model trained for 128k
+    # will size its KV cache for 128k and simply fail to load on a small
+    # card. So this prompt exists to CAP it.
+    #
+    # Blank must DELETE the key, never write it empty. llama.cpp reads this
+    # with stoi; an empty value is a parse error and the container restart-
+    # loops. Absent is the default, empty is a crash — the same trap already
+    # documented for LLAMA_ARG_N_GPU_LAYERS in docker-compose.yml.
+    echo
+    print_info "Context length — how much the model can hold at once."
+    print_info "Blank keeps llama.cpp's default: the model's own trained context,"
+    print_info "which is what you usually want."
+    print_warn "Set a number only if the model fails to load or the GPU runs out"
+    print_warn "of memory — a large trained context sizes its cache for that size"
+    print_warn "whether you use it or not."
+    read -rp "Context length in tokens [blank for the model's own]: " CTX_ANSWER
+    CTX_ANSWER="${CTX_ANSWER//$'\r'/}"; CTX_ANSWER="${CTX_ANSWER//[[:space:]]/}"
+    if [[ -n "$CTX_ANSWER" && ! "$CTX_ANSWER" =~ ^[0-9]+$ ]]; then
+        print_warn "Not a whole number — ignoring it and keeping the model's own context."
+        CTX_ANSWER=""
+    fi
+
     cat > "$INSTALL_DIR/.env" <<EOF
 AI_ACCELERATION=$AI_ACCELERATION
 LLAMA_CPP_TAG=$( (( GPU_ENABLED )) && echo "server-cuda" || echo "server" )
@@ -252,10 +282,16 @@ AI_MODELS_PATH=$ENV_MODELS_PATH
 # Absent means auto, which is what you want. Uncomment and give it a NUMBER
 # only to split a model between GPU and CPU, e.g. LLAMA_ARG_N_GPU_LAYERS=20
 #LLAMA_ARG_N_GPU_LAYERS=
+# Same rule, same reason: absent means the model's own trained context, which
+# is llama.cpp's `-c 0` default. An empty value is a stoi parse error, not a
+# fallback — so this line stays commented unless a number was actually chosen,
+# and the number is appended below rather than written empty here.
+#LLAMA_ARG_CTX_SIZE=
 LLAMA_ARG_N_PARALLEL=1
 EOF
-    [[ -n "$MEM_LIMIT" ]] && echo "MEM_LIMIT=$MEM_LIMIT" >> "$INSTALL_DIR/.env"
-    [[ -n "$HOST_PORT" ]] && echo "HOST_PORT=$HOST_PORT" >> "$INSTALL_DIR/.env"
+    [[ -n "$MEM_LIMIT" ]]   && echo "MEM_LIMIT=$MEM_LIMIT"     >> "$INSTALL_DIR/.env"
+    [[ -n "$HOST_PORT" ]]   && echo "HOST_PORT=$HOST_PORT"     >> "$INSTALL_DIR/.env"
+    [[ -n "$CTX_ANSWER" ]]  && echo "LLAMA_ARG_CTX_SIZE=$CTX_ANSWER" >> "$INSTALL_DIR/.env"
     chmod 600 "$INSTALL_DIR/.env"
     print_info "Generated .env at $INSTALL_DIR."
     # No secrets file: llama.cpp has no accounts and generates no credentials.
@@ -291,14 +327,24 @@ ENV_HF_REPO=$(read_env_value "LLAMA_ARG_HF_REPO" "$INSTALL_DIR/.env")
 ENV_TAG=$(read_env_value "LLAMA_CPP_TAG" "$INSTALL_DIR/.env")
 
 ENV_NGL=$(read_env_value "LLAMA_ARG_N_GPU_LAYERS" "$INSTALL_DIR/.env")
+ENV_CTX=$(read_env_value "LLAMA_ARG_CTX_SIZE"     "$INSTALL_DIR/.env")
 
 OVERRIDE_BODY=$(
     [[ -n "$ENV_MEM_LIMIT" ]] && echo "    mem_limit: $ENV_MEM_LIMIT"
-    # Injected ONLY when set to something. See docker-compose.yml: passing it
-    # empty is a parse error inside llama.cpp, not a fallback to the default.
-    if [[ -n "$ENV_NGL" ]]; then
+    # ONE `environment:` key, however many variables sit under it. This used to
+    # be printed from inside the N_GPU_LAYERS branch, which was correct while
+    # that was the only variable and produces a DUPLICATE KEY the moment a
+    # second one is added — YAML that reads fine and that Compose rejects.
+    #
+    # Each variable is still injected only when it has a value. See
+    # docker-compose.yml: passing one of these empty is a parse error inside
+    # llama.cpp (it reads them with stoi), not a fallback to the default.
+    # Absent is the default; empty is a restart loop.
+    if [[ -n "$ENV_NGL" || -n "$ENV_CTX" ]]; then
         echo "    environment:"
-        echo "      LLAMA_ARG_N_GPU_LAYERS: \"$ENV_NGL\""
+        [[ -n "$ENV_NGL" ]] && echo "      LLAMA_ARG_N_GPU_LAYERS: \"$ENV_NGL\""
+        [[ -n "$ENV_CTX" ]] && echo "      LLAMA_ARG_CTX_SIZE: \"$ENV_CTX\""
+        true
     fi
     if [[ -n "$ENV_HOST_PORT" ]]; then
         echo "    ports:"
