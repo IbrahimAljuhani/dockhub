@@ -262,7 +262,11 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
     #     model that cannot answer. It is filtered out, and a model that has
     #     one is flagged, because importing that model loses its vision.
     MODELS_PARENT="$(dirname "$ENV_MODELS_PATH")"
-    GGUF_PATHS=(); GGUF_LABELS=()
+    # Two parallel arrays on purpose. The weights live in a hash-named blob,
+    # but the human name is on the SYMLINK that points at it. Keeping only the
+    # resolved path made the suggested model name a 64-character sha256 — the
+    # blob's filename — which is what a live run offered.
+    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=()
     if [[ -d "$MODELS_PARENT" ]]; then
         while IFS= read -r g; do
             [[ -z "$g" ]] && continue
@@ -277,6 +281,7 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
                 note="  [vision projector present — Ollama imports text only]"
             fi
             GGUF_PATHS+=("$real")
+            GGUF_NAMES+=("$base")
             GGUF_LABELS+=("$base  ($(du -h "$real" 2>/dev/null | cut -f1))$note")
         done < <(find "$MODELS_PARENT" -name '*.gguf' 2>/dev/null | sort)
     fi
@@ -296,7 +301,12 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
     read -rp "Pull a model now? " model_choice
     OLLAMA_MODEL=""
     OLLAMA_MODEL_GB=0
+    # Both initialised, not just the one the guard tests. They are always set
+    # together today, so this changes nothing — and that is exactly the state
+    # install_dockhub.sh was in before an unset read aborted a whole run under
+    # `set -u`. Declaring costs a line; the failure costs the run.
     IMPORT_SRC=""
+    IMPORT_NAME_SRC=""
     case "$model_choice" in
         1) OLLAMA_MODEL="llama3.2:3b";      OLLAMA_MODEL_GB=3 ;;
         2) OLLAMA_MODEL="llama3.1:8b";      OLLAMA_MODEL_GB=6 ;;
@@ -325,6 +335,7 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
                 read -rp "  Which file? (1-${#GGUF_PATHS[@]}): " gi
                 if [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
                     IMPORT_SRC="${GGUF_PATHS[$((gi-1))]}"
+                    IMPORT_NAME_SRC="${GGUF_NAMES[$((gi-1))]}"
                 else
                     print_warn "  Not one of the listed numbers — skipped."
                 fi
@@ -339,18 +350,33 @@ if (( API_OK )) && (( MODEL_COUNT == 0 )); then
     esac
 
     if [[ -n "$IMPORT_SRC" ]]; then
-        default_name="$(basename "${IMPORT_SRC%.gguf}" | tr 'A-Z' 'a-z')"
+        # From the symlink's name, not the blob's. Trailing .gguf removed and
+        # lowercased, because an Ollama model name is typed at a prompt.
+        default_name="$(basename "${IMPORT_NAME_SRC%.gguf}" | tr 'A-Z' 'a-z')"
         read -rp "  Name it in Ollama [$default_name]: " import_name
         import_name="${import_name:-$default_name}"
+        import_name="${import_name%.gguf}"
         stage="$ENV_MODELS_PATH/.import.gguf"
-        # Hard link first: both directories live under the same parent, so this
-        # is instant and costs no space. `ollama create` will still copy the
-        # weights into its own content-addressed store — that copy is the real
-        # cost and it is unavoidable — but staging should not add a third.
+        # Hard link first: both directories sit under one parent, so when it
+        # works it is instant and free. `ollama create` still copies the weights
+        # into its own content-addressed store — that copy is unavoidable — but
+        # staging should not add a third.
         if ln "$IMPORT_SRC" "$stage" 2>/dev/null; then
             print_info "  Staged by hard link — no extra space used for this step."
         else
-            print_warn "  Different filesystem, so this stage needs a full copy first."
+            # Do NOT name a cause here. This said "different filesystem", which
+            # was wrong on the machine it was written for: both paths were on
+            # one disk, and the real reason was almost certainly
+            # fs.protected_hardlinks — on by default in Ubuntu, and it forbids
+            # linking a file you do not own. The blob belonged to root, written
+            # by another provider's container. Several causes produce this exact
+            # failure; picking one and stating it as fact is how a message
+            # sends someone to fix the wrong thing.
+            print_warn "  Could not hard-link the file, so this stage needs a full copy."
+            print_info "  Usually one of: a different filesystem, or the kernel's"
+            print_info "  fs.protected_hardlinks, which forbids linking a file you do not own"
+            print_info "  (weights fetched by another provider's container belong to root)."
+            print_info "  Copying $(du -h "$IMPORT_SRC" 2>/dev/null | cut -f1) — this is temporary and removed afterwards."
             cp "$IMPORT_SRC" "$stage" || { print_warn "  Copy failed — skipped."; stage=""; }
         fi
         if [[ -n "$stage" ]]; then
