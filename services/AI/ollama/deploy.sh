@@ -298,7 +298,7 @@ if (( API_OK )); then
     # but the human name is on the SYMLINK that points at it. Keeping only the
     # resolved path made the suggested model name a 64-character sha256 — the
     # blob's filename — which is what a live run offered.
-    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=(); GGUF_NOTES=(); GGUF_DUPS=()
+    GGUF_PATHS=(); GGUF_NAMES=(); GGUF_LABELS=(); GGUF_NOTES=(); DUP_SKIPPED=0
     if [[ -n "$MODELS_PARENT" && -d "$MODELS_PARENT" ]]; then
         while IFS= read -r g; do
             [[ -z "$g" ]] && continue
@@ -346,15 +346,19 @@ if (( API_OK )); then
             hex="$(basename "$real")"
             if [[ "$hex" =~ ^[0-9a-f]{64}$ ]] \
                && [[ -e "$ENV_MODELS_PATH/models/blobs/sha256-$hex" ]]; then
-                dup="  ✓ already imported"
-            else
-                dup=""
+                # SKIPPED, not listed and flagged. It was shown with a "✓
+                # already imported" marker, which put an entry in an actions
+                # menu that does nothing — and then warned about it once
+                # chosen. A list of things to do should hold only things worth
+                # doing. Counted instead, and reported in one line so nothing
+                # is silently hidden.
+                DUP_SKIPPED=$((DUP_SKIPPED + 1))
+                continue
             fi
             GGUF_PATHS+=("$real")
             GGUF_NAMES+=("$base")
-            GGUF_LABELS+=("$base   $(du -h "$real" 2>/dev/null | cut -f1)   from $owner$dup")
+            GGUF_LABELS+=("$base   $(du -h "$real" 2>/dev/null | cut -f1)   from $owner")
             GGUF_NOTES+=("$note")
-            GGUF_DUPS+=("$dup")
         done < <(find "$MODELS_PARENT" -name '*.gguf' 2>/dev/null | sort)
     fi
 
@@ -373,13 +377,20 @@ if (( API_OK )); then
     # said nothing about the one thing that separates it from 4: Ollama copies
     # the weights, so the file ends up on this disk twice.
     echo "   4) Another model — Ollama's library or Hugging Face"
+    # Nothing is hidden without saying so. If every file another provider has
+    # is already in Ollama's store, option 5 is absent — and that absence gets
+    # one line of explanation rather than leaving the reader to wonder whether
+    # the scan found anything at all.
+    if (( DUP_SKIPPED > 0 && ${#GGUF_PATHS[@]} == 0 )); then
+        print_info "   (Every model file the other providers have is already here.)"
+    fi
     if (( ${#GGUF_PATHS[@]} > 0 )); then
         # "A file already on this disk" read as "the models you already have",
         # and a user with three installed models asked why only one was listed.
         # It never meant that: the models above are already served and need
         # nothing done to them. This lists weights belonging to ANOTHER
         # provider, which Ollama cannot use until it has its own copy.
-        echo "   5) Take a copy of another provider's model file:"
+        echo "   5) Add one that llama.cpp or LocalAI already downloaded:"
         for i in "${!GGUF_LABELS[@]}"; do
             printf "        %d. %s\n" "$((i+1))" "${GGUF_LABELS[$i]}"
             # The projector caveat gets its own line. Appended, it pushed the
@@ -472,31 +483,11 @@ if (( API_OK )); then
             if (( ${#GGUF_PATHS[@]} > 0 )); then
                 echo
                 read -rp "  Which file? (1-${#GGUF_PATHS[@]}): " gi
+                # No duplicate prompt here any more. An already-imported file is
+                # filtered out of the list above rather than offered and then
+                # argued about — so everything numbered here is worth choosing,
+                # and a valid pick can no longer produce a warning.
                 if [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
-                    # Ask before spending the copy, not after. Re-importing an
-                    # identical file is not harmful — Ollama recognises every
-                    # layer and writes nothing — but it still costs a full
-                    # staging copy of several gigabytes to reach that
-                    # conclusion, and a live run did exactly that.
-                    if [[ -n "${GGUF_DUPS[$((gi-1))]}" ]]; then
-                        print_warn "  That file is already in Ollama's store — the same content,"
-                        print_warn "  byte for byte. Importing it again copies it, then Ollama"
-                        print_warn "  finds every layer already present and writes nothing new."
-                        read -rp "  Import it anyway, under a different name? (y/N): " dup_ok
-                        if [[ "${dup_ok,,}" != "y" ]]; then
-                            print_info "  Skipped."
-                            # 'declined', not '' — clearing it made the range
-                            # check below fail, which then reported "Not one of
-                            # the listed numbers" after a perfectly valid pick
-                            # that the user had simply turned down. Two
-                            # contradictory lines for one answer.
-                            gi="declined"
-                        fi
-                    fi
-                fi
-                if [[ "$gi" == "declined" ]]; then
-                    : # already reported above; nothing more to say
-                elif [[ "$gi" =~ ^[0-9]+$ ]] && (( gi >= 1 && gi <= ${#GGUF_PATHS[@]} )); then
                     IMPORT_SRC="${GGUF_PATHS[$((gi-1))]}"
                     IMPORT_NAME_SRC="${GGUF_NAMES[$((gi-1))]}"
                 else
