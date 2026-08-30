@@ -314,7 +314,7 @@ That produced a few habits worth knowing about as a reader:
 
 ## 📌 Status
 
-**41 of the 42 services are built and deployed on real hardware.** The catalogue was closed at 41 on 2026-08-19, with Langflow finishing the [Multi-Agent](services/Multi-Agent/) category. [SearXNG](services/Security/searxng/) was added afterwards and is **written but not yet run on a real server** — it is listed here rather than held back, and this line will say so until its first live deploy.
+**41 of the 42 services are built and deployed on real hardware.** The catalogue was closed at 41 on 2026-08-19, with Langflow finishing the [Multi-Agent](services/Multi-Agent/) category. [SearXNG](services/Security/searxng/) was added on 2026-08-30 and **deployed live the same day** — both containers up, all three networks joined, and the JSON API answering `200`. Its **backup and restore have not yet been exercised**, which is the one step still between it and the standard every other service here has met.
 
 Categories, conventions and the shared library (`lib/`) are stable. Service scripts are added one at a time, each verified on real hardware before it lands.
 
