@@ -203,6 +203,67 @@ This also decides the backup policy, which is the **opposite** of the agents':
 
 A provider *downloads*. Anything it holds can be fetched again. Backing up 40 GB of re-downloadable weights every night is not caution, it is waste.
 
+### One parent, three private rooms
+
+That `<provider>` in the path is not decoration. The providers share the **parent**, not the files:
+
+```
+~/docker/ai-models/
+├── ollama/       blobs + manifests, content-addressed
+├── llama-cpp/    the Hugging Face cache layout
+└── localai/      models/ — plain .gguf
+```
+
+Each container mounts only its own directory. **Ollama cannot see llama.cpp's weights and llama.cpp cannot see Ollama's** — they are siblings, never nested. Sharing one folder would not work anyway, because they do not store the same way:
+
+| | On disk | Reads a plain `.gguf`? |
+|---|---|---|
+| **Ollama** | `blobs/sha256-…` + `manifests/`, no file extensions | Only by importing a copy |
+| **llama.cpp** | `models--{org}--{repo}/blobs/{sha256}` with `.gguf` **symlinks** under `snapshots/` | Yes, in place |
+| **LocalAI** | plain files in `models/` | Yes, in place |
+
+Two consequences that surprise people, both found on a live machine:
+
+- **`ls ~/docker/ai-models/llama-cpp/*.gguf` finds nothing**, even with models downloaded. The weights are hash-named blobs with no extension; the only things called `.gguf` are symlinks two directories down.
+- **Importing into Ollama costs a second copy.** `ollama create` pulls the weights into its own store rather than referencing them, so the same model then exists twice. llama.cpp and LocalAI read their file where it lies. `deploy.sh` says so before you choose.
+
+**Removing a service does not remove its weights.** They live outside `~/docker/<service>/`, so redeploying reuses them and downloads nothing — which is the point. `services.sh` now tells you how much stayed behind and where, because "removed completely" was true of everything except the largest thing on disk.
+
+### Getting a model in
+
+Both providers can pull from **Ollama's library and from Hugging Face**; neither is limited to one source.
+
+| | Ollama | llama.cpp |
+|---|---|---|
+| Its own library | `gemma3:4b` | — |
+| Hugging Face | `hf.co/{user}/{repo}[:QUANT]` | `{user}/{repo}[:QUANT]` |
+
+`deploy.sh` asks which source and adds the prefix itself, so a repo pasted straight from the browser works.
+
+⚠️ **GGUF only.** Raw `safetensors` weights cannot be pulled by either — filter Hugging Face by `library=gguf`.
+
+⚠️ **An `mmproj-*.gguf` is not a model.** It is the vision half of a multimodal pair, and llama.cpp loads both. **Ollama cannot** — its Modelfile has no instruction for a projector (`ADAPTER` is for LoRA). Import such a model into Ollama and you get a working text model with its vision silently gone; `deploy.sh` says so in the list. The naming is not fixed either — `mmproj-Ornith-…gguf` and `gemma-4-E4B-it-mmproj.gguf` are both real.
+
+### One model or many
+
+The deepest difference, and the one that makes two similar-looking menus mean opposite things:
+
+- **llama.cpp serves ONE model.** Choosing another **replaces** it. Open WebUI will show a list of one, and that is correct.
+- **Ollama serves ALL of them.** Choosing another **adds** it; the client picks per request.
+
+So llama.cpp's menu asks *which model*, and Ollama's asks *what to add*.
+
+### Context length: the same setting, opposite dangers
+
+Covered above for Ollama; the reason the two prompts read differently:
+
+| | Default | So the prompt exists to |
+|---|---|---|
+| **Ollama** | VRAM-based, often **4096** | **raise** it — agents need far more |
+| **llama.cpp** | `-c 0` — the model's own trained context | **cap** it — a 128k-context model sizes its cache for 128k and may not load |
+
+> ⚠️ For llama.cpp, leaving the setting **blank deletes the key**; it is never written empty. `LLAMA_ARG_CTX_SIZE=` is parsed with `stoi`, and an empty string is a parse error that puts the container in a restart loop. Absent means the default; empty means a crash. The same is true of `LLAMA_ARG_N_GPU_LAYERS`.
+
 ---
 
 ## 🔌 How consumers reach a provider

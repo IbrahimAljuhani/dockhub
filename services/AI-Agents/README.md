@@ -171,7 +171,82 @@ Upstream's default is to run the commands it decides on **without confirming**. 
 
 Those are created by the app through the Docker socket — **not by DockHub's compose file** — so our careful `127.0.0.1` binding on the app does not extend to them. The session's workspace and API are reachable from your LAN on random high ports for as long as the session lives. Keep the host behind a firewall; this one is not ours to close.
 
-**5. Prompt injection is unsolved.** Every layer above assumes the model *will* eventually be talked into something. That is the design premise, not a pessimistic aside.
+**5. Nothing limits what an agent sends *out*.** Every layer above is about reaching *in*. None of them touches the other direction, and the other direction is where a compromised agent does its damage.
+
+`main-net`, `ai-net` and `models-net` are created as ordinary bridge networks:
+
+```bash
+docker network create ai-net
+```
+
+An ordinary bridge means **outbound NAT**. Every agent reaches the whole internet from the moment it starts. DockHub never asks, and never restricts it.
+
+That is not an oversight — it is unavoidable. An agent that cannot reach the internet cannot reach your model provider, pull a package, clone a repository, or send you a message. Its usefulness *is* its egress.
+
+> Docker's `internal: true` would close it, and we measured exactly what that costs. On a real host, 2026-08-20: outbound blocked ✓, but Docker installs **zero** DNAT rules for a container on an internal network, so `internal: true` and `ports:` are mutually exclusive. The full result is in [lib/common.sh](../../lib/common.sh) above `ensure_seclab_net`.
+
+So the boundary to think about is not *whether* the agent reaches the internet — it does — but **what it can carry there**. Layer 7 is the answer that works: separate keys, its own data directory, nothing mounted that it does not need. A sandbox protects your **host**; it does not narrow the agent's **reach**.
+
+**6. Prompt injection is unsolved.** Every layer above assumes the model *will* eventually be talked into something. That is the design premise, not a pessimistic aside.
+
+---
+
+## 🌐 Can it browse? Can you ask it to search?
+
+Three separate capabilities, easy to confuse. An agent that reaches the internet does not necessarily render a page, and one that renders a page does not necessarily know how to *search*.
+
+| Agent | Reaches the internet | Drives a browser | Web search you can just ask for |
+|---|---|---|---|
+| **OpenClaw** | Always | **Optional** — the `latest-browser` image variant bundles Chromium + Xvfb | Via the browser, once you pick that variant |
+| **Hermes** | Always | **Yes** — Playwright Chromium is installed at build | **Yes, with no API key at all** — see below |
+| **OpenHands** | Always | **Yes** — Chromium ships in the pinned runtime image | Via the browser; `BrowserToolSet` is in the SDK's default toolset |
+
+### Hermes searches the web without credentials
+
+`web_search_tool` resolves a backend through a cascade. Your own key wins if you set one — `TAVILY_API_KEY`, `EXA_API_KEY`, `PARALLEL_API_KEY`, `KEENABLE_API_KEY`, `FIRECRAWL_API_KEY`, `BRAVE_SEARCH_API_KEY`. **When none is set, it falls through to a keyless tier** that uses five vendors' free endpoints in a round-robin ring, failing over to the next when one throttles:
+
+```python
+_KEYLESS_RING = ("exa", "parallel", "tavily", "firecrawl", "keenable")
+```
+
+It is on by default (`web.keyless_fallback`), so **"search the web for X" works on a fresh deployment with nothing configured.** Turn it off in `config.yaml` if you would rather it stayed quiet.
+
+> **The privacy cost is real and easy to miss.** A keyless free tier is still somebody's endpoint. Every query the agent runs leaves your server and lands with one of those five vendors, chosen by a rotating cursor — so you cannot even predict *which*. If that matters for your data, set one key you have chosen deliberately, or set `web.keyless_fallback: false`.
+
+Hermes also carries `mcp_tool.py` and ships ~65 optional MCP servers, so the same question can be answered by a connector instead. That is a larger subject than this page; the point here is that **search is not something you have to build.**
+
+### Verify the browser on your own deployment
+
+Upstream's Dockerfile bakes it in:
+
+```dockerfile
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
+RUN npx playwright install --with-deps chromium --only-shell
+```
+
+`--only-shell` means the **headless shell** — it renders and runs JavaScript, but there is no headed window to look at. Confirm it landed in the image you actually pulled:
+
+```bash
+docker exec hermes ls /opt/hermes/.playwright
+```
+
+**OpenHands is verified from the registry, not assumed.** The tag `deploy.sh` pins is `ghcr.io/openhands/agent-server:1.26.0-python`, and its image config carries:
+
+```
+CHROME_BIN=/usr/bin/chromium
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+CHROMIUM_FLAGS=--no-sandbox --disable-dev-shm-usage --disable-gpu
+```
+
+Upstream's Dockerfile builds two bases — a minimal one (*"No Docker, no VNC, no Desktop"*) and a full one — and installs Chromium in **the full one only**. Those variables are written in that same block, so their presence proves which base this tag was built from. There is no `-minimal` tag published to choose instead.
+
+Check any image yourself without pulling it:
+
+```bash
+docker image inspect ghcr.io/openhands/agent-server:1.26.0-python --format '{{json .Config.Env}}'
+```
+
+> **All three read attacker-controlled text by definition.** A search result is a stranger's page, and the agent treats what it says as information. Combine that with point 5 — nothing limits what it sends *out* — and the shape of the risk is clear: a page can ask, and an agent can answer. That is not a reason to avoid browsing agents. It is the reason point 6 is stated the way it is, and the reason Layer 7 says *its own keys, never yours*.
 
 ---
 
